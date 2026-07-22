@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:maven.ctr-electronics.com)",
+      "WebFetch(domain:3015rangerrobotics.github.io)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl -sL -o Phoenix6-26.3.0.json \"https://maven.ctr-electronics.com/release/com/ctre/phoenix6/latest/Phoenix6-frc2026-latest.json\")",
+      "Bash(curl -sL -o PathplannerLib-2026.1.2.json \"https://3015rangerrobotics.github.io/pathplannerlib/PathplannerLib.json\")",
+      "Bash(curl -sL -o AdvantageKit-new.json \"https://github.com/Mechanical-Advantage/AdvantageKit/releases/latest/download/AdvantageKit.json\")",
+      "Bash(curl -sL -o WPILibNewCommands-new.json \"https://raw.githubusercontent.com/wpilibsuite/allwpilib/v2026.2.1/wpilibNewCommands/WPILibNewCommands.json\")",
+      "WebFetch(domain:raw.githubusercontent.com)"
+    ]
+  }
+}

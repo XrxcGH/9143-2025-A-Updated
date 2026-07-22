@@ -1,0 +1,70 @@
+{
+  "version": "2025.0",
+  "waypoints": [
+    {
+      "anchor": {
+        "x": 5.138,
+        "y": 5.174
+      },
+      "prevControl": null,
+      "nextControl": {
+        "x": 4.826102843006057,
+        "y": 5.366699828503988
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 4.888,
+        "y": 5.674
+      },
+      "prevControl": {
+        "x": 5.282587974774481,
+        "y": 5.211807773130149
+      },
+      "nextControl": {
+        "x": 4.725676401323502,
+        "y": 5.864134292837225
+      },
+      "isLocked": false,
+      "linkedName": null
+    },
+    {
+      "anchor": {
+        "x": 1.175,
+        "y": 7.013
+      },
+      "prevControl": {
+        "x": 0.9250901676746026,
+        "y": 7.019713844434578
+      },
+      "nextControl": null,
+      "isLocked": false,
+      "linkedName": null
+    }
+  ],
+  "rotationTargets": [],
+  "constraintZones": [],
+  "pointTowardsZones": [],
+  "eventMarkers": [],
+  "globalConstraints": {
+    "maxVelocity": 3.0,
+    "maxAcceleration": 4.0,
+    "maxAngularVelocity": 540.0,
+    "maxAngularAcceleration": 720.0,
+    "nominalVoltage": 12.0,
+    "unlimited": false
+  },
+  "goalEndState": {
+    "velocity": 0,
+    "rotation": -54.0
+  },
+  "reversed": false,
+  "folder": "Starting Back Left Reef",
+  "idealStartingState": {
+    "velocity": 0,
+    "rotation": -119.99999999999999
+  },
+  "useDefaultConstraints": true
+}

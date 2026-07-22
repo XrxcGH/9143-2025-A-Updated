@@ -1,0 +1,305 @@
+package frc.robot;
+
+import org.littletonrobotics.junction.AutoLogOutput;
+import org.littletonrobotics.junction.Logger;
+
+import edu.wpi.first.cameraserver.CameraServer;
+import edu.wpi.first.cscore.HttpCamera;
+import edu.wpi.first.cscore.HttpCamera.HttpCameraKind;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Rotation3d;
+import edu.wpi.first.math.kinematics.ChassisSpeeds;
+import edu.wpi.first.math.kinematics.SwerveModuleState;
+import edu.wpi.first.math.util.Units;
+import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.wpilibj.Alert;
+import edu.wpi.first.wpilibj.Alert.AlertType;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
+import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.util.Color;
+import edu.wpi.first.wpilibj.util.Color8Bit;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Commands;
+import frc.robot.Constants.LoggingConstants;
+import frc.robot.Constants.VisionConstants;
+import frc.robot.subsystems.CorAl;
+import frc.robot.subsystems.Elevator;
+import frc.robot.subsystems.LEDs;
+import frc.robot.subsystems.Swerve;
+import frc.robot.util.Elastic;
+
+/**
+ * Central dashboard manager - the ONLY place in the robot code that publishes
+ * data for the Elastic dashboard.
+ *
+ * How the Elastic integration works (Elastic dropped Shuffleboard API
+ * support, so this project uses the modern approach):
+ *
+ *  1. This class publishes plain NetworkTables data (numbers, booleans,
+ *     sendables like Field2d and the auto chooser) under /SmartDashboard.
+ *  2. The tab layout lives in deploy/elastic-layout.json (Setup, Autonomous,
+ *     Teleop, and Testing tabs). Robot.java serves the deploy directory over
+ *     HTTP on port 5800, and Elastic loads the layout with
+ *     File -> "Load Layout From Robot" (Ctrl+D).
+ *  3. Robot.java calls Elastic.selectTab() on mode changes so the dashboard
+ *     automatically shows the right tab for each match phase.
+ *  4. Persistent problems surface through WPILib Alerts (Elastic's Alerts
+ *     widget); sudden mid-match failures additionally fire an Elastic toast
+ *     notification so they are impossible to miss.
+ *
+ * Subsystems expose plain getters and know nothing about the dashboard;
+ * update() polls them once per loop from Robot.robotPeriodic().
+ */
+public class Dashboard {
+    private final Swerve swerve;
+    private final Elevator elevator;
+    private final CorAl coral;
+    private final LEDs leds;
+
+    /** Field widget data: robot pose (and any objects added later, e.g. trajectories). */
+    private final Field2d field = new Field2d();
+
+    /** Raw NT table backing Elastic's SwerveDrive widget (needs a ".type" marker). */
+    private final NetworkTable swerveWidgetTable;
+
+    // ------------------------------------------------------------------
+    // Superstructure visualization
+    // ------------------------------------------------------------------
+    // Mechanism2d: side-on schematic of the elevator + arm, rendered by
+    // Glass and AdvantageScope (both live over NT). Drawing conventions:
+    // the elevator ligament points straight up; the arm ligament's angle is
+    // relative to the elevator, drawn so 0 deg (tucked) points down along
+    // the elevator, 90 deg (safe) points out horizontally.
+    private final Mechanism2d superstructureMech = new Mechanism2d(1.5, 2.5);
+    private final MechanismLigament2d elevatorLigament;
+    private final MechanismLigament2d armLigament;
+
+    // Approximate arm length for both visualizations (meters). VERIFY.
+    private static final double ARM_LENGTH = 0.4;
+
+    // 3D component-pose model for AdvantageScope's 3D field view: attach a
+    // glTF CAD model (File > Import CAD or the online converter) and map
+    // these array entries to its articulated components in the 3D config.
+    // Robot-relative coordinate frame: X forward, Y left, Z up, origin at
+    // the robot center on the floor. All offsets below are PLACEHOLDERS
+    // measured as zero - VERIFY against the CAD model's component origins
+    // (AdvantageScope docs: "Custom Assets > Articulated components").
+    private static final double ELEVATOR_X_OFFSET = 0.0;   // Meters forward of robot center - VERIFY
+    private static final double ARM_PIVOT_HEIGHT = 0.30;   // Pivot height above the floor at 0 elevator height (meters) - VERIFY
+    @AutoLogOutput (key = "Draggables/Components3d")
+    private final Pose3d[] componentPoses = {new Pose3d(), new Pose3d(), new Pose3d()};
+
+    // ------------------------------------------------------------------
+    // Persistent alerts - shown in the Alerts widget on every tab that has
+    // one, and logged automatically. set(true) shows, set(false) clears.
+    // ------------------------------------------------------------------
+    private final Alert throughBoreAlert = new Alert(
+        "CorAl through bore encoder disconnected - pivot is running on the motor encoder only.",
+        AlertType.kError);
+    private final Alert elevatorSyncAlert = new Alert(
+        "Elevator sides out of sync - check for belt slippage or mechanical binding.",
+        AlertType.kWarning);
+    private final Alert coralFeedbackAlert = new Alert(
+        "CorAl motor encoder disagrees with the through bore - it will re-sync when the arm is idle.",
+        AlertType.kWarning);
+    private final Alert lowBatteryAlert = new Alert(
+        "Battery resting voltage is low - swap the battery before the next match.",
+        AlertType.kWarning);
+
+    /** Tracks the through bore state so a disconnect fires one toast, not a stream. */
+    private boolean throughBoreWasConnected = true;
+
+    /**
+     * Registers all sendables and camera streams. Call once from
+     * RobotContainer after the subsystems exist. (The auto chooser is a
+     * LoggedDashboardChooser that publishes itself - see RobotContainer.)
+     */
+    public Dashboard(Swerve swerve, Elevator elevator, CorAl coral, LEDs leds) {
+        this.swerve = swerve;
+        this.elevator = elevator;
+        this.coral = coral;
+        this.leds = leds;
+
+        // --- Superstructure Mechanism2d (Glass / AdvantageScope) ---
+        elevatorLigament = superstructureMech.getRoot("Superstructure", 0.75, 0.05)
+            .append(new MechanismLigament2d("Elevator", ARM_PIVOT_HEIGHT, 90, 8,
+                new Color8Bit(Color.kOrange)));
+        armLigament = elevatorLigament
+            .append(new MechanismLigament2d("Arm", ARM_LENGTH, -180, 6,
+                new Color8Bit(Color.kCyan)));
+
+        // --- Sendables (registered once; NT keeps them updated) ---
+        // Field widget: realtime robot location on the field drawing
+        SmartDashboard.putData("Field", field);
+        // Elevator + arm schematic (viewable in Glass and AdvantageScope)
+        SmartDashboard.putData("Superstructure Mechanism", superstructureMech);
+        // Command scheduler view for the Testing tab
+        SmartDashboard.putData("Command Scheduler", CommandScheduler.getInstance());
+        // Subsystem widgets (show default/current command) for the Testing tab
+        SmartDashboard.putData("Elevator Subsystem", elevator);
+        SmartDashboard.putData("CorAl Subsystem", coral);
+
+        // --- Pre-match utility buttons (Command widgets on the Setup tab) ---
+        // ignoringDisable lets the pit crew zero mechanisms without enabling.
+        SmartDashboard.putData("Zero Elevator",
+            Commands.runOnce(elevator::resetEncoders, elevator)
+                .ignoringDisable(true).withName("Zero Elevator"));
+        SmartDashboard.putData("Zero CorAl Pivot",
+            Commands.runOnce(coral::resetPivotEncoder, coral)
+                .ignoringDisable(true).withName("Zero CorAl Pivot"));
+
+        // --- Elastic SwerveDrive widget ---
+        // Elastic identifies the widget by a ".type" marker and reads the
+        // module entries published in update() (angles in radians, m/s).
+        swerveWidgetTable = NetworkTableInstance.getDefault()
+            .getTable("SmartDashboard").getSubTable("Swerve Drive");
+        swerveWidgetTable.getEntry(".type").setString("SwerveDrive");
+
+        // --- Limelight camera streams ---
+        // Registers each Limelight's MJPEG stream under /CameraPublisher so
+        // Elastic's Camera Stream widget can display it. The dashboard pulls
+        // video straight from the camera; nothing streams through the roboRIO.
+        for (String name : VisionConstants.LIMELIGHT_NAMES) {
+            CameraServer.addCamera(new HttpCamera(
+                "limelight-" + name,
+                "http://limelight-" + name + ".local:5800/stream.mjpg",
+                HttpCameraKind.kMJPGStreamer));
+        }
+    }
+
+    /**
+     * Publishes all live values. Called every loop from Robot.robotPeriodic().
+     */
+    public void update() {
+        // --- Field + drivetrain ---
+        var driveState = swerve.getState();
+        field.setRobotPose(driveState.Pose);
+
+        SmartDashboard.putNumber("Swerve/Speed",
+            Math.hypot(driveState.Speeds.vxMetersPerSecond, driveState.Speeds.vyMetersPerSecond));
+        SmartDashboard.putNumber("Swerve/Heading", driveState.Pose.getRotation().getDegrees());
+        SmartDashboard.putBoolean("Swerve/Vision Tracking", swerve.isVisionTrackingEnabled());
+
+        // SwerveDrive widget entries (module order: FL, FR, BL, BR)
+        if (driveState.ModuleStates != null && driveState.ModuleStates.length == 4) {
+            swerveWidgetTable.getEntry("Front Left Angle").setDouble(driveState.ModuleStates[0].angle.getRadians());
+            swerveWidgetTable.getEntry("Front Left Velocity").setDouble(driveState.ModuleStates[0].speedMetersPerSecond);
+            swerveWidgetTable.getEntry("Front Right Angle").setDouble(driveState.ModuleStates[1].angle.getRadians());
+            swerveWidgetTable.getEntry("Front Right Velocity").setDouble(driveState.ModuleStates[1].speedMetersPerSecond);
+            swerveWidgetTable.getEntry("Back Left Angle").setDouble(driveState.ModuleStates[2].angle.getRadians());
+            swerveWidgetTable.getEntry("Back Left Velocity").setDouble(driveState.ModuleStates[2].speedMetersPerSecond);
+            swerveWidgetTable.getEntry("Back Right Angle").setDouble(driveState.ModuleStates[3].angle.getRadians());
+            swerveWidgetTable.getEntry("Back Right Velocity").setDouble(driveState.ModuleStates[3].speedMetersPerSecond);
+            swerveWidgetTable.getEntry("Robot Angle").setDouble(driveState.Pose.getRotation().getRadians());
+        }
+
+        // --- Superstructure visualization ---
+        double heightMeters = Units.inchesToMeters(elevator.getCurrentPosition());
+        double armAngleDeg = coral.getPivotAngle();
+
+        // Mechanism2d: elevator ligament grows with height; arm ligament is
+        // drawn relative to the elevator (0 deg tucked = down, 90 = out).
+        elevatorLigament.setLength(ARM_PIVOT_HEIGHT + heightMeters);
+        armLigament.setAngle(armAngleDeg - 180.0);
+
+        // 3D component poses for AdvantageScope (robot-relative: X forward,
+        // Y left, Z up). Cascade rigging: the middle stage rises at half the
+        // carriage speed. Arm pitches about the Y axis; the sign/zero must
+        // match the CAD component's modeled orientation - VERIFY in
+        // AdvantageScope and flip/offset here if the model swings backward.
+        componentPoses[0] = new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters / 2.0, Rotation3d.kZero); // Middle stage
+        componentPoses[1] = new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters, Rotation3d.kZero);       // Carriage
+        componentPoses[2] = new Pose3d(ELEVATOR_X_OFFSET, 0, ARM_PIVOT_HEIGHT + heightMeters,
+            new Rotation3d(0, -Units.degreesToRadians(armAngleDeg), 0));                     // Arm
+
+        // --- AdvantageKit structured outputs (.wpilog + RLOG live stream) ---
+        // These are the review-critical fields for AdvantageScope: 2D/3D
+        // field views, swerve visualization, and mechanism traces.
+        Logger.recordOutput("RobotState/Pose", Pose2d.struct, driveState.Pose);
+        Logger.recordOutput("RobotState/Speeds", ChassisSpeeds.struct, driveState.Speeds);
+        if (driveState.ModuleStates != null && driveState.ModuleStates.length == 4) {
+            Logger.recordOutput("RobotState/ModuleStates", SwerveModuleState.struct, driveState.ModuleStates);
+            Logger.recordOutput("RobotState/ModuleTargets", SwerveModuleState.struct, driveState.ModuleTargets);
+        }
+        Logger.recordOutput("RobotState/ComponentPoses", Pose3d.struct, componentPoses);
+        Logger.recordOutput("Elevator/HeightInches", elevator.getCurrentPosition());
+        Logger.recordOutput("Elevator/TargetInches", elevator.getTargetPosition());
+        Logger.recordOutput("CorAl/AngleDegrees", armAngleDeg);
+        Logger.recordOutput("CorAl/TargetDegrees", coral.getTargetAngle());
+        Logger.recordOutput("CorAl/GamePiece", coral.isGamePieceDetected());
+        Logger.recordOutput("Vision/BestTag",
+            swerve.getVision().getBestTarget().map(t -> t.id).orElse(-1));
+
+        // --- Match / robot vitals ---
+        SmartDashboard.putNumber("Match Time", DriverStation.getMatchTime());
+        SmartDashboard.putNumber("Battery Voltage", RobotController.getBatteryVoltage());
+        SmartDashboard.putNumber("CAN Utilization",
+            RobotController.getCANStatus().percentBusUtilization);
+
+        // --- Elevator ---
+        SmartDashboard.putNumber("Elevator/Height", elevator.getCurrentPosition());
+        SmartDashboard.putNumber("Elevator/Target", elevator.getTargetPosition());
+        SmartDashboard.putNumber("Elevator/Velocity", elevator.getVelocity());
+        SmartDashboard.putBoolean("Elevator/At Target", elevator.isAtTargetPosition());
+        SmartDashboard.putBoolean("Elevator/Manual Mode", elevator.isInManualMode());
+        SmartDashboard.putNumber("Elevator/Left Current", elevator.getLeftCurrent());
+        SmartDashboard.putNumber("Elevator/Right Current", elevator.getRightCurrent());
+        SmartDashboard.putNumber("Elevator/Left Output", elevator.getLeftOutput());
+        SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
+
+        // --- CorAl ---
+        SmartDashboard.putNumber("CorAl/Angle", coral.getPivotAngle());
+        SmartDashboard.putNumber("CorAl/Target", coral.getTargetAngle());
+        SmartDashboard.putNumber("CorAl/Motor Angle", coral.getMotorAngle());
+        SmartDashboard.putBoolean("CorAl/At Target", coral.isAtTargetAngle());
+        SmartDashboard.putBoolean("CorAl/Game Piece", coral.isGamePieceDetected());
+        SmartDashboard.putBoolean("CorAl/Through Bore OK", coral.isThroughBoreConnected());
+        SmartDashboard.putNumber("CorAl/CANrange Distance", coral.getCANRangeDistance());
+        SmartDashboard.putNumber("CorAl/Pivot Current", coral.getPivotCurrent());
+        SmartDashboard.putNumber("CorAl/Intake Current", coral.getIntakeCurrent());
+        SmartDashboard.putNumber("CorAl/Pivot Output", coral.getPivotOutput());
+        SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
+
+        // --- Vision ---
+        var vision = swerve.getVision();
+        SmartDashboard.putNumber("Vision/Best Tag",
+            vision.getBestTarget().map(t -> (double) t.id).orElse(-1.0));
+        SmartDashboard.putNumber("Vision/TX",
+            vision.getBestTarget().map(t -> t.tx).orElse(0.0));
+        SmartDashboard.putNumber("Vision/Distance",
+            vision.getBestTarget().map(t -> t.groundDistance()).orElse(0.0));
+        for (String name : VisionConstants.LIMELIGHT_NAMES) {
+            SmartDashboard.putBoolean("Vision/" + name + " Has Target", vision.hasTarget(name));
+        }
+        SmartDashboard.putString("Vision/Branch Side", vision.getBranchSide().name());
+
+        // --- LEDs ---
+        SmartDashboard.putString("LEDs/State",
+            leds.getState() != null ? leds.getState().name() : "INIT");
+
+        // --- Alerts (persistent conditions) ---
+        boolean throughBoreConnected = coral.isThroughBoreConnected();
+        throughBoreAlert.set(!throughBoreConnected);
+        elevatorSyncAlert.set(!elevator.sidesInSync());
+        coralFeedbackAlert.set(throughBoreConnected && !coral.isMotorFeedbackValid());
+        // Resting-voltage check only while disabled - voltage sags under
+        // load during a match are normal and would nag the drive team.
+        lowBatteryAlert.set(DriverStation.isDisabled()
+            && RobotController.getBatteryVoltage() < 12.0);
+
+        // --- One-shot toast when the through bore drops out ---
+        if (throughBoreWasConnected && !throughBoreConnected) {
+            Elastic.sendNotification(new Elastic.Notification(
+                Elastic.NotificationLevel.ERROR,
+                "Through Bore Disconnected",
+                "CorAl pivot angle is now motor-encoder only. Avoid re-zeroing until fixed."));
+        }
+        throughBoreWasConnected = throughBoreConnected;
+    }
+}

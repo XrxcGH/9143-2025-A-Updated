@@ -5,6 +5,7 @@ import java.util.function.Supplier;
 
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.LimelightHelpers;
 import frc.robot.Superstructure;
@@ -66,31 +67,40 @@ public class Vision extends SubsystemBase {
     // Best target cache, refreshed once per periodic()
     private Optional<AprilTagTarget> cachedBestTarget = Optional.empty();
 
+    // Precomputed "limelight-<name>" NT table names (avoids per-loop string
+    // concatenation in the hot paths)
+    private final String[] limelightTableNames;
+
     public Vision(Swerve swerve) {
         this.swerve = swerve;
 
-        for (String name : VisionConstants.LIMELIGHT_NAMES) {
+        limelightTableNames = new String[VisionConstants.LIMELIGHT_NAMES.length];
+        for (int i = 0; i < VisionConstants.LIMELIGHT_NAMES.length; i++) {
+            limelightTableNames[i] = "limelight-" + VisionConstants.LIMELIGHT_NAMES[i];
+        }
+
+        for (String tableName : limelightTableNames) {
             // Set all Limelights to the AprilTag pipeline
-            LimelightHelpers.setPipelineIndex("limelight-" + name, VisionConstants.APRILTAG_PIPELINE);
+            LimelightHelpers.setPipelineIndex(tableName, VisionConstants.APRILTAG_PIPELINE);
             // Turn off Limelight LEDs during initialization
-            LimelightHelpers.setLEDMode_ForceOff("limelight-" + name);
+            LimelightHelpers.setLEDMode_ForceOff(tableName);
         }
     }
 
-    /** Whether the given Limelight (by short name) currently sees a target. */
-    public boolean hasTarget(String name) {
-        return LimelightHelpers.getTV("limelight-" + name);
+    /** Whether the Limelight at the given LIMELIGHT_NAMES index sees a target. */
+    public boolean hasTarget(int index) {
+        return LimelightHelpers.getTV(limelightTableNames[index]);
     }
 
     // Toggles AprilTag tracking and controls Limelight LEDs.
     public void toggleTracking(boolean enabled) {
         if (enabled != trackingEnabled) {
             trackingEnabled = enabled;
-            for (String name : VisionConstants.LIMELIGHT_NAMES) {
+            for (String tableName : limelightTableNames) {
                 if (trackingEnabled) {
-                    LimelightHelpers.setLEDMode_ForceOn("limelight-" + name);
+                    LimelightHelpers.setLEDMode_ForceOn(tableName);
                 } else {
-                    LimelightHelpers.setLEDMode_ForceOff("limelight-" + name);
+                    LimelightHelpers.setLEDMode_ForceOff(tableName);
                 }
             }
         }
@@ -185,23 +195,38 @@ public class Vision extends SubsystemBase {
         return cachedBestTarget;
     }
 
-    // Queries every Limelight and picks the CLOSEST visible TRACKABLE tag
-    // (smallest ground distance in camera space). Tags with no tracking
-    // goal (barge/processor) are skipped entirely.
+    /**
+     * True when the tag's class matches what the superstructure is doing:
+     * a STOW goal means the robot is heading to a coral station to intake,
+     * so only station tags are candidates; every scoring/algae goal targets
+     * the reef, so only reef tags are candidates. Without this, a station
+     * tag seen by the rear camera at 3 m could out-"close" the intended
+     * reef tag at 4 m and hijack a scoring alignment.
+     */
+    private boolean tagMatchesCurrentGoal(int tagId) {
+        if (goalSupplier.get() == Superstructure.Goal.STOW) {
+            return isCoralStationTag(tagId);
+        }
+        return isReefTag(tagId);
+    }
+
+    // Queries every Limelight and picks the CLOSEST visible tag whose class
+    // matches the current superstructure goal (reef for scoring/algae,
+    // coral station for stow/intake). Barge and processor tags never match.
     private Optional<AprilTagTarget> findBestTarget() {
         AprilTagTarget bestTarget = null;
         double bestDistance = Double.MAX_VALUE;
 
-        for (int i = 0; i < VisionConstants.LIMELIGHT_NAMES.length; i++) {
+        for (int i = 0; i < limelightTableNames.length; i++) {
             String name = VisionConstants.LIMELIGHT_NAMES[i];
-            String limelightName = "limelight-" + name;
+            String limelightName = limelightTableNames[i];
             if (!LimelightHelpers.getTV(limelightName)) {
                 continue;
             }
 
             int tagId = (int) LimelightHelpers.getFiducialID(limelightName);
-            if (getTrackingGoal(tagId).isEmpty()) {
-                continue; // Intentionally untracked tag class
+            if (!tagMatchesCurrentGoal(tagId)) {
+                continue; // Wrong tag class for the current goal (or untracked)
             }
 
             // Limelight camera space: X = right, Y = down, Z = forward.
@@ -277,36 +302,54 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * Fuses MegaTag2 pose estimates from every Limelight into the drivetrain
-     * odometry. MegaTag2 needs the robot's current heading, which is sent to
-     * each camera first; in return it produces a much more stable pose than
-     * single-tag solves. Timestamp conversion to the Phoenix timebase happens
-     * inside Swerve.addVisionMeasurement().
+     * Fuses vision pose estimates from every Limelight into the drivetrain
+     * odometry. Timestamp conversion to the Phoenix timebase happens inside
+     * Swerve.addVisionMeasurement().
+     *
+     * Two modes:
+     *  - DISABLED (pre-match / between periods): MegaTag1, whose solve
+     *    includes an absolute HEADING from tag geometry alone. Its rotation
+     *    is fused so the pose heading converges to field-correct while the
+     *    robot sits still - without this, the heading MegaTag2 depends on
+     *    would start at whatever the gyro booted to and every fused pose
+     *    would be wrong until the first manual pose/heading reset.
+     *  - ENABLED: MegaTag2, which takes our (now-seeded) heading and returns
+     *    a far more stable translation than single-tag solves. Its heading
+     *    is our own gyro echoed back, so it gets effectively zero weight.
      */
     private void updateRobotPosition() {
+        boolean seedingHeading = DriverStation.isDisabled();
         double headingDegrees = swerve.getState().Pose.getRotation().getDegrees();
 
-        for (String name : VisionConstants.LIMELIGHT_NAMES) {
-            String limelightName = "limelight-" + name;
+        for (String tableName : limelightTableNames) {
+            // NoFlush variant: one NT flush after the loop instead of a full
+            // network flush per camera per loop
+            LimelightHelpers.SetRobotOrientation_NoFlush(tableName, headingDegrees, 0, 0, 0, 0, 0);
 
-            LimelightHelpers.SetRobotOrientation(limelightName, headingDegrees, 0, 0, 0, 0, 0);
-            LimelightHelpers.PoseEstimate estimate =
-                LimelightHelpers.getBotPoseEstimate_wpiBlue_MegaTag2(limelightName);
+            LimelightHelpers.PoseEstimate estimate = seedingHeading
+                ? LimelightHelpers.getBotPoseEstimate_wpiBlue(tableName)
+                : LimelightHelpers.getBotPoseEstimate_wpiBlue_MegaTag2(tableName);
 
             if (estimate == null || estimate.tagCount == 0) {
                 continue;
             }
 
-            // Confidence scales with tag count and closeness. MegaTag2 heading
-            // comes from our own gyro, so give it effectively no weight.
+            // Confidence scales with tag count and closeness
             double xyStdDev = 0.3
                 + 0.4 * (estimate.avgTagDist * estimate.avgTagDist) / Math.max(1, estimate.tagCount);
+            // MegaTag1 heading is trusted (loosely; tighter with 2+ tags)
+            // while disabled and stationary; MegaTag2 heading never is.
+            double rotStdDev = seedingHeading
+                ? (estimate.tagCount >= 2 ? 0.3 : 0.9)
+                : 9999999;
 
             swerve.addVisionMeasurement(
                 estimate.pose,
                 estimate.timestampSeconds,
-                VecBuilder.fill(xyStdDev, xyStdDev, 9999999));
+                VecBuilder.fill(xyStdDev, xyStdDev, rotStdDev));
         }
+
+        LimelightHelpers.Flush();
     }
 
     @Override

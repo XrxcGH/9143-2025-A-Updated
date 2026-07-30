@@ -185,3 +185,7 @@ compile_commands.json
 
 # Eclipse generated file for annotation processors
 .factorypath
+
+# Per-user Claude Code settings and stray AdvantageKit logs
+.claude/settings.local.json
+*.wpilog

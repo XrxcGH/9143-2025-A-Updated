@@ -42,6 +42,14 @@ public class Telemetry {
 	public Telemetry(double maxSpeed) {
 		MaxSpeed = maxSpeed;
 		SignalLogger.start();
+
+		// Register the module Mechanism2d widgets ONCE. telemeterize() runs
+		// at the odometry rate (100-250 Hz) on CTRE's odometry thread;
+		// re-registering there means hundreds of synchronized dashboard
+		// lookups and string allocations per second for no benefit.
+		for (int i = 0; i < 4; ++i) {
+			SmartDashboard.putData("Module " + i, m_moduleMechanisms[i]);
+		}
 	}
 
 	// What to publish over networktables for telemetry
@@ -117,13 +125,12 @@ public class Telemetry {
 		SignalLogger.writeDoubleArray("DriveState/ModuleTargets", m_moduleTargetsArray);
 		SignalLogger.writeDouble("DriveState/OdometryPeriod", state.OdometryPeriod, "seconds");
 
-		// Telemeterize the module states to a Mechanism2d
+		// Telemeterize the module states to the (constructor-registered)
+		// Mechanism2d widgets
 		for (int i = 0; i < 4; ++i) {
 			m_moduleSpeeds[i].setAngle(state.ModuleStates[i].angle);
 			m_moduleDirections[i].setAngle(state.ModuleStates[i].angle);
 			m_moduleSpeeds[i].setLength(state.ModuleStates[i].speedMetersPerSecond / (2 * MaxSpeed));
-
-			SmartDashboard.putData("Module " + i, m_moduleMechanisms[i]);
 		}
 	}
 }

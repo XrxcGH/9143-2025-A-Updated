@@ -49,8 +49,8 @@ All position buttons run coordinated elevator + arm sequences through the **Supe
 | Right bumper | Algae score (52.5", 105°, then eject) |
 | Left trigger | Stow to base (rollers stopped, arm tucked) |
 | Right trigger | Raise arm to safe travel angle (context-aware) |
-| Left bumper | Reset elevator encoders (works disabled) |
-| Start | Reset CorAl pivot encoder (works disabled) |
+| Left bumper | Reset elevator encoders (**disabled only**, mechanism at base) |
+| Start | Reset CorAl pivot encoder (**disabled only**, mechanism at base) |
 
 ---
 

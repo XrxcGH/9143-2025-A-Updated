@@ -13,6 +13,7 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.kinematics.SwerveModuleState;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.networktables.NetworkTable;
+import edu.wpi.first.networktables.NetworkTableEntry;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.Alert;
 import edu.wpi.first.wpilibj.Alert.AlertType;
@@ -67,6 +68,14 @@ public class Dashboard {
 
     /** Raw NT table backing Elastic's SwerveDrive widget (needs a ".type" marker). */
     private final NetworkTable swerveWidgetTable;
+
+    // Cached NT entries for the SwerveDrive widget (order: FL angle, FL vel,
+    // FR angle, FR vel, BL angle, BL vel, BR angle, BR vel, robot angle) -
+    // resolving string-keyed entries on every 20 ms loop is pure waste.
+    private final NetworkTableEntry[] swerveWidgetEntries;
+
+    // Precomputed "Vision/<name> Has Target" keys (avoids per-loop concatenation)
+    private final String[] visionHasTargetKeys;
 
     // ------------------------------------------------------------------
     // Superstructure visualization
@@ -160,6 +169,22 @@ public class Dashboard {
         swerveWidgetTable = NetworkTableInstance.getDefault()
             .getTable("SmartDashboard").getSubTable("Swerve Drive");
         swerveWidgetTable.getEntry(".type").setString("SwerveDrive");
+        swerveWidgetEntries = new NetworkTableEntry[] {
+            swerveWidgetTable.getEntry("Front Left Angle"),
+            swerveWidgetTable.getEntry("Front Left Velocity"),
+            swerveWidgetTable.getEntry("Front Right Angle"),
+            swerveWidgetTable.getEntry("Front Right Velocity"),
+            swerveWidgetTable.getEntry("Back Left Angle"),
+            swerveWidgetTable.getEntry("Back Left Velocity"),
+            swerveWidgetTable.getEntry("Back Right Angle"),
+            swerveWidgetTable.getEntry("Back Right Velocity"),
+            swerveWidgetTable.getEntry("Robot Angle"),
+        };
+
+        visionHasTargetKeys = new String[VisionConstants.LIMELIGHT_NAMES.length];
+        for (int i = 0; i < VisionConstants.LIMELIGHT_NAMES.length; i++) {
+            visionHasTargetKeys[i] = "Vision/" + VisionConstants.LIMELIGHT_NAMES[i] + " Has Target";
+        }
 
         // --- Limelight camera streams ---
         // Registers each Limelight's MJPEG stream under /CameraPublisher so
@@ -188,15 +213,11 @@ public class Dashboard {
 
         // SwerveDrive widget entries (module order: FL, FR, BL, BR)
         if (driveState.ModuleStates != null && driveState.ModuleStates.length == 4) {
-            swerveWidgetTable.getEntry("Front Left Angle").setDouble(driveState.ModuleStates[0].angle.getRadians());
-            swerveWidgetTable.getEntry("Front Left Velocity").setDouble(driveState.ModuleStates[0].speedMetersPerSecond);
-            swerveWidgetTable.getEntry("Front Right Angle").setDouble(driveState.ModuleStates[1].angle.getRadians());
-            swerveWidgetTable.getEntry("Front Right Velocity").setDouble(driveState.ModuleStates[1].speedMetersPerSecond);
-            swerveWidgetTable.getEntry("Back Left Angle").setDouble(driveState.ModuleStates[2].angle.getRadians());
-            swerveWidgetTable.getEntry("Back Left Velocity").setDouble(driveState.ModuleStates[2].speedMetersPerSecond);
-            swerveWidgetTable.getEntry("Back Right Angle").setDouble(driveState.ModuleStates[3].angle.getRadians());
-            swerveWidgetTable.getEntry("Back Right Velocity").setDouble(driveState.ModuleStates[3].speedMetersPerSecond);
-            swerveWidgetTable.getEntry("Robot Angle").setDouble(driveState.Pose.getRotation().getRadians());
+            for (int i = 0; i < 4; i++) {
+                swerveWidgetEntries[i * 2].setDouble(driveState.ModuleStates[i].angle.getRadians());
+                swerveWidgetEntries[i * 2 + 1].setDouble(driveState.ModuleStates[i].speedMetersPerSecond);
+            }
+            swerveWidgetEntries[8].setDouble(driveState.Pose.getRotation().getRadians());
         }
 
         // --- Superstructure visualization ---
@@ -213,10 +234,13 @@ public class Dashboard {
         // carriage speed. Arm pitches about the Y axis; the sign/zero must
         // match the CAD component's modeled orientation - VERIFY in
         // AdvantageScope and flip/offset here if the model swings backward.
-        componentPoses[0] = new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters / 2.0, Rotation3d.kZero); // Middle stage
-        componentPoses[1] = new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters, Rotation3d.kZero);       // Carriage
-        componentPoses[2] = new Pose3d(ELEVATOR_X_OFFSET, 0, ARM_PIVOT_HEIGHT + heightMeters,
-            new Rotation3d(0, -Units.degreesToRadians(armAngleDeg), 0));                     // Arm
+        componentPoses[LoggingConstants.MIDDLE_STAGE_INDEX] =
+            new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters / 2.0, Rotation3d.kZero);
+        componentPoses[LoggingConstants.CARRIAGE_INDEX] =
+            new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters, Rotation3d.kZero);
+        componentPoses[LoggingConstants.ARM_INDEX] =
+            new Pose3d(ELEVATOR_X_OFFSET, 0, ARM_PIVOT_HEIGHT + heightMeters,
+                new Rotation3d(0, -Units.degreesToRadians(armAngleDeg), 0));
 
         // --- AdvantageKit structured outputs (.wpilog + RLOG live stream) ---
         // These are the review-critical fields for AdvantageScope: 2D/3D
@@ -233,8 +257,8 @@ public class Dashboard {
         Logger.recordOutput("CorAl/AngleDegrees", armAngleDeg);
         Logger.recordOutput("CorAl/TargetDegrees", coral.getTargetAngle());
         Logger.recordOutput("CorAl/GamePiece", coral.isGamePieceDetected());
-        Logger.recordOutput("Vision/BestTag",
-            swerve.getVision().getBestTarget().map(t -> t.id).orElse(-1));
+        // (Vision/BestTag is logged in the Vision block below, from the same
+        // single best-target read as the dashboard values.)
 
         // --- Match / robot vitals ---
         SmartDashboard.putNumber("Match Time", DriverStation.getMatchTime());
@@ -267,15 +291,18 @@ public class Dashboard {
         SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
 
         // --- Vision ---
+        // One best-target read reused for every consumer this loop
         var vision = swerve.getVision();
+        var bestTarget = vision.getBestTarget();
         SmartDashboard.putNumber("Vision/Best Tag",
-            vision.getBestTarget().map(t -> (double) t.id).orElse(-1.0));
+            bestTarget.map(t -> (double) t.id).orElse(-1.0));
         SmartDashboard.putNumber("Vision/TX",
-            vision.getBestTarget().map(t -> t.tx).orElse(0.0));
+            bestTarget.map(t -> t.tx).orElse(0.0));
         SmartDashboard.putNumber("Vision/Distance",
-            vision.getBestTarget().map(t -> t.groundDistance()).orElse(0.0));
-        for (String name : VisionConstants.LIMELIGHT_NAMES) {
-            SmartDashboard.putBoolean("Vision/" + name + " Has Target", vision.hasTarget(name));
+            bestTarget.map(t -> t.groundDistance()).orElse(0.0));
+        Logger.recordOutput("Vision/BestTag", bestTarget.map(t -> t.id).orElse(-1));
+        for (int i = 0; i < visionHasTargetKeys.length; i++) {
+            SmartDashboard.putBoolean(visionHasTargetKeys[i], vision.hasTarget(i));
         }
         SmartDashboard.putString("Vision/Branch Side", vision.getBranchSide().name());
 

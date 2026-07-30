@@ -25,6 +25,7 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -69,6 +70,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
 	// Swerve request reused by the AprilTag tracking command (avoids allocating a new request every loop)
 	private final SwerveRequest.RobotCentric m_visionTrackRequest = new SwerveRequest.RobotCentric();
+
+	// Vision-measurement spin rejection: angular rate above which vision
+	// poses are untrustworthy, and how long after the spin ends they stay
+	// rejected (covers image capture latency of the last smeared frames)
+	private static final double kVisionMaxOmegaRadPerSec = 2.0;
+	private static final double kVisionRejectAfterSpinSeconds = 0.2;
+	private double m_lastFastRotationTime = -kVisionRejectAfterSpinSeconds;
 
 	// Swerve requests to apply during SysId characterization
 	private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
@@ -343,16 +351,21 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 * side - see Vision.getTrackingGoal), rotating to face the tag.
 	 *
 	 * Coordinate frames:
-	 *   Camera space: X = right (m), Z = forward (m), tx = degrees (+ right)
+	 *   Camera space: X = right (m), Z = forward (m)
 	 *   Robot space (WPILib): +X = forward, +Y = LEFT, +omega = CCW
 	 * Rear-mounted cameras (the coral station camera) see the world rotated
-	 * 180 degrees, which exactly negates all three drive terms - handled by
-	 * the target's facingSign.
+	 * 180 degrees, which negates the two TRANSLATION terms - handled by the
+	 * target's facingSign. The ROTATION term is NOT mirrored: for any rigidly
+	 * mounted camera, robot CCW rotation (+omega) moves a fixed target toward
+	 * the right of that camera's image (d(angle)/dt = +omega) regardless of
+	 * mounting yaw, so the correction is always omega = -k * angleError.
 	 *
 	 * If no trackable tag is visible (or the target is lost mid-approach)
 	 * the command actively commands zero velocity - swerve requests latch,
 	 * so without this the robot would keep driving at its last commanded
-	 * speed.
+	 * speed. When the command ends for any reason (cancelled, or interrupted
+	 * by another swerve command), it stops the robot and clears the tracking
+	 * flag so the Y-button toggle can never desync from reality.
 	 */
 	public Command createAprilTagTrackingCommand() {
 		return run(() -> {
@@ -375,9 +388,12 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			// Errors between where the tag is and where we want it to be.
 			// Positive distanceError = too far away -> close the distance.
 			// Positive lateralError = tag is right of the goal in the image.
+			// The angle error is derived from the same pose solve as the
+			// other two terms (rather than the separately-published tx) so
+			// one camera frame can never mix with another.
 			double distanceError = tag.poseZ - goal.get().distance;
 			double lateralError = tag.poseX - goal.get().lateral;
-			double angleError = tag.tx; // Degrees; positive = tag to the right
+			double angleError = Math.toDegrees(Math.atan2(tag.poseX, tag.poseZ)); // + = tag right of camera axis
 
 			// Deadbands prevent hunting around the goal position
 			if (Math.abs(distanceError) < VisionConstants.TrackingGains.POSITION_ERROR_DEADBAND) distanceError = 0;
@@ -385,14 +401,12 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			if (Math.abs(angleError) < VisionConstants.TrackingGains.ROTATION_ERROR_DEADBAND) angleError = 0;
 
 			// Proportional control mapped into robot-relative velocities.
-			// For a front camera: vy is negated because camera X is
-			// right-positive but robot Y is left-positive, and omega is
-			// negated because a tag to the right needs a clockwise (negative)
-			// rotation. A rear camera mirrors all three, so every term is
-			// scaled by the camera's facing sign.
+			// Front camera: vy negated (camera X is right-positive, robot Y is
+			// left-positive); rear camera mirrors vx and vy via facingSign.
+			// Omega is never mirrored (see the class comment above).
 			double vx = tag.facingSign * distanceError * VisionConstants.TrackingGains.DISTANCE_kP;
 			double vy = tag.facingSign * -lateralError * VisionConstants.TrackingGains.DISTANCE_kP;
-			double omega = tag.facingSign * -angleError * VisionConstants.TrackingGains.ROTATION_kP;
+			double omega = -angleError * VisionConstants.TrackingGains.ROTATION_kP;
 
 			// Clamp velocities to safe tracking limits
 			vx = Math.min(Math.max(vx, -VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY), VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
@@ -403,6 +417,16 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 				.withVelocityX(vx)
 				.withVelocityY(vy)
 				.withRotationalRate(omega));
+		}).finallyDo(() -> {
+			// Runs on cancel AND on interruption by any other swerve command
+			// (brake, point, D-pad nudges, SysId): stop the robot and drop
+			// the tracking state so the toggle always reflects reality.
+			isVisionTrackingEnabled = false;
+			vision.toggleTracking(false);
+			setControl(m_visionTrackRequest
+				.withVelocityX(0)
+				.withVelocityY(0)
+				.withRotationalRate(0));
 		});
 	}
 
@@ -423,12 +447,16 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		Pose2d visionPose,
 		double timestampSeconds,
 		Matrix<N3, N1> stdDevs) {
-		// Skip measurements taken while spinning fast; vision poses degrade badly
-		boolean rotatingTooFast = Math.abs(getState().Speeds.omegaRadiansPerSecond) > 2.0;
-
-		if (!rotatingTooFast) {
-			super.addVisionMeasurement(visionPose, Utils.fpgaToCurrentTime(timestampSeconds), stdDevs);
+		// Skip measurements captured while spinning fast (motion blur and
+		// rolling shutter corrupt the solve). The image was captured 25-100 ms
+		// ago, so gate on whether the robot has spun fast RECENTLY, not just
+		// this instant - otherwise the first smeared frames after a spin ends
+		// slip through and yank the pose.
+		if (Timer.getFPGATimestamp() - m_lastFastRotationTime
+				< kVisionRejectAfterSpinSeconds) {
+			return;
 		}
+		super.addVisionMeasurement(visionPose, Utils.fpgaToCurrentTime(timestampSeconds), stdDevs);
 	}
 
 	/** The Vision subsystem owned by this drivetrain (used by the Dashboard). */
@@ -438,6 +466,11 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
 	@Override
 	public void periodic() {
+		// Track when the robot last spun fast, for vision-measurement rejection
+		if (Math.abs(getState().Speeds.omegaRadiansPerSecond) > kVisionMaxOmegaRadPerSec) {
+			m_lastFastRotationTime = Timer.getFPGATimestamp();
+		}
+
 		// Apply operator perspective if not already applied
 		if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
 			DriverStation.getAlliance().ifPresent(allianceColor -> {

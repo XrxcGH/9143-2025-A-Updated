@@ -17,7 +17,6 @@ import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 
-import org.littletonrobotics.junction.AutoLog;
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.networktables.LoggedDashboardChooser;
 import edu.wpi.first.wpilibj.DriverStation;
@@ -67,7 +66,7 @@ import frc.robot.subsystems.Vision;
  *                         NO collision interlocks - watch the mechanism)
  *   D-pad down          - coral L1 scoring pose (0", 100 deg)
  *   D-pad left          - coral L2 scoring pose (12", 5 deg)
- *   D-pad right         - coral L3 scoring pose (28", 5 deg)
+ *   D-pad right         - coral L3 scoring pose (29", 22.5 deg, handoff overlap)
  *   D-pad up            - coral L4 scoring pose (52.5", 45 deg, handoff overlap)
  *   A                   - coral intake (stow to base, rollers until the
  *                         CANrange confirms a game piece)
@@ -78,8 +77,8 @@ import frc.robot.subsystems.Vision;
  *   Right bumper        - algae score (52.5", 105 deg, then eject)
  *   Left trigger        - stow to base (rollers stopped, arm tucked)
  *   Right trigger       - raise arm to safe travel angle (context-aware)
- *   Left bumper         - reset elevator encoders (works while disabled)
- *   Start               - reset CorAl pivot encoder (works while disabled)
+ *   Left bumper         - reset elevator encoders (DISABLED ONLY, at base)
+ *   Start               - reset CorAl pivot encoder (DISABLED ONLY, at base)
  * ===========================================================================
  */
 public class RobotContainer {
@@ -231,25 +230,21 @@ public class RobotContainer {
             swerve.getVision().setBranchSide(Vision.BranchSide.RIGHT)));
 
         // Toggle vision tracking on Y, but not while back/start are held
-        // (back+Y and start+Y are the SysId test combos above)
+        // (back+Y and start+Y are the SysId test combos above). The toggle
+        // keys off whether the tracking command is actually SCHEDULED, not a
+        // parallel flag - the command's own finallyDo stops the robot and
+        // clears the tracking state whenever it ends, including when another
+        // swerve binding (brake, point, nudges, SysId) interrupts it, so the
+        // toggle can never desync from reality.
         driver_controller.y()
             .and(driver_controller.back().negate())
             .and(driver_controller.start().negate())
             .onTrue(Commands.runOnce(() -> {
-            boolean newTrackingState = !swerve.isVisionTrackingEnabled();
-            swerve.setVisionTrackingEnabled(newTrackingState);
-
-            if (newTrackingState) {
-                CommandScheduler.getInstance().schedule(swerve.aprilTagTrackingCommand);
+            if (swerve.aprilTagTrackingCommand.isScheduled()) {
+                swerve.aprilTagTrackingCommand.cancel();
             } else {
-                if (swerve.getCurrentCommand() == swerve.aprilTagTrackingCommand) {
-                    swerve.aprilTagTrackingCommand.cancel();
-                }
-                // Stop the robot when tracking is disabled
-                swerve.setControl(new SwerveRequest.RobotCentric()
-                    .withVelocityX(0)
-                    .withVelocityY(0)
-                    .withRotationalRate(0));
+                swerve.setVisionTrackingEnabled(true);
+                CommandScheduler.getInstance().schedule(swerve.aprilTagTrackingCommand);
             }
         }));
 
@@ -284,10 +279,15 @@ public class RobotContainer {
         operator_controller.leftTrigger().onTrue(superstructure.stow());
         operator_controller.rightTrigger().onTrue(superstructure.raiseArm());
 
-        // Encoder resets (usable while disabled, with mechanisms at their
-        // physical base positions)
-        operator_controller.leftBumper().onTrue(Commands.runOnce(() -> elevator.resetEncoders(), elevator).ignoringDisable(true));
-        operator_controller.start().onTrue(Commands.runOnce(() -> coral.resetPivotEncoder(), coral).ignoringDisable(true));
+        // Encoder resets: ONLY while disabled, with mechanisms at their
+        // physical base positions. Zeroing while enabled would shift the
+        // reference frame under a latched closed-loop setpoint - the
+        // controller would suddenly see a huge error and drive the mechanism
+        // hard toward a position that no longer means what it did.
+        operator_controller.leftBumper().and(DriverStation::isDisabled)
+            .onTrue(Commands.runOnce(() -> elevator.resetEncoders(), elevator).ignoringDisable(true));
+        operator_controller.start().and(DriverStation::isDisabled)
+            .onTrue(Commands.runOnce(() -> coral.resetPivotEncoder(), coral).ignoringDisable(true));
 
         // -------- Manual overrides (default commands) --------
         // WARNING: manual control commands the subsystems directly and has

@@ -196,22 +196,29 @@ public class CorAl extends SubsystemBase {
 
         // Seed the motor sensor from the absolute encoder before starting the
         // move (never mid-move; see periodic()), so the profile targets the
-        // true mechanism angle with no residual offset.
+        // true mechanism angle with no residual offset. Zero timeout: the
+        // default setPosition overload BLOCKS the main loop waiting for the
+        // device ack (up to 100 ms); fire-and-forget still applies the value.
         if (isThroughBoreConnected()) {
-            pivotMotor.setPosition(getThroughBoreAngle() / 360.0);
+            pivotMotor.setPosition(getThroughBoreAngle() / 360.0, 0);
         }
 
         pivotMotor.setControl(positionRequest.withPosition(targetAngle / 360.0));
     }
 
-    /** Sets the motor sensor to the through bore angle if they disagree. */
+    /**
+     * Sets the motor sensor to the through bore angle if they disagree.
+     * Non-blocking (zero timeout) because this runs on the main loop -
+     * from periodic() it could otherwise stall the whole robot for a CAN
+     * config round trip on every loop while the discrepancy persists.
+     */
     private void syncMotorToThroughBore() {
         if (!isThroughBoreConnected()) {
             return;
         }
         double throughBoreAngle = getThroughBoreAngle();
         if (Math.abs(throughBoreAngle - getMotorAngle()) > CorAlConstants.THROUGH_BORE_ALLOWED_DISCREPANCY) {
-            pivotMotor.setPosition(throughBoreAngle / 360.0);
+            pivotMotor.setPosition(throughBoreAngle / 360.0, 0);
         }
     }
 

@@ -174,8 +174,9 @@ public final class Constants {
 			(58.0 / 10.0) * (58.0 / 18.0) * (42.0 / 12.0);
 
 		// --- Motion Magic Profile (degrees, seconds; converted to mechanism rotations in the subsystem) ---
-		// Conservative for first tests: full 70-degree travel in ~1 second
-		// (90 deg/s = 16.4 rotor rps through 65.41:1 - well within a Kraken).
+		// Conservative for first tests: the common 90-degree BASE<->RAISE
+		// swing takes ~1.5 s, full 160-degree travel ~2.3 s (90 deg/s =
+		// 16.4 rotor rps through 65.41:1 - well within a Kraken).
 		// TUNE: raise once gains feel solid.
 		public static final double CORAL_PIVOT_MAX_VELOCITY = 90.0;      // Cruise velocity (deg/s)
 		public static final double CORAL_PIVOT_MAX_ACCELERATION = 180.0; // Acceleration (deg/s^2)
@@ -235,6 +236,11 @@ public final class Constants {
 			CORAL_L2(5.0),
 			CORAL_L3(22.5),
 			CORAL_L4(45.0),
+			// NOTE: intentionally equal to the forward soft limit (the
+			// mechanical max). The soft limit only cuts output PAST the
+			// threshold and the arm approaches from below with gravity
+			// pulling back, so settling exactly at it works; if the arm
+			// hunts against the limit during tuning, drop this 1-2 degrees.
 			ALGAE_INTAKE(160.0),
 			ALGAE_SCORE(105.0),
 			ALGAE_HOLD(90.0);
@@ -299,7 +305,9 @@ public final class Constants {
 		// until this height, then the arm starts rotating toward 45 deg while
 		// the elevator finishes the climb (reversed when leaving L4).
 		// TUNE: raise if the mechanism still clips the second-stage tube;
-		// lower to make L4 cycles faster.
+		// lower to make L4 cycles faster. With the current profiles the arm
+		// completes its 90->45 swing around 50-51 in of elevator height, so
+		// check clearance at THAT height specifically, not just at 52.5.
 		public static final double HIGH_HANDOFF_HEIGHT = 40.0; // Inches
 
 		// Same idea for the L3 approach (29 in, 22.5 deg): the elevator rises
@@ -315,6 +323,15 @@ public final class Constants {
 		// Extra settling margin used when checking "arm is at/above the safe
 		// travel angle" (degrees).
 		public static final double SAFE_ANGLE_TOLERANCE = 3.0;
+
+		// Timeout on the FINAL settle wait of every planned move (seconds).
+		// If a mechanism can't quite reach its at-target tolerance (sensor
+		// disagreement, mechanical stall against a stop), the command ends
+		// anyway - the latched closed-loop setpoints keep holding position,
+		// so timing out is always safe. Intermediate SAFETY gates (handoff
+		// heights, safe-angle waits) never time out: skipping one of those
+		// could command a collision.
+		public static final double SETTLE_TIMEOUT_SECONDS = 3.0;
 	}
 
 	/**
@@ -415,10 +432,17 @@ public final class Constants {
 		}
 	}
 
+	/**
+	 * Constants for AdvantageKit / AdvantageScope logging output.
+	 */
 	public static final class LoggingConstants {
-		// Indicies for NT://Draggables/Components3d
-		public static final int ELEVATOR_INDEX = 0;
-		public static final int CLIMB_INDEX = 1;
-		public static final int CorAL_INDEX = 2;
+		// Indices into the Components3d / DesiredComponents3d Pose3d arrays
+		// published for AdvantageScope's articulated 3D robot model. This
+		// robot's three moving components, in the order the code publishes
+		// them (must match the component order in
+		// advantageScopeAssets/Robot_Leviathan/config.json / the glTF export):
+		public static final int MIDDLE_STAGE_INDEX = 0; // Elevator middle stage (rises at half carriage speed)
+		public static final int CARRIAGE_INDEX = 1;     // Elevator carriage
+		public static final int ARM_INDEX = 2;          // CorAl arm
 	}
 }

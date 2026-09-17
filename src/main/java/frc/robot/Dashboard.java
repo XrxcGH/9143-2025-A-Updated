@@ -108,8 +108,10 @@ public class Dashboard {
     private final MechanismLigament2d elevatorLigament;
     private final MechanismLigament2d armLigament;
 
-    // Approximate arm length for both visualizations (meters). VERIFY.
-    private static final double ARM_LENGTH = 0.4;
+    // Arm length for both visualizations (meters): pivot axis (through-bore
+    // centerline) to the far intake roller axes, 13.9 in in the CAD
+    // (9143-2025-A-0000 Leviathan STEP).
+    private static final double ARM_LENGTH = 0.352;
 
     // 3D component-pose model for AdvantageScope's 3D field view: attach a
     // glTF CAD model (File > Import CAD or the online converter) and map
@@ -118,8 +120,12 @@ public class Dashboard {
     // the robot center on the floor. All offsets below are PLACEHOLDERS
     // measured as zero - VERIFY against the CAD model's component origins
     // (AdvantageScope docs: "Custom Assets > Articulated components").
-    private static final double ELEVATOR_X_OFFSET = 0.0;   // Meters forward of robot center - VERIFY
-    private static final double ARM_PIVOT_HEIGHT = 0.30;   // Pivot height above the floor at 0 elevator height (meters) - VERIFY
+    // From the CAD (9143-2025-A-0000 Leviathan STEP, carriage on its hard
+    // stop, floor at the wheel contact): the pivot axis (through-bore bore
+    // centerline) is 12.01 in forward of the frame center and 13.875 in
+    // above the floor.
+    private static final double ELEVATOR_X_OFFSET = 0.305;  // Meters forward of robot center
+    private static final double ARM_PIVOT_HEIGHT = 0.352;   // Pivot height above the floor at the elevator hard stop (meters)
     @AutoLogOutput (key = "Draggables/Components3d")
     private final Pose3d[] componentPoses = {new Pose3d(), new Pose3d(), new Pose3d()};
 

@@ -100,10 +100,10 @@ All "flush" distances are what the camera *reads* in that condition — tune by 
 | Camera | Forward | Side | Up | Pitch | Yaw | Status |
 |---|---|---|---|---|---|---|
 | funnel (rear) | −14.0" (1.0" inside the back edge of the 30" frame) | 0 (centered) | 29.625" | +50° (tilted up) | 180° (rear-facing) | **measured** |
-| barge | — | — | — | — | — | placeholder — measure, then set `measured = true` |
-| reef | — | — | — | — | — | placeholder — measure, then set `measured = true` |
+| barge | — | — | — | — | — | placeholder — the CAD has its mount (front-left, ~40.6" up, 13.4" forward) but no camera body in it; measure, then set `measured = true` |
+| reef (front-left, base stage) | +11.04" | −11.25" (left) | 15.78" | −20° (tilted down) | −30° (toward the centerline, i.e. to the right) | **from the CAD** (LL3G lens-barrel axis in the Leviathan STEP) — verify in the web UI |
 
-One-time check after deploying: open `http://limelight-funnel.local:5801`, confirm the 3D preview shows the camera at the back, pointing rearward and tilted up. If it points the wrong way, flip the pitch or yaw sign in the constant. With the camera tilted 50°, the tracker's *Station Flush Distance* is still simply whatever `Vision Distance` reads when the rear bumpers are flush — the tilt is baked into that reading.
+One-time check after deploying: open `http://limelight-funnel.local:5801`, confirm the 3D preview shows the camera at the back, pointing rearward and tilted up; then `http://limelight-reef.local:5801` should show the camera front-left, low, looking forward-right and down. If either points the wrong way, flip the pitch or yaw sign in the constant. With the camera tilted 50°, the tracker's *Station Flush Distance* is still simply whatever `Vision Distance` reads when the rear bumpers are flush — the tilt is baked into that reading.
 
 **Heat and fan noise.** Two things the code does to keep the Limelights cool without giving up tracking performance: the **LEDs are never turned on** (AprilTags need no illumination, and the LED array is the camera's biggest heat source), and processing is **throttled while the robot is disabled** (one frame processed per 100 skipped — still ~1 solve/s for the pre-match heading seed) with full rate restored the instant it enables. The rest is configured on each camera's web UI (`http://limelight-<name>.local:5801`), where these settings dominate CPU/GPU load and therefore fan speed:
 
@@ -289,9 +289,27 @@ Swerve hardware constants are in [TunerConstants.java](src/main/java/frc/robot/g
 
 ---
 
+## Geometry confirmed from the CAD
+
+The five STEP exports (`9143-2025-A-0000 Leviathan` and its Drivetrain / Elevator / CorAl / Funnel sub-assemblies) were resolved with a small assembly walker (part placements + bounding boxes + cylinder axes, validated on known tube sizes). CAD frame: X = robot left, Y = up, Z = forward; the floor is Y = 0 (wheel centers sit at exactly 2.000"). What it settled:
+
+| Item | CAD | Code |
+|---|---|---|
+| Bumper / frame envelope | 36.5" square bumpers on a 30.0" frame, centered on the origin | matches `TunerConstants` / bumper assumptions |
+| Swerve steering axes | all four at 12.375" from center — **2.625" inset for the MK4n too**, not just the MK4i | `TunerConstants` ±12.375" ✔ |
+| Elevator sprocket | "25 Chain 22t .500 Hex Sprocket" | 22T ✔ |
+| Elevator hard-stop height | base bottom cross tube top 5.875", middle-stage 1" tube on it, carriage tube bottom 6.875" → **1.000"** with one stage between | tunable default 0.875" (tape fits 0.87–0.95") — tape at rest decides |
+| CorAl pivot axis (hard stop) | through-bore bore: **13.875" up, 12.01" forward** of center | `Dashboard` pivot height 0.352 m, X offset 0.305 m |
+| Arm reach | far intake roller axes 13.9" from the pivot; in the CAD pose the arm points 33° past vertical toward the *rear* (the intake pose, facing the funnel) | `Dashboard` arm length 0.352 m |
+| Reef Limelight | lens 11.25" left, 15.78" up, 11.04" forward; 20° down, 30° toward the centerline | `LIMELIGHT_POSES[reef]`, pushed to the camera |
+| Funnel Limelight | mount centered, ~30" up, 11.6–14.7" behind center | consistent with the hand-measured pose |
+| Barge Limelight | mount only, no camera body in the CAD | still a placeholder |
+
+Two things the CAD shows that the code should know about: the carriage stage is rigged with 4 mm Dyneema over pulleys **and constant-force springs** (a gravity assist — expect the tuned elevator kG to land near zero or even slightly negative-feeling at the bottom), and there is a **CANivore** in the brainpan while `TunerConstants` puts the drivetrain on the roboRIO bus (empty bus name) — fine if the CANivore is unused, but if the swerve devices are wired to it the bus name must be set.
+
 ## Pre-Competition Checklist
 
-1. **Verify the CANcoder offsets in Tuner X** (wheels aligned straight forward). `tuner-project.json` disagrees with `TunerConstants.java` on all four offsets — and note the Tuner project itself is **stale** (it models all four modules as MK4n L3+, but the real robot has MK4i L3 fronts), so do **not** blindly regenerate TunerConstants from it; the mixed per-module ratios now in TunerConstants.java match the physical robot. Also confirm the MK4n (back) wheel inset from the SDS layout drawing — the code assumes 2.625" from the frame edge like the MK4i.
+1. **Verify the CANcoder offsets in Tuner X** (wheels aligned straight forward). `tuner-project.json` disagrees with `TunerConstants.java` on all four offsets — and note the Tuner project itself is **stale** (it models all four modules as MK4n L3+, but the real robot has MK4i L3 fronts), so do **not** blindly regenerate TunerConstants from it; the mixed per-module ratios now in TunerConstants.java match the physical robot. The MK4n (back) wheel inset is **confirmed from the CAD**: the steering-bearing axes of all four modules sit 12.375" from the frame center (2.625" in from both frame edges, MK4n and MK4i alike), matching `TunerConstants`.
 2. **Confirm the elevator hard-stop height** with a tape at rest (base-2×1 top to carriage-2×1 bottom) against *Elevator – Height At Hard Stop* (0.875"), then verify a 20" and a 40" move with the tape — see *Calibrating the elevator height*. The gearing model is confirmed; the travel ratio should stay at 1.0.
 3. **Sanity-check the CorAl pivot angle** against the through bore encoder. The 65.41:1 ratio is derived from the real gear train (10:58 → 18:58 → 12:42). Also confirm the through bore is mounted 1:1 on the pivot shaft.
 4. **Tune closed-loop gains** (elevator kP/kS/kV/kG and both mechanisms' profiles from the Testing-tab tunables — they re-apply the next time the robot is disabled; pivot kP/kS/kV/kG via Phoenix Tuner X; `AutoConstants` path-following kP) and test autos. Both mechanisms ship at **match-pace profiles**: elevator 20 in/s / 200 in/s² (the ceiling of the 45:1 gearing — see *Faster elevator*), pivot 200°/s / 300°/s² / jerk 2000°/s³, **deliberately softened while the pivot chain has backlash** (the arm was being thrown through the slop at the end of moves; 240 / 480 / 4800 is the target once the chain is fixed). First moves at these settings: watch L4 (the arm now rotates to 45° between ≈23.5" and ≈41.5" so it is clear of the reef bar before the coral reaches it — see the *Handoffs* readout; go more negative on the L4 offset if it still clips) and a held coral through a fast swing; if it slips, lower the pivot *Acceleration* first.

@@ -188,11 +188,14 @@ public final class Constants {
 		// measured from the top of the base-stage 2x1 to the bottom of the
 		// carriage 2x1, with the middle stage between them. On its hard stop
 		// the carriage does NOT sit at 0 in that frame: five tape tests put
-		// it ~0.875 in above the reference (see the travel-ratio note). The
-		// encoder is therefore referenced TO this value, not zeroed, every
-		// time the carriage is at its hard stop, so a commanded 20 in lands
-		// the tape at 20 in. Default of the "Elevator - Height At Hard Stop"
-		// tunable; measure it directly (tape at rest) to confirm. The
+		// it ~0.875 in above the reference (see the travel-ratio note), and
+		// the CAD (Leviathan STEP, everything on its hard stops) puts it at
+		// exactly 1.000 in - the base stage's bottom cross tube tops out at
+		// Y 5.875, the middle stage's 1 in tube sits on it, and the carriage
+		// tube bottom is at 6.875. Tape at rest settles which. The encoder
+		// is referenced TO this value, not zeroed, every time the carriage
+		// is at its hard stop, so a commanded 20 in lands the tape at 20 in.
+		// Default of the "Elevator - Height At Hard Stop" tunable. The
 		// reverse soft limit is this height; presets of 0 clamp to it.
 		public static final double ELEVATOR_ZERO_HEIGHT = 0.875;
 		public static final double ELEVATOR_MAX_POSITION = 53.0; // Forward soft limit
@@ -629,10 +632,22 @@ public final class Constants {
 			// side view with west = rearward, north = up) so the coral
 			// station tag stays in frame when the rear bumpers are flush.
 			new CameraPose(-14.0 * 0.0254, 0.0, 29.625 * 0.0254, 0.0, 50.0, 180.0, true),
-			// barge (front): PLACEHOLDER - measure and set measured = true
+			// barge: PLACEHOLDER - the CAD has its 1x1 mount (front-left,
+			// ~40.6 in up, 13.4 in forward) but no camera body in it, so
+			// there is nothing to derive a pose from. Measure and set
+			// measured = true.
 			new CameraPose(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false),
-			// reef (front): PLACEHOLDER - measure and set measured = true
-			new CameraPose(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false),
+			// reef (front-left, base stage): FROM THE CAD (Leviathan STEP,
+			// lens-barrel cylinder of the LL3G model in the "2x1
+			// Perpendicular Angled Limelight Mount"): lens 11.04 in forward
+			// of center, 11.25 in LEFT of center (negative in Limelight's
+			// Y-right convention), 15.78 in above the floor; optical axis
+			// pitched 20 deg DOWN and yawed 30 deg toward the robot's
+			// centerline (to the right). VERIFY in the camera web UI 3D
+			// preview (http://limelight-reef.local:5801): the model should
+			// sit front-left, looking forward-right and down; if it looks
+			// left instead, flip the yaw sign.
+			new CameraPose(11.04 * 0.0254, -11.25 * 0.0254, 15.78 * 0.0254, 0.0, -20.0, -30.0, true),
 		};
 
 		// --- Tag Classes (2025 Reefscape field) ---

@@ -47,7 +47,7 @@ public final class Constants {
 
 		// --- Motor Inversion ---
 		public static final boolean ELEVATOR_LEFT_INVERTED = false;      // True if positive output should be flipped (positive must move the carriage UP)
-		public static final boolean ELEVATOR_RIGHT_OPPOSES_LEFT = false; // True if the right motor spins opposite the left
+		public static final boolean ELEVATOR_RIGHT_OPPOSES_LEFT = true; // True if the right motor spins opposite the left
 
 		// --- Current Limits (amps) ---
 		public static final int ELEVATOR_CURRENT_LIMIT = 50; // Spark MAX smart current limit per NEO
@@ -68,14 +68,30 @@ public final class Constants {
 		// the chain advance.
 		public static final double ELEVATOR_CASCADE_RATIO = 2.0;
 
-		// Carriage travel (inches) per MOTOR rotation:
-		// 5.5 x 2 / 45 = ~0.244. Applied as the Spark MAX position
-		// conversion factor so all heights are in inches.
-		public static final double ELEVATOR_INCHES_PER_ROTATION =
+		// Carriage travel (inches) per MOTOR rotation predicted by the
+		// gearing alone: 5.5 x 2 / 45 = ~0.244.
+		public static final double ELEVATOR_MODELED_INCHES_PER_ROTATION =
 			ELEVATOR_SPROCKET_CIRCUMFERENCE * ELEVATOR_CASCADE_RATIO / ELEVATOR_GEAR_RATIO;
 
+		// MEASURED correction (Sept 2026): a commanded 2.00 in move traveled
+		// ~2.75 in, so the real travel per rotation is 1.375x the model - the
+		// chain path has a larger effective circumference than the sprocket's
+		// pitch circle (consistent with the chain riding over the middle-stage
+		// 2x1 tubing rather than the bare sprocket). The code only needs the
+		// measured ratio, not the exact geometry.
+		// VERIFY / REFINE: re-measure over a LONG move (command 20 in, tape
+		// the carriage, ratio = measured / 20) - a 2 in move has ~5% tape
+		// error, a 20 in move ~0.5%.
+		public static final double ELEVATOR_MEASURED_TRAVEL_RATIO = 2.75 / 2.0;
+
+		// Carriage travel (inches) per MOTOR rotation actually applied as the
+		// Spark MAX position conversion factor (~0.336) so all heights are in
+		// inches.
+		public static final double ELEVATOR_INCHES_PER_ROTATION =
+			ELEVATOR_MODELED_INCHES_PER_ROTATION * ELEVATOR_MEASURED_TRAVEL_RATIO;
+
 		// --- MAXMotion Profile (inches, seconds) ---
-		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.244 = ~23 in/s
+		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.336 = ~32 in/s
 		// theoretical top speed. Cruise stays well below that so the profile
 		// remains achievable under load.
 		// FIRST-POWER-ON VALUES: deliberately gentle (full 53 in of travel in
@@ -94,18 +110,19 @@ public final class Constants {
 		//   2. Raise kG until the carriage just holds its height at rest.
 		//   3. Command a preset and raise kP until tracking is crisp;
 		//      add kD only if it oscillates.
-		// kP sanity: 0.4 duty/inch is ~0.1 duty per motor rotation (1 in =
-		// 4.1 rotations), which is REV's own MAXMotion starting gain scaled to
-		// this mechanism's units - the loop only has to track the profiled
-		// setpoint (kV/kG carry the motion), so this is firm without ringing.
+		// kP sanity: 0.3 duty/inch is ~0.1 duty per motor rotation (1 in =
+		// 3.0 rotations with the measured conversion), which is REV's own
+		// MAXMotion starting gain scaled to this mechanism's units - the loop
+		// only has to track the profiled setpoint (kV/kG carry the motion),
+		// so this is firm without ringing.
 		// Symptoms: sluggish settle -> raise kP; buzz/hunt at rest -> lower.
-		public static final double ELEVATOR_kP = 0.4; // Duty cycle per inch of position error
+		public static final double ELEVATOR_kP = 0.3; // Duty cycle per inch of position error
 		public static final double ELEVATOR_kI = 0.0; // Leave 0 - kG handles gravity sag
 		public static final double ELEVATOR_kD = 0.0; // Duty cycle per in/s of error derivative
 
 		// --- On-Controller Feedforward (volts; REVLib FeedForwardConfig) ---
 		public static final double ELEVATOR_kS = 0.0;  // Volts to overcome static friction (TUNE: raise until motion starts)
-		public static final double ELEVATOR_kV = 0.52; // Volts per in/s of profile velocity (12 V / 23 in/s free speed)
+		public static final double ELEVATOR_kV = 0.38; // Volts per in/s of profile velocity (12 V / 32 in/s free speed)
 		public static final double ELEVATOR_kG = 0.35; // Volts to hold the carriage against gravity (TUNE step 2)
 
 		// --- Voltage Compensation ---

@@ -64,9 +64,13 @@ public class Elevator extends SubsystemBase {
     // physics model exists purely so the mechanism moves in the sim GUI /
     // AdvantageScope; the values below affect simulation fidelity only.
     // ------------------------------------------------------------------
-    // Carriage travels 11 in per drum rotation (5.5 in of chain x2 cascade),
-    // modeled as an effective drum radius of 11 in / (2*pi).
-    private static final double SIM_DRUM_RADIUS_METERS = Units.inchesToMeters(11.0) / (2.0 * Math.PI);
+    // Effective drum radius derived from the SAME conversion the real
+    // controller uses (carriage inches per motor rotation x gear ratio =
+    // inches per drum rotation), so the sim can never drift from the
+    // measured mechanism scaling.
+    private static final double SIM_DRUM_RADIUS_METERS = Units.inchesToMeters(
+        ElevatorConstants.ELEVATOR_INCHES_PER_ROTATION * ElevatorConstants.ELEVATOR_GEAR_RATIO)
+        / (2.0 * Math.PI);
     private static final double SIM_CARRIAGE_MASS_KG = 6.0; // Estimate - affects sim only
     private SparkMaxSim leftMotorSim;
     private ElevatorSim elevatorSim;

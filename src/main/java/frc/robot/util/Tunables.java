@@ -79,8 +79,11 @@ public final class Tunables {
      *      new "Height At Hard Stop" 0.875 in
      *   4: match-pace profiles - elevator 18 in/s, 120 in/s^2; new pivot
      *      profile tunables 240 deg/s, 480 deg/s^2, jerk 4800 deg/s^3
+     *   5: elevator 20 in/s, 200 in/s^2 (gearing ceiling); pivot softened
+     *      to 200 / 300 / 2000 for chain backlash; L4 arm arrival -0.6 s
+     *      (was hitting the bar), L3 +0.8 s
      */
-    private static final int DEFAULTS_VERSION = 4;
+    private static final int DEFAULTS_VERSION = 5;
 
     /**
      * Seeds every key with its Constants default if it does not exist yet

@@ -102,26 +102,30 @@ public final class Constants {
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.244 = ~23 in/s
 		// theoretical top speed. Cruise stays below that so the profile
 		// remains achievable under load.
-		// Match-pace profile. 18 in/s is ~80% of the NEO's free speed
-		// through 45:1 and needs ~10 V at cruise (kV 0.52 x 18 plus kS/kG),
-		// which is the practical ceiling on this gearing: a higher cruise
-		// leaves the position loop nothing to work with once the battery
-		// sags, and MAXMotion just runs as fast as it can instead. Full
-		// travel takes ~3.0 s (cruise reached in 0.15 s over 1.4 in). The
-		// acceleration is not torque-limited (120 in/s^2 costs ~0.3 V of
+		// Match-pace profile, at the ceiling of this gearing. 20 in/s is
+		// ~87% of the NEO's free speed through 45:1 and needs ~11 V at
+		// cruise (kV 0.52 x 20 plus kS/kG) - about all a 12 V-compensated
+		// output has. Above this the feedforward saturates, the position
+		// loop has nothing left, and MAXMotion simply runs as fast as the
+		// motors can (it regenerates the profile from wherever the carriage
+		// actually is, so it is not unsafe - just no faster). Full travel
+		// takes ~2.7 s (cruise reached in 0.1 s over 1 in). The
+		// acceleration is not torque-limited (200 in/s^2 costs ~0.5 V of
 		// motor effort against the reflected inertia); it is a comfort limit
 		// on the chain and the arm riding on the carriage.
-		// Cycle-time note: a materially faster elevator on this drivetrain
-		// means a shorter gearbox (5x5 = 25:1 or 3x3x3 = 27:1 cartridges),
-		// which nearly doubles the speed ceiling - the code needs only the
-		// ELEVATOR_GEAR_RATIO change.
+		// Cycle-time note: a materially faster elevator means a shorter
+		// gearbox. Dropping one 3:1 cartridge (5x3 = 15:1) triples the
+		// speed ceiling (~69 in/s free, ~50 in/s cruise, full travel ~1.2 s)
+		// with ~8x force margin left at the 50 A limit; the code needs only
+		// ELEVATOR_GEAR_RATIO changed (kV derives from it) plus a kP/kG
+		// retune on the Testing tab. See the README ("Faster elevator").
 		// The profile always decelerates INTO the setpoint, so the carriage
 		// settles rather than hitting the target. Adjust on the Testing tab
 		// ("Elevator - Cruise Velocity" / "Max Acceleration"); the
 		// Superstructure handoff heights follow the live values, so re-check
 		// the Handoffs readout after a change.
-		public static final double ELEVATOR_MAX_VELOCITY = 18.0;      // Cruise velocity (in/s)
-		public static final double ELEVATOR_MAX_ACCELERATION = 120.0; // Acceleration (in/s^2)
+		public static final double ELEVATOR_MAX_VELOCITY = 20.0;      // Cruise velocity (in/s)
+		public static final double ELEVATOR_MAX_ACCELERATION = 200.0; // Acceleration (in/s^2)
 		// How far the carriage may stray from the MAXMotion profile before
 		// the controller regenerates the profile from the current position
 		// and velocity. NOT a settling tolerance. REV's starting point is
@@ -269,28 +273,36 @@ public final class Constants {
 			(58.0 / 10.0) * (58.0 / 18.0) * (42.0 / 12.0);
 
 		// --- Motion Magic Profile (degrees, seconds; converted to mechanism rotations in the subsystem) ---
-		// Match-pace profile - DEFAULTS for the live tunables "Pivot - Cruise
-		// Velocity" / "Acceleration" / "Jerk" (Testing tab), re-applied to
-		// the TalonFX the next time the robot is disabled. The 60 deg/s
-		// first-power-on profile tracked cleanly, so the arm now moves at a
-		// rate that matters for cycle time:
-		//   - 240 deg/s is 44% of the Kraken's free speed through 65.41:1
-		//     (100 rotor rps / 65.41 = 1.53 rot/s = 550 deg/s), so kV needs
-		//     ~5.2 V at cruise and kP keeps plenty of headroom.
-		//   - 480 deg/s^2 makes the common 90-degree BASE<->RAISE swing a
-		//     ~0.9 s triangle (peak ~210 deg/s) and the 45-degree L4
-		//     rotation ~0.6 s; at the rollers (~0.3 m) that is ~0.5 g of
-		//     centripetal load on a held coral. If a coral slips during a
-		//     swing, lower the ACCELERATION first (it sets the peak
-		//     tangential force), then cruise.
-		//   - The jerk limit is 10x the acceleration (0.1 s to reach full
-		//     accel), so the arm still eases into and out of every move
-		//     instead of snapping.
+		// DEFAULTS for the live tunables "Pivot - Cruise Velocity" /
+		// "Acceleration" / "Jerk" (Testing tab), re-applied to the TalonFX
+		// the next time the robot is disabled.
+		//
+		// CHAIN-BACKLASH PROFILE (Sept 2026): the pivot chain currently has
+		// slack and backlash, so at the end of a fast move the arm coasts
+		// through the slop and the chain catches it - the whole assembly
+		// gets thrown around. Motion Magic decelerates at the same rate it
+		// accelerates, so the ACCELERATION sets how hard that catch is, and
+		// the JERK limit sets how abruptly the deceleration begins. These
+		// values keep the arm ~2x faster than the first-power-on profile
+		// (90-degree swing ~1.2 s instead of 2.1 s, the 45-degree L4
+		// rotation ~0.9 s) while easing into every stop:
+		//   - 200 deg/s is 36% of the Kraken's free speed through 65.41:1
+		//     (100 rotor rps / 65.41 = 1.53 rot/s = 550 deg/s): ~4.4 V of
+		//     kV at cruise, plenty of headroom for kP.
+		//   - 300 deg/s^2: 37% less peak force at the chain catch than the
+		//     480 the mechanism can otherwise handle.
+		//   - 2000 deg/s^3: ~0.15 s to reach full deceleration, so the stop
+		//     ramps in instead of snapping.
+		// WHEN THE CHAIN IS FIXED (no slop): 240 / 480 / 4800 tracked
+		// cleanly and is the match-pace target - set it on the Testing tab,
+		// then move these defaults. If a held coral slips during a swing,
+		// lower the ACCELERATION first (it sets the peak tangential force),
+		// then cruise.
 		// The Superstructure handoff heights follow the live values - re-check
 		// the Handoffs readout after a change.
-		public static final double CORAL_PIVOT_MAX_VELOCITY = 240.0;     // Cruise velocity (deg/s)
-		public static final double CORAL_PIVOT_MAX_ACCELERATION = 480.0; // Acceleration (deg/s^2)
-		public static final double CORAL_PIVOT_MAX_JERK = 4800.0;        // Jerk limit (deg/s^3); ~10x accel = ~0.1 s to reach full accel
+		public static final double CORAL_PIVOT_MAX_VELOCITY = 200.0;     // Cruise velocity (deg/s)
+		public static final double CORAL_PIVOT_MAX_ACCELERATION = 300.0; // Acceleration (deg/s^2)
+		public static final double CORAL_PIVOT_MAX_JERK = 2000.0;        // Jerk limit (deg/s^3); ~0.15 s to reach full accel
 
 		// --- Closed-Loop Gains (Phoenix 6 slot 0; voltage-based, error in mechanism rotations) ---
 		// TUNE - starting points for first power-on:
@@ -357,7 +369,10 @@ public final class Constants {
 			BASE(0.0),          // Coral intake position
 			RAISE(90.0),        // Safe travel / algae hold position
 			CORAL_L1(100.0),
-			CORAL_L2(5.0),
+			// L2 scores at 10 rather than the geometric 5: the pivot chain
+			// currently has backlash, so the arm sags a few degrees past
+			// where the rotor thinks it is. Revisit when the chain is fixed.
+			CORAL_L2(10.0),
 			CORAL_L3(22.5),
 			CORAL_L4(45.0),
 			// NOTE: intentionally equal to the forward soft limit (the
@@ -436,22 +451,23 @@ public final class Constants {
 		// The one tunable per pose is the RELATIONSHIP between the two
 		// arrivals: how many seconds after the elevator settles the arm
 		// finishes its rotation (negative = the arm finishes early).
-		//   L4: 0.0 s -> the arm finishes its 90->45 rotation as the elevator
-		//       settles at 52.5 in (that rotation is only known clear at full
-		//       height, so it may not finish early). With the match-pace
-		//       profiles (elevator 18 in/s, pivot 240 deg/s) the ~0.7 s
-		//       rotation starts at ~41 in. Go negative only after L4 has
-		//       been watched: every -0.1 s finishes the arm ~1.8 in lower.
-		//   L3: +1.15 s -> the arm's 90->22.5 swing (~0.85 s) is shorter
-		//       than the offset, so the rotation starts just before the
-		//       elevator arrives (~28.5 in) and happens as it settles at
-		//       29 in - the mechanism sweeps in behind the tube rather than
-		//       into it. PREDICTED - first test at low speed with a hand on
-		//       the disable switch.
+		//   L4: -0.6 s -> the arm finishes its 90->45 rotation well BEFORE
+		//       the elevator arrives. Finishing at the top (offset 0) hit
+		//       the reef bar on the robot: the arm must already be at 45 deg
+		//       when the coral passes the L4 pipe. With the shipped profiles
+		//       (elevator 20 in/s / 200 in/s^2, pivot 200 deg/s / 300
+		//       deg/s^2) the ~0.9 s rotation starts at ~23.5 in and is done
+		//       at ~41.5 in, 11 in below L4. Every -0.1 s moves both ends
+		//       ~2 in earlier; if it still clips the bar, go more negative.
+		//   L3: +0.8 s -> the arm's 90->22.5 swing (~1.05 s) starts ~4 in
+		//       before the elevator arrives (~25 in) and mostly happens as
+		//       it settles at 29 in, so the mechanism sweeps in behind the
+		//       tube rather than into it (was +1.15, which waited until
+		//       ~28.5 in; the robot showed it could start earlier).
 		// Both are editable live ("Superstructure - L3/L4 Arm Arrival
 		// Offset (s)"); the resolved heights show on the Testing tab.
-		public static final double L4_ARM_ARRIVAL_OFFSET_SECONDS = 0.0;
-		public static final double L3_ARM_ARRIVAL_OFFSET_SECONDS = 1.15;
+		public static final double L4_ARM_ARRIVAL_OFFSET_SECONDS = -0.6;
+		public static final double L3_ARM_ARRIVAL_OFFSET_SECONDS = 0.8;
 
 		// Derived handoffs are clamped to start no lower than this far above
 		// the low-box roof (never inside the tube contact zone) ...

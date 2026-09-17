@@ -14,6 +14,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 
 import frc.robot.util.Elastic;
+import frc.robot.util.Tunables;
 
 /**
  * The main robot class, called by WPILib at the appropriate times for each
@@ -60,6 +61,12 @@ public class Robot extends LoggedRobot {
 		// to fetch deploy/elastic-layout.json via File -> "Load Layout From
 		// Robot", so every drive station computer gets the same dashboard.
 		WebServer.start(5800, Filesystem.getDeployDirectory().getPath());
+
+		// Seed the dashboard-editable tunables (vision distances, elevator
+		// calibration/gains, handoff timing) with their Constants defaults
+		// if not already stored on the roboRIO - BEFORE the subsystems are
+		// built, since the Elevator configures its controllers from them.
+		Tunables.init();
 
 		m_robotContainer = new RobotContainer();
 

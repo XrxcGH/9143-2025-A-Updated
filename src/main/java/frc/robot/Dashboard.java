@@ -139,6 +139,14 @@ public class Dashboard {
     private final Alert lowBatteryAlert = new Alert(
         "Battery resting voltage is low - swap the battery before the next match.",
         AlertType.kWarning);
+    private final Alert elevatorBelowZeroAlert = new Alert(
+        "Elevator reads below zero - it was zeroed with the carriage raised. Lower it to the hard "
+            + "stop and press Zero Elevator, or every height will land high.",
+        AlertType.kWarning);
+    private final Alert elevatorRatioPendingAlert = new Alert(
+        "New elevator travel ratio not applied yet - lower the carriage to its base and disable; "
+            + "it applies and re-zeros there automatically.",
+        AlertType.kInfo);
 
     /** Tracks the through bore state so a disconnect fires one toast, not a stream. */
     private boolean throughBoreWasConnected = true;
@@ -329,6 +337,8 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Right Current", elevator.getRightCurrent());
         SmartDashboard.putNumber("Elevator/Left Output", elevator.getLeftOutput());
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
+        // Ratio in effect on the controllers (the tunable may still be pending)
+        SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());
 
         // --- CorAl ---
         SmartDashboard.putNumber("CorAl/Angle", coral.getPivotAngle());
@@ -381,6 +391,8 @@ public class Dashboard {
         boolean throughBoreConnected = coral.isThroughBoreConnected();
         throughBoreAlert.set(!throughBoreConnected);
         elevatorSyncAlert.set(!elevator.sidesInSync());
+        elevatorBelowZeroAlert.set(elevator.readsBelowZero());
+        elevatorRatioPendingAlert.set(elevator.isTravelRatioChangePending());
         coralFeedbackAlert.set(throughBoreConnected && !coral.isMotorFeedbackValid());
         // Resting-voltage check only while disabled - voltage sags under
         // load during a match are normal and would nag the drive team.

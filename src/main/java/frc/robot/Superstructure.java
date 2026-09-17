@@ -8,7 +8,6 @@ import edu.wpi.first.wpilibj2.command.Commands;
 
 import frc.robot.Constants.CorAlConstants;
 import frc.robot.Constants.CorAlConstants.PivotPresetAngles;
-import frc.robot.Constants.ElevatorConstants;
 import frc.robot.Constants.ElevatorConstants.PresetHeights;
 import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.subsystems.CorAl;
@@ -185,8 +184,10 @@ public class Superstructure {
      */
     public double handoffHeight(double targetHeight, double targetAngle, double arrivalOffsetSeconds) {
         double elevatorTimeToGoAtStart = armSwingSeconds(targetAngle) - arrivalOffsetSeconds;
+        // Live profile values, so a Testing-tab retune of the elevator's
+        // cruise/acceleration moves the handoffs with it.
         double climbDuringSwing = distanceBeforeStop(elevatorTimeToGoAtStart,
-            ElevatorConstants.ELEVATOR_MAX_VELOCITY, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
+            elevator.cruiseVelocity(), elevator.maxAcceleration());
         double handoff = targetHeight - climbDuringSwing;
         double floor = SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
             + SuperstructureConstants.HANDOFF_MIN_ABOVE_LOW_BOX;

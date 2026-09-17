@@ -163,10 +163,8 @@ public class RobotContainer {
         // (L1 standoff vs. flush scoring vs. algae) - wire that in.
         swerve.getVision().setGoalSupplier(superstructure::getGoal);
 
-        // Seed the dashboard-editable tunables (vision distances, handoff
-        // heights, ...) with their Constants defaults if not already stored
-        // on the roboRIO.
-        Tunables.init();
+        // (Tunables.init() runs in Robot before this container is built, so
+        // the subsystems above were configured from the stored values.)
 
         // All Elastic/NetworkTables publishing is centralized here.
         dashboard = new Dashboard(swerve, elevator, coral, leds, superstructure);

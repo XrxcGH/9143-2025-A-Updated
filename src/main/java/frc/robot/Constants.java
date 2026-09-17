@@ -73,57 +73,94 @@ public final class Constants {
 		public static final double ELEVATOR_MODELED_INCHES_PER_ROTATION =
 			ELEVATOR_SPROCKET_CIRCUMFERENCE * ELEVATOR_CASCADE_RATIO / ELEVATOR_GEAR_RATIO;
 
-		// MEASURED correction (Sept 2026): a commanded 2.00 in move traveled
-		// ~2.75 in, so the real travel per rotation is 1.375x the model - the
-		// chain path has a larger effective circumference than the sprocket's
-		// pitch circle (consistent with the chain riding over the middle-stage
-		// 2x1 tubing rather than the bare sprocket). The code only needs the
-		// measured ratio, not the exact geometry.
-		// VERIFY / REFINE: re-measure over a LONG move (command 20 in, tape
-		// the carriage, ratio = measured / 20) - a 2 in move has ~5% tape
-		// error, a 20 in move ~0.5%.
-		public static final double ELEVATOR_MEASURED_TRAVEL_RATIO = 2.75 / 2.0;
+		// MEASURED correction, applied on top of the model. This is the
+		// factory default of the "Elevator - Travel Ratio" tunable; the value
+		// actually applied to the Spark MAX is the live tunable (see
+		// Elevator.inchesPerRotation()), calibrated on the robot with a tape
+		// measure (README: "Calibrating the elevator height").
+		//
+		// The two on-robot tests so far DISAGREE:
+		//   1. 2.00 in commanded -> ~2.75 in traveled at ratio 1.0
+		//      (implies 1.375; a rough reading).
+		//   2. 6.00 in commanded -> 5.125 in traveled at ratio 1.375
+		//      (implies 1.375 x 5.125 / 6 = ~1.17).
+		// Both readings ALSO fit "ratio 1.0 plus a constant ~0.74 in": the
+		// gearing model being right, with both moves starting from a carriage
+		// ~3/4 in BELOW the encoder's zero (zeroed with the carriage raised,
+		// then dropped to the hard stop). The default trusts the longer, more
+		// precise 6 in reading; the README procedure (zero at the hard stop,
+		// confirm the dashboard reads 0.0, then a 20 in move) separates the
+		// two cases in one test.
+		public static final double ELEVATOR_MEASURED_TRAVEL_RATIO = (2.75 / 2.0) * (5.125 / 6.0);
 
-		// Carriage travel (inches) per MOTOR rotation actually applied as the
-		// Spark MAX position conversion factor (~0.336) so all heights are in
-		// inches.
+		// Default carriage travel (inches) per MOTOR rotation (~0.287): the
+		// model times the default ratio. Anything that needs the LIVE value
+		// asks the Elevator (inchesPerRotation()).
 		public static final double ELEVATOR_INCHES_PER_ROTATION =
 			ELEVATOR_MODELED_INCHES_PER_ROTATION * ELEVATOR_MEASURED_TRAVEL_RATIO;
 
-		// --- MAXMotion Profile (inches, seconds) ---
-		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.336 = ~32 in/s
+		// --- MAXMotion Profile (inches, seconds) - tunable defaults ---
+		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.287 = ~27 in/s
 		// theoretical top speed. Cruise stays well below that so the profile
 		// remains achievable under load.
 		// FIRST-POWER-ON VALUES: deliberately gentle (full 53 in of travel in
 		// ~7 s, cruise reached in 0.33 s) so nothing slams while the gains are
 		// being tuned. The profile always decelerates INTO the setpoint, so the
 		// carriage settles rather than hitting the target. Once holding and
-		// tracking are clean, raise toward 16 in/s and 60 in/s^2.
+		// tracking are clean, raise toward 16 in/s and 60 in/s^2 on the
+		// Testing tab ("Elevator - Cruise Velocity" / "Max Acceleration");
+		// the Superstructure handoff heights follow the live values.
 		public static final double ELEVATOR_MAX_VELOCITY = 8.0;      // Cruise velocity (in/s)
 		public static final double ELEVATOR_MAX_ACCELERATION = 24.0; // Acceleration (in/s^2)
+		// How far the carriage may stray from the MAXMotion profile before
+		// the controller regenerates the profile from the current position
+		// and velocity. NOT a settling tolerance. REV's starting point is
+		// about one motor rotation, which is ~0.3 in here.
+		public static final double ELEVATOR_ALLOWED_PROFILE_ERROR = 0.3;
 
-		// --- Closed-Loop PID Gains (Spark MAX slot 0; error in inches) ---
+		// --- Closed-Loop Gains (Spark MAX slot 0; error in inches) - tunable defaults ---
+		// kP, kS, the kV scale, kG, and the profile above are all editable on
+		// the Testing tab and re-applied to both controllers the next time
+		// the robot is disabled - no redeploy, no REV Hardware Client.
 		// TUNE - first power-on procedure:
-		//   1. Sanity-check the height reading against a tape measure (the
-		//      conversion is derived from real gearing, but confirm the
-		//      90-degree gearbox is 1:1 and rigging doesn't multiply travel).
+		//   1. Calibrate the height reading against a tape measure (README:
+		//      "Calibrating the elevator height").
 		//   2. Raise kG until the carriage just holds its height at rest.
 		//   3. Command a preset and raise kP until tracking is crisp;
 		//      add kD only if it oscillates.
-		// kP sanity: 0.3 duty/inch is ~0.1 duty per motor rotation (1 in =
-		// 3.0 rotations with the measured conversion), which is REV's own
-		// MAXMotion starting gain scaled to this mechanism's units - the loop
-		// only has to track the profiled setpoint (kV/kG carry the motion),
-		// so this is firm without ringing.
-		// Symptoms: sluggish settle -> raise kP; buzz/hunt at rest -> lower.
+		// kP sanity: REV's MAXMotion starting point is 0.01 duty per motor
+		// ROTATION; one inch is ~3.5 rotations, so that is ~0.035 duty/in
+		// and 0.3 is ~8x it. The loop only tracks the profiled setpoint
+		// (kV/kG carry the motion), and the NEO's back-EMF damping through
+		// 45:1 keeps a P-only loop overdamped, so 0.3 is firm without
+		// ringing; its job is to shrink the friction-induced rest error
+		// (rest error = friction volts / (12 x kP) inches).
+		// Symptoms: rests short of target -> raise kP or kS; buzz/hunt at
+		// rest -> lower kP; overshoots -> lower the kV scale, then kS (REV).
 		public static final double ELEVATOR_kP = 0.3; // Duty cycle per inch of position error
 		public static final double ELEVATOR_kI = 0.0; // Leave 0 - kG handles gravity sag
 		public static final double ELEVATOR_kD = 0.0; // Duty cycle per in/s of error derivative
 
 		// --- On-Controller Feedforward (volts; REVLib FeedForwardConfig) ---
-		public static final double ELEVATOR_kS = 0.0;  // Volts to overcome static friction (TUNE: raise until motion starts)
-		public static final double ELEVATOR_kV = 0.38; // Volts per in/s of profile velocity (12 V / 32 in/s free speed)
-		public static final double ELEVATOR_kG = 0.35; // Volts to hold the carriage against gravity (TUNE step 2)
+		// kS: REV's procedure - the largest voltage that does NOT move the
+		// carriage (TUNE: raise until motion just starts, then back off).
+		public static final double ELEVATOR_kS = 0.0;
+		// kV is NOT a stored constant. It is the NEO back-EMF model,
+		// 12 V / (free speed in in/s), and free speed in inches depends on
+		// the travel ratio - so the Elevator derives it from the live ratio
+		// (modelKv: ~0.44 V per in/s at the 0.287 default). The kV scale
+		// multiplies that model (REV: overshoot -> reduce kV).
+		public static final double NEO_FREE_SPEED_RPM = 5676.0;
+		public static final double ELEVATOR_kV_SCALE = 1.0;
+		// kG: carriage + arm weight through the 2:1 cascade and 45:1 works
+		// out to ~0.2-0.3 V per motor; 0.35 holds with margin for gearbox
+		// drag (TUNE step 2).
+		public static final double ELEVATOR_kG = 0.35;
+
+		/** NEO back-EMF velocity feedforward (volts per in/s) for a given carriage travel per motor rotation. */
+		public static double modelKv(double inchesPerRotation) {
+			return ELEVATOR_NOMINAL_VOLTAGE / (NEO_FREE_SPEED_RPM / 60.0 * inchesPerRotation);
+		}
 
 		// --- Voltage Compensation ---
 		public static final double ELEVATOR_NOMINAL_VOLTAGE = 12.0; // Volts; keeps response consistent as the battery sags
@@ -138,6 +175,14 @@ public final class Constants {
 
 		// --- Tolerances (inches) ---
 		public static final double ELEVATOR_ALLOWED_ERROR = 0.1; // "At target" threshold
+		// The encoder must read within this of zero for a travel-ratio edit
+		// to be applied: the carriage is then on its hard stop and is
+		// re-zeroed there under the new scale.
+		public static final double ELEVATOR_AT_BASE_TOLERANCE = 0.5;
+		// A reading below this means the encoder was zeroed with the carriage
+		// raised and it has since dropped to the hard stop - every commanded
+		// height would land that much high. The Dashboard alerts to re-zero.
+		public static final double ELEVATOR_BELOW_ZERO_ALERT = -0.25;
 
 		// --- Manual Control (unitless stick values) ---
 		public static final double ELEVATOR_MANUAL_CONTROL_DEADBAND = 0.2; // Stick deadband

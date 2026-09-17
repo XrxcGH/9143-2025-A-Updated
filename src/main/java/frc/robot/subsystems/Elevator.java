@@ -14,17 +14,20 @@ import com.revrobotics.spark.config.SparkMaxConfig;
 
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.simulation.ElevatorSim;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.Constants.ElevatorConstants;
+import frc.robot.util.Tunables;
 
 /**
  * Elevator subsystem driven by two NEO brushless motors on Spark MAX
  * controllers, each through a 45:1 MAXPlanetary reduction (5:1 x 3:1 x 3:1
- * cartridges) to the winch drum.
+ * cartridges) and a 90-degree gearbox to the 22T sprocket shaft.
  *
  * Control architecture:
  *  - The left Spark MAX is the leader; the right is configured as a hardware
@@ -32,12 +35,22 @@ import frc.robot.Constants.ElevatorConstants;
  *    fight each other.
  *  - The encoder conversion factors scale the NEO's integrated encoder so
  *    every position is in inches and every velocity in inches per second.
+ *    The inches-per-rotation figure is the gearing model times the
+ *    "Elevator - Travel Ratio" tunable, which is calibrated on the robot
+ *    with a tape measure (README: "Calibrating the elevator height").
  *  - Height moves use MAXMotion (trapezoidal profiling on the controller)
- *    with a constant gravity feedforward (kG) passed as arbitrary
- *    feedforward voltage, so the carriage tracks smoothly and holds its
- *    height at rest and when the operator releases the stick.
+ *    with on-controller kS/kV/kG feedforward, so the carriage tracks
+ *    smoothly and holds its height at rest and when the operator releases
+ *    the stick.
  *  - Soft limits on the controller bound travel in every control mode, and
  *    voltage compensation keeps response consistent as the battery sags.
+ *
+ * Live tuning: the travel ratio, gains, feedforward, and profile limits are
+ * Preferences-backed tunables (Testing tab). {@link #periodic()} re-applies
+ * an edit to both controllers the next time the robot is disabled, so the
+ * elevator is calibrated and tuned without a redeploy or the REV Hardware
+ * Client. A travel-ratio edit additionally waits for the carriage to be at
+ * its base, because it rescales the encoder; it is then re-zeroed there.
  *
  * Dashboard note: this subsystem publishes nothing itself. All telemetry is
  * read through the public getters by the central {@link frc.robot.Dashboard}
@@ -60,17 +73,28 @@ public class Elevator extends SubsystemBase {
     private boolean positionControlEnabled = false;
 
     // ------------------------------------------------------------------
+    // Live-tunable configuration (Testing tab -> Tunables widget), as last
+    // applied to the controllers. See periodic().
+    // ------------------------------------------------------------------
+    private double appliedTravelRatio;
+    private double appliedKp;
+    private double appliedKs;
+    private double appliedKvScale;
+    private double appliedKg;
+    private double appliedCruiseVelocity;
+    private double appliedMaxAcceleration;
+    private double appliedProfileError;
+    /** True while an edited travel ratio is waiting for the carriage to be at its base. */
+    private boolean travelRatioChangePending = false;
+    /** Paces the tunable poll so eight Preferences reads do not run every loop. */
+    private final Timer tunablePollTimer = new Timer();
+    private static final double TUNABLE_POLL_SECONDS = 0.5;
+
+    // ------------------------------------------------------------------
     // Desktop simulation (only constructed when running off-robot). The
     // physics model exists purely so the mechanism moves in the sim GUI /
     // AdvantageScope; the values below affect simulation fidelity only.
     // ------------------------------------------------------------------
-    // Effective drum radius derived from the SAME conversion the real
-    // controller uses (carriage inches per motor rotation x gear ratio =
-    // inches per drum rotation), so the sim can never drift from the
-    // measured mechanism scaling.
-    private static final double SIM_DRUM_RADIUS_METERS = Units.inchesToMeters(
-        ElevatorConstants.ELEVATOR_INCHES_PER_ROTATION * ElevatorConstants.ELEVATOR_GEAR_RATIO)
-        / (2.0 * Math.PI);
     private static final double SIM_CARRIAGE_MASS_KG = 6.0; // Estimate - affects sim only
     private SparkMaxSim leftMotorSim;
     private ElevatorSim elevatorSim;
@@ -79,7 +103,9 @@ public class Elevator extends SubsystemBase {
         leftMotor = new SparkMax(ElevatorConstants.ELEVATOR_LEFT_ID, MotorType.kBrushless);
         rightMotor = new SparkMax(ElevatorConstants.ELEVATOR_RIGHT_ID, MotorType.kBrushless);
 
-        configureMotors();
+        appliedTravelRatio = Tunables.elevatorTravelRatio();
+        readGainTunables();
+        configureMotors(ResetMode.kResetSafeParameters);
 
         leftEncoder = leftMotor.getEncoder();
         rightEncoder = rightMotor.getEncoder();
@@ -88,14 +114,21 @@ public class Elevator extends SubsystemBase {
 
         // Reset encoders on initialization (elevator must start at its base position)
         resetEncoders();
+        tunablePollTimer.start();
 
         if (RobotBase.isSimulation()) {
             leftMotorSim = new SparkMaxSim(leftMotor, DCMotor.getNEO(1));
+            // Effective drum radius derived from the SAME conversion the real
+            // controller uses (carriage inches per motor rotation x gear
+            // ratio = inches per drum rotation), so the sim cannot drift
+            // from the calibrated mechanism scaling.
+            double drumRadiusMeters = Units.inchesToMeters(
+                inchesPerRotation() * ElevatorConstants.ELEVATOR_GEAR_RATIO) / (2.0 * Math.PI);
             elevatorSim = new ElevatorSim(
                 DCMotor.getNEO(2),
                 ElevatorConstants.ELEVATOR_GEAR_RATIO,
                 SIM_CARRIAGE_MASS_KG,
-                SIM_DRUM_RADIUS_METERS,
+                drumRadiusMeters,
                 Units.inchesToMeters(ElevatorConstants.ELEVATOR_MIN_POSITION),
                 Units.inchesToMeters(ElevatorConstants.ELEVATOR_MAX_POSITION),
                 true, // Simulate gravity so kG/holding behavior is visible
@@ -103,12 +136,44 @@ public class Elevator extends SubsystemBase {
         }
     }
 
+    /** Snapshots the gain / feedforward / profile tunables into the applied fields. */
+    private void readGainTunables() {
+        appliedKp = Tunables.elevatorKp();
+        appliedKs = Tunables.elevatorKs();
+        appliedKvScale = Tunables.elevatorKvScale();
+        appliedKg = Tunables.elevatorKg();
+        appliedCruiseVelocity = Tunables.elevatorCruiseVelocity();
+        appliedMaxAcceleration = Tunables.elevatorMaxAcceleration();
+        appliedProfileError = Tunables.elevatorProfileError();
+    }
+
+    /** True if any gain / feedforward / profile tunable differs from what is applied. */
+    private boolean gainTunablesChanged() {
+        return Tunables.elevatorKp() != appliedKp
+            || Tunables.elevatorKs() != appliedKs
+            || Tunables.elevatorKvScale() != appliedKvScale
+            || Tunables.elevatorKg() != appliedKg
+            || Tunables.elevatorCruiseVelocity() != appliedCruiseVelocity
+            || Tunables.elevatorMaxAcceleration() != appliedMaxAcceleration
+            || Tunables.elevatorProfileError() != appliedProfileError;
+    }
+
     /**
-     * Builds and applies the leader and follower configurations. Parameters
-     * are persisted to flash so a brownout or power cycle cannot silently
-     * revert the controllers to factory defaults mid-match.
+     * Builds and applies the leader and follower configurations from the
+     * applied tunables. Parameters are persisted to flash so a brownout or
+     * power cycle cannot silently revert the controllers to factory
+     * defaults mid-match.
+     *
+     * @param resetMode kResetSafeParameters at boot (start from a known
+     *     state); kNoResetSafeParameters for a live re-apply, which only
+     *     touches the parameters in the config.
      */
-    private void configureMotors() {
+    private void configureMotors(ResetMode resetMode) {
+        double inchesPerRotation = inchesPerRotation();
+        // Velocity feedforward is the NEO back-EMF model in the CURRENT
+        // encoder units, so it follows the travel ratio automatically.
+        double kV = ElevatorConstants.modelKv(inchesPerRotation) * appliedKvScale;
+
         // --- Shared base configuration ---
         SparkMaxConfig leaderConfig = new SparkMaxConfig();
 
@@ -121,14 +186,14 @@ public class Elevator extends SubsystemBase {
         // Scale the NEO encoder so position is in inches and velocity is in
         // inches per second (native units are motor rotations and RPM).
         leaderConfig.encoder
-            .positionConversionFactor(ElevatorConstants.ELEVATOR_INCHES_PER_ROTATION)
-            .velocityConversionFactor(ElevatorConstants.ELEVATOR_INCHES_PER_ROTATION / 60.0);
+            .positionConversionFactor(inchesPerRotation)
+            .velocityConversionFactor(inchesPerRotation / 60.0);
 
         // Closed-loop PID gains (slot 0). Error units are inches after the
-        // conversion factors above.
+        // conversion factors above; output is duty cycle.
         leaderConfig.closedLoop
             .feedbackSensor(FeedbackSensor.kPrimaryEncoder)
-            .p(ElevatorConstants.ELEVATOR_kP)
+            .p(appliedKp)
             .i(ElevatorConstants.ELEVATOR_kI)
             .d(ElevatorConstants.ELEVATOR_kD)
             .outputRange(-1, 1);
@@ -138,15 +203,18 @@ public class Elevator extends SubsystemBase {
         // ElevatorFeedforward, evaluated by the Spark MAX every cycle so the
         // carriage tracks the MAXMotion profile and holds height at rest.
         leaderConfig.closedLoop.feedForward
-            .kS(ElevatorConstants.ELEVATOR_kS)
-            .kV(ElevatorConstants.ELEVATOR_kV)
-            .kG(ElevatorConstants.ELEVATOR_kG);
+            .kS(appliedKs)
+            .kV(kV)
+            .kG(appliedKg);
 
-        // MAXMotion profile parameters (inches, inches per second)
+        // MAXMotion profile parameters (inches, inches per second). The
+        // profile error is how far the carriage may stray from the profile
+        // before MAXMotion regenerates it from the current state - it is
+        // not a settling tolerance.
         leaderConfig.closedLoop.maxMotion
-            .cruiseVelocity(ElevatorConstants.ELEVATOR_MAX_VELOCITY)
-            .maxAcceleration(ElevatorConstants.ELEVATOR_MAX_ACCELERATION)
-            .allowedProfileError(ElevatorConstants.ELEVATOR_ALLOWED_ERROR);
+            .cruiseVelocity(appliedCruiseVelocity)
+            .maxAcceleration(appliedMaxAcceleration)
+            .allowedProfileError(appliedProfileError);
 
         // Soft limits (inches) bound travel in every control mode
         leaderConfig.softLimit
@@ -162,8 +230,55 @@ public class Elevator extends SubsystemBase {
         followerConfig.follow(ElevatorConstants.ELEVATOR_LEFT_ID,
             ElevatorConstants.ELEVATOR_RIGHT_OPPOSES_LEFT);
 
-        leftMotor.configure(leaderConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        rightMotor.configure(followerConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        leftMotor.configure(leaderConfig, resetMode, PersistMode.kPersistParameters);
+        rightMotor.configure(followerConfig, resetMode, PersistMode.kPersistParameters);
+    }
+
+    /**
+     * Re-applies edited tunables to the controllers. Only while DISABLED (a
+     * reconfigure mid-move would stutter the mechanism), polled twice a
+     * second. Gains, feedforward, and profile limits apply right away. A
+     * travel-ratio change rescales the encoder, so it is applied only with
+     * the carriage at its base, where the encoders are then re-zeroed
+     * against the hard stop; until then it waits and the Dashboard shows
+     * an alert.
+     */
+    @Override
+    public void periodic() {
+        if (!DriverStation.isDisabled() || !tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)) {
+            return;
+        }
+
+        boolean reconfigure = false;
+        boolean ratioApplied = false;
+
+        double ratio = Tunables.elevatorTravelRatio();
+        if (ratio != appliedTravelRatio) {
+            if (Math.abs(getCurrentPosition()) <= ElevatorConstants.ELEVATOR_AT_BASE_TOLERANCE) {
+                appliedTravelRatio = ratio;
+                travelRatioChangePending = false;
+                ratioApplied = true;
+                reconfigure = true;
+            } else {
+                travelRatioChangePending = true;
+            }
+        } else {
+            travelRatioChangePending = false;
+        }
+
+        if (gainTunablesChanged()) {
+            readGainTunables();
+            reconfigure = true;
+        }
+
+        if (reconfigure) {
+            configureMotors(ResetMode.kNoResetSafeParameters);
+            if (ratioApplied) {
+                // The carriage is on its hard stop: make the new scale's
+                // zero exactly there.
+                resetEncoders();
+            }
+        }
     }
 
     /**
@@ -250,8 +365,47 @@ public class Elevator extends SubsystemBase {
             <= ElevatorConstants.ELEVATOR_ALLOWED_ERROR;
     }
 
+    /**
+     * True when the encoder reads meaningfully below zero: it was zeroed
+     * with the carriage raised and the carriage has since dropped to the
+     * hard stop, so every commanded height would land that much high. The
+     * Dashboard raises an alert; fix by re-zeroing at the hard stop.
+     */
+    public boolean readsBelowZero() {
+        return getCurrentPosition() < ElevatorConstants.ELEVATOR_BELOW_ZERO_ALERT;
+    }
+
     public boolean isInManualMode() {
         return manualModeEnabled;
+    }
+
+    // ------------------------------------------------------------------
+    // Applied configuration (used by the Superstructure planner and Dashboard)
+    // ------------------------------------------------------------------
+
+    /** Travel ratio (measured / modeled) currently applied to the encoder scaling. */
+    public double travelRatio() {
+        return appliedTravelRatio;
+    }
+
+    /** Carriage travel (inches) per motor rotation currently applied to the controllers. */
+    public double inchesPerRotation() {
+        return ElevatorConstants.ELEVATOR_MODELED_INCHES_PER_ROTATION * appliedTravelRatio;
+    }
+
+    /** MAXMotion cruise velocity (in/s) currently applied - the planner derives handoffs from it. */
+    public double cruiseVelocity() {
+        return appliedCruiseVelocity;
+    }
+
+    /** MAXMotion acceleration (in/s^2) currently applied - the planner derives handoffs from it. */
+    public double maxAcceleration() {
+        return appliedMaxAcceleration;
+    }
+
+    /** True while an edited travel ratio is waiting for the carriage to be at its base. */
+    public boolean isTravelRatioChangePending() {
+        return travelRatioChangePending;
     }
 
     /** Leader (left) motor output current in amps, for diagnostics. */
@@ -278,9 +432,6 @@ public class Elevator extends SubsystemBase {
     public double getVelocity() {
         return leftEncoder.getVelocity();
     }
-
-    // No periodic() override: closed-loop control runs on the Spark MAX, and
-    // all monitoring/alerting is centralized in Dashboard.
 
     /**
      * Physics simulation: the Spark MAX sim runs the same closed-loop

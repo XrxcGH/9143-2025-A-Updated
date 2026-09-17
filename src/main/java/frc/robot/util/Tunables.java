@@ -2,6 +2,7 @@ package frc.robot.util;
 
 import edu.wpi.first.wpilibj.Preferences;
 
+import frc.robot.Constants.CorAlConstants;
 import frc.robot.Constants.DriveConstants;
 import frc.robot.Constants.ElevatorConstants;
 import frc.robot.Constants.SuperstructureConstants;
@@ -51,6 +52,9 @@ public final class Tunables {
     private static final String ELEVATOR_CRUISE_VELOCITY = "Elevator - Cruise Velocity (in/s)";
     private static final String ELEVATOR_MAX_ACCELERATION = "Elevator - Max Acceleration (in/s^2)";
     private static final String ELEVATOR_PROFILE_ERROR = "Elevator - Profile Error (in)";
+    private static final String PIVOT_CRUISE_VELOCITY = "Pivot - Cruise Velocity (deg/s)";
+    private static final String PIVOT_MAX_ACCELERATION = "Pivot - Acceleration (deg/s^2)";
+    private static final String PIVOT_MAX_JERK = "Pivot - Jerk (deg/s^3)";
     private static final String REEF_FLUSH_DISTANCE = "Vision - Reef Flush Distance (m)";
     private static final String STATION_FLUSH_DISTANCE = "Vision - Station Flush Distance (m)";
     private static final String L1_SCORE_DISTANCE = "Vision - L1 Score Distance (m)";
@@ -73,8 +77,10 @@ public final class Tunables {
      *      16 in/s, 60 in/s^2; L4 arm arrival offset 0 s for that profile
      *   3: travel ratio back to 1.0 (gearing confirmed by 20/40 in tests);
      *      new "Height At Hard Stop" 0.875 in
+     *   4: match-pace profiles - elevator 18 in/s, 120 in/s^2; new pivot
+     *      profile tunables 240 deg/s, 480 deg/s^2, jerk 4800 deg/s^3
      */
-    private static final int DEFAULTS_VERSION = 3;
+    private static final int DEFAULTS_VERSION = 4;
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -98,6 +104,9 @@ public final class Tunables {
         Preferences.initDouble(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY);
         Preferences.initDouble(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
         Preferences.initDouble(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR);
+        Preferences.initDouble(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY);
+        Preferences.initDouble(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION);
+        Preferences.initDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
         Preferences.initDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.initDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.initDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -124,6 +133,9 @@ public final class Tunables {
         Preferences.setDouble(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY);
         Preferences.setDouble(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
         Preferences.setDouble(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR);
+        Preferences.setDouble(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY);
+        Preferences.setDouble(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION);
+        Preferences.setDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
         Preferences.setDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.setDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.setDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -211,6 +223,27 @@ public final class Tunables {
     /** Deviation from the MAXMotion profile (inches) that triggers a profile regeneration. */
     public static double elevatorProfileError() {
         return clamped(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR, 0.05, 5.0);
+    }
+
+    // ------------------------------------------------------------------
+    // CorAl pivot Motion Magic profile (degrees). The CorAl re-applies
+    // these to the TalonFX the next time the robot is disabled; the
+    // Superstructure derives its handoff heights from the live values.
+    // ------------------------------------------------------------------
+
+    /** Motion Magic cruise velocity, deg/s (clamped below the ~550 deg/s free speed). */
+    public static double pivotCruiseVelocity() {
+        return clamped(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY, 10.0, 500.0);
+    }
+
+    /** Motion Magic acceleration, deg/s^2. */
+    public static double pivotMaxAcceleration() {
+        return clamped(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION, 20.0, 3000.0);
+    }
+
+    /** Motion Magic jerk limit, deg/s^3 (0 disables the limit - a plain trapezoid). */
+    public static double pivotMaxJerk() {
+        return clamped(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK, 0.0, 50000.0);
     }
 
     // ------------------------------------------------------------------

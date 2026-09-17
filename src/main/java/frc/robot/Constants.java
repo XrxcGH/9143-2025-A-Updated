@@ -15,16 +15,14 @@ package frc.robot;
  *
  * ============================== CAN ID MAP ==============================
  *   2       Pigeon 2 IMU                     (rio bus)
- *   5       CANdle LED controller
+ *   3       CANrange game piece sensor
+ *   5       CANdle LED controller (not installed - LED code commented out)
  *   11/12/13  Back Left  swerve drive / steer / CANcoder
  *   21/22/23  Front Left swerve drive / steer / CANcoder
  *   31/32/33  Front Right swerve drive / steer / CANcoder
  *   41/42/43  Back Right swerve drive / steer / CANcoder
  *   58/59   Elevator left (leader) / right (follower) Spark MAX
- *   60/61   CorAl pivot / intake TalonFX (Kraken X60)
- *   62      CANrange game piece sensor (VERIFY - see note at the constant)
- *
- *   (63 is free - previously reserved for the removed AlLow mechanism)
+ *   56/57   CorAl pivot / intake TalonFX (Kraken X60)
  *
  * ============================== DIO MAP =================================
  *   0       CorAl through bore encoder (absolute, duty cycle)
@@ -104,16 +102,26 @@ public final class Constants {
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.244 = ~23 in/s
 		// theoretical top speed. Cruise stays below that so the profile
 		// remains achievable under load.
-		// The first power-on profile (8 in/s, 24 in/s^2) was judged too slow
-		// on the robot; these cover the full travel in ~3.6 s (cruise reached
-		// in 0.27 s over 2.1 in) and need ~9 V at cruise (kV 0.52 x 16 plus
-		// kS/kG), leaving some headroom on a sagging battery. The profile always decelerates INTO the
-		// setpoint, so the carriage settles rather than hitting the target.
-		// Adjust on the Testing tab ("Elevator - Cruise Velocity" / "Max
-		// Acceleration"); the Superstructure handoff heights follow the live
-		// values, so re-check the Handoffs readout after a change.
-		public static final double ELEVATOR_MAX_VELOCITY = 16.0;     // Cruise velocity (in/s)
-		public static final double ELEVATOR_MAX_ACCELERATION = 60.0; // Acceleration (in/s^2)
+		// Match-pace profile. 18 in/s is ~80% of the NEO's free speed
+		// through 45:1 and needs ~10 V at cruise (kV 0.52 x 18 plus kS/kG),
+		// which is the practical ceiling on this gearing: a higher cruise
+		// leaves the position loop nothing to work with once the battery
+		// sags, and MAXMotion just runs as fast as it can instead. Full
+		// travel takes ~3.0 s (cruise reached in 0.15 s over 1.4 in). The
+		// acceleration is not torque-limited (120 in/s^2 costs ~0.3 V of
+		// motor effort against the reflected inertia); it is a comfort limit
+		// on the chain and the arm riding on the carriage.
+		// Cycle-time note: a materially faster elevator on this drivetrain
+		// means a shorter gearbox (5x5 = 25:1 or 3x3x3 = 27:1 cartridges),
+		// which nearly doubles the speed ceiling - the code needs only the
+		// ELEVATOR_GEAR_RATIO change.
+		// The profile always decelerates INTO the setpoint, so the carriage
+		// settles rather than hitting the target. Adjust on the Testing tab
+		// ("Elevator - Cruise Velocity" / "Max Acceleration"); the
+		// Superstructure handoff heights follow the live values, so re-check
+		// the Handoffs readout after a change.
+		public static final double ELEVATOR_MAX_VELOCITY = 18.0;      // Cruise velocity (in/s)
+		public static final double ELEVATOR_MAX_ACCELERATION = 120.0; // Acceleration (in/s^2)
 		// How far the carriage may stray from the MAXMotion profile before
 		// the controller regenerates the profile from the current position
 		// and velocity. NOT a settling tolerance. REV's starting point is
@@ -231,14 +239,12 @@ public final class Constants {
 	 */
 	public static final class CorAlConstants {
 		// --- CAN IDs ---
-		public static final int CORAL_PIVOT_MOTOR_ID = 60;  // Pivot TalonFX
-		public static final int CORAL_INTAKE_MOTOR_ID = 61; // Intake TalonFX
+		public static final int CORAL_PIVOT_MOTOR_ID = 56;  // Pivot TalonFX
+		public static final int CORAL_INTAKE_MOTOR_ID = 57; // Intake TalonFX
 		// VERIFY: this was previously documented/configured as 64, but Phoenix
 		// device IDs only go up to 62 - constructing a device with ID 64
 		// throws and crashes robot code on boot (caught by RobotContainerTest).
-		// Set the CANrange to 62 in Tuner X, or change this to whatever ID it
-		// actually has.
-		public static final int CANRANGE_SENSOR_ID = 62;    // CANrange game piece sensor
+		public static final int CANRANGE_SENSOR_ID = 3;    // CANrange game piece sensor
 
 		// --- DIO Ports ---
 		public static final int THROUGH_BORE_DIO_PORT = 0; // Through bore encoder input
@@ -263,18 +269,28 @@ public final class Constants {
 			(58.0 / 10.0) * (58.0 / 18.0) * (42.0 / 12.0);
 
 		// --- Motion Magic Profile (degrees, seconds; converted to mechanism rotations in the subsystem) ---
-		// Conservative for first tests: the common 90-degree BASE<->RAISE
-		// swing takes ~1.5 s, full 160-degree travel ~2.3 s (90 deg/s =
-		// 16.4 rotor rps through 65.41:1 - well within a Kraken).
-		// TUNE: raise once gains feel solid.
-		// FIRST-POWER-ON VALUES: deliberately gentle (full 160 deg sweep in
-		// ~3 s). 60 deg/s is only 11 rotor rps through 65.41:1 - a tenth of a
-		// Kraken's free speed - and the jerk limit rounds the profile corners
-		// so the arm eases into and out of every move instead of snapping.
-		// Once tracking is clean, raise toward 120 deg/s and 240 deg/s^2.
-		public static final double CORAL_PIVOT_MAX_VELOCITY = 60.0;      // Cruise velocity (deg/s)
-		public static final double CORAL_PIVOT_MAX_ACCELERATION = 120.0; // Acceleration (deg/s^2)
-		public static final double CORAL_PIVOT_MAX_JERK = 1200.0;        // Jerk limit (deg/s^3); ~10x accel = ~0.1 s to reach full accel
+		// Match-pace profile - DEFAULTS for the live tunables "Pivot - Cruise
+		// Velocity" / "Acceleration" / "Jerk" (Testing tab), re-applied to
+		// the TalonFX the next time the robot is disabled. The 60 deg/s
+		// first-power-on profile tracked cleanly, so the arm now moves at a
+		// rate that matters for cycle time:
+		//   - 240 deg/s is 44% of the Kraken's free speed through 65.41:1
+		//     (100 rotor rps / 65.41 = 1.53 rot/s = 550 deg/s), so kV needs
+		//     ~5.2 V at cruise and kP keeps plenty of headroom.
+		//   - 480 deg/s^2 makes the common 90-degree BASE<->RAISE swing a
+		//     ~0.9 s triangle (peak ~210 deg/s) and the 45-degree L4
+		//     rotation ~0.6 s; at the rollers (~0.3 m) that is ~0.5 g of
+		//     centripetal load on a held coral. If a coral slips during a
+		//     swing, lower the ACCELERATION first (it sets the peak
+		//     tangential force), then cruise.
+		//   - The jerk limit is 10x the acceleration (0.1 s to reach full
+		//     accel), so the arm still eases into and out of every move
+		//     instead of snapping.
+		// The Superstructure handoff heights follow the live values - re-check
+		// the Handoffs readout after a change.
+		public static final double CORAL_PIVOT_MAX_VELOCITY = 240.0;     // Cruise velocity (deg/s)
+		public static final double CORAL_PIVOT_MAX_ACCELERATION = 480.0; // Acceleration (deg/s^2)
+		public static final double CORAL_PIVOT_MAX_JERK = 4800.0;        // Jerk limit (deg/s^3); ~10x accel = ~0.1 s to reach full accel
 
 		// --- Closed-Loop Gains (Phoenix 6 slot 0; voltage-based, error in mechanism rotations) ---
 		// TUNE - starting points for first power-on:
@@ -422,13 +438,16 @@ public final class Constants {
 		// finishes its rotation (negative = the arm finishes early).
 		//   L4: 0.0 s -> the arm finishes its 90->45 rotation as the elevator
 		//       settles at 52.5 in (that rotation is only known clear at full
-		//       height, so it may not finish early). With the 16 in/s profile
-		//       the rotation starts at ~34 in. Go negative only after L4 has
-		//       been watched: every -0.1 s finishes the arm ~1.6 in lower.
-		//   L3: +1.15 s -> starts at ~25 in; most of the rotation happens as
-		//       the elevator settles at 29 in, so the mechanism sweeps in
-		//       behind the tube rather than into it. PREDICTED - first test
-		//       at low speed with a hand on the disable switch.
+		//       height, so it may not finish early). With the match-pace
+		//       profiles (elevator 18 in/s, pivot 240 deg/s) the ~0.7 s
+		//       rotation starts at ~41 in. Go negative only after L4 has
+		//       been watched: every -0.1 s finishes the arm ~1.8 in lower.
+		//   L3: +1.15 s -> the arm's 90->22.5 swing (~0.85 s) is shorter
+		//       than the offset, so the rotation starts just before the
+		//       elevator arrives (~28.5 in) and happens as it settles at
+		//       29 in - the mechanism sweeps in behind the tube rather than
+		//       into it. PREDICTED - first test at low speed with a hand on
+		//       the disable switch.
 		// Both are editable live ("Superstructure - L3/L4 Arm Arrival
 		// Offset (s)"); the resolved heights show on the Testing tab.
 		public static final double L4_ARM_ARRIVAL_OFFSET_SECONDS = 0.0;
@@ -455,22 +474,26 @@ public final class Constants {
 		public static final double SETTLE_TIMEOUT_SECONDS = 3.0;
 	}
 
-	/**
-	 * Constants for the LED subsystem (CTRE CANdle).
-	 * The CANdle drives its 8 onboard LEDs plus an attached LED strip; the
-	 * onboard LEDs are indices 0-7 and the strip starts at index 8.
-	 */
-	public static final class LEDConstants {
-		// --- CAN IDs ---
-		public static final int CANDLE_ID = 5; // CANdle (rio CAN bus)
-
-		// --- Strip Configuration ---
-		public static final int LED_COUNT = 68;       // Total LEDs: 8 onboard + strip (VERIFY - set to actual strip length)
-		public static final double BRIGHTNESS = 0.6;  // Global brightness scalar 0-1 (limits current draw on long strips)
-
-		// --- Timing (seconds) ---
-		public static final double ENDGAME_WARNING_TIME = 20.0; // Teleop time remaining when the endgame pattern starts
-	}
+	// CANdle disabled (Sept 2026): there is no CANdle on the robot, so the LED
+	// subsystem (subsystems/LEDs.java) and its constants are commented out.
+	// Restore both together.
+	//
+	// /**
+	//  * Constants for the LED subsystem (CTRE CANdle).
+	//  * The CANdle drives its 8 onboard LEDs plus an attached LED strip; the
+	//  * onboard LEDs are indices 0-7 and the strip starts at index 8.
+	//  */
+	// public static final class LEDConstants {
+	// 	// --- CAN IDs ---
+	// 	public static final int CANDLE_ID = 5; // CANdle (rio CAN bus)
+	//
+	// 	// --- Strip Configuration ---
+	// 	public static final int LED_COUNT = 68;       // Total LEDs: 8 onboard + strip (VERIFY - set to actual strip length)
+	// 	public static final double BRIGHTNESS = 0.6;  // Global brightness scalar 0-1 (limits current draw on long strips)
+	//
+	// 	// --- Timing (seconds) ---
+	// 	public static final double ENDGAME_WARNING_TIME = 20.0; // Teleop time remaining when the endgame pattern starts
+	// }
 
 	/**
 	 * Constants for teleop driving.

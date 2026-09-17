@@ -163,12 +163,14 @@ public class Superstructure {
         return cruise * seconds - 0.5 * cruise * cruise / accel;
     }
 
-    /** Seconds the arm's profile needs to swing from the safe angle to {@code targetAngle}. */
+    /**
+     * Seconds the arm's profile needs to swing from the safe angle to
+     * {@code targetAngle}. Uses the LIVE Motion Magic profile, so a
+     * Testing-tab retune of the pivot moves the handoffs with it.
+     */
     public double armSwingSeconds(double targetAngle) {
         return profileDuration(SAFE_ANGLE - targetAngle,
-            CorAlConstants.CORAL_PIVOT_MAX_VELOCITY,
-            CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION,
-            CorAlConstants.CORAL_PIVOT_MAX_JERK);
+            coral.cruiseVelocity(), coral.maxAcceleration(), coral.maxJerk());
     }
 
     /**

@@ -1,6 +1,7 @@
 package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.CANrangeConfiguration;
+import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
@@ -14,13 +15,16 @@ import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DigitalInput;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DutyCycle;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.Constants.CorAlConstants;
+import frc.robot.util.Tunables;
 
 /**
  * The CorAl (Coral and Algae) subsystem controls the robot's game piece
@@ -71,6 +75,16 @@ public class CorAl extends SubsystemBase {
     private double throughBoreOffset = 0;
 
     // ------------------------------------------------------------------
+    // Live-tunable Motion Magic profile (Testing tab -> Tunables widget),
+    // as last applied to the pivot TalonFX. See periodic().
+    // ------------------------------------------------------------------
+    private double appliedCruiseVelocity;  // deg/s
+    private double appliedMaxAcceleration; // deg/s^2
+    private double appliedMaxJerk;         // deg/s^3
+    private final Timer tunablePollTimer = new Timer();
+    private static final double TUNABLE_POLL_SECONDS = 0.5;
+
+    // ------------------------------------------------------------------
     // Desktop simulation (only constructed when running off-robot). The
     // physics model exists purely so the mechanism moves in the sim GUI /
     // AdvantageScope; the values below affect simulation fidelity only.
@@ -94,12 +108,14 @@ public class CorAl extends SubsystemBase {
 
         canRangeSensor = new CANrange(CorAlConstants.CANRANGE_SENSOR_ID);
 
+        readProfileTunables();
         configurePivotMotor(pivotMotor);
         configureIntakeMotor(intakeMotor);
         configureCanRange(canRangeSensor);
 
         // Use the current position as the zero reference
         zeroEncoders();
+        tunablePollTimer.start();
 
         if (RobotBase.isSimulation()) {
             armSim = new SingleJointedArmSim(
@@ -155,12 +171,8 @@ public class CorAl extends SubsystemBase {
         config.Slot0.kS = CorAlConstants.CORAL_PIVOT_kS;
         config.Slot0.kV = CorAlConstants.CORAL_PIVOT_kV;
 
-        // Motion Magic profile (constants are in degrees; Phoenix wants rotations)
-        config.MotionMagic.MotionMagicCruiseVelocity = CorAlConstants.CORAL_PIVOT_MAX_VELOCITY / 360.0;
-        config.MotionMagic.MotionMagicAcceleration = CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION / 360.0;
-        // Jerk limit turns the trapezoid into an S-curve: no step change in
-        // acceleration, so the arm never snaps into or out of motion
-        config.MotionMagic.MotionMagicJerk = CorAlConstants.CORAL_PIVOT_MAX_JERK / 360.0;
+        // Motion Magic profile from the live tunables
+        config.MotionMagic = motionMagicConfig();
 
         // Soft limits keep the arm inside its travel in every control mode
         config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = CorAlConstants.CORAL_PIVOT_MAX_ANGLE / 360.0;
@@ -169,6 +181,33 @@ public class CorAl extends SubsystemBase {
         config.SoftwareLimitSwitch.ReverseSoftLimitEnable = true;
 
         motor.getConfigurator().apply(config);
+    }
+
+    /** Snapshots the profile tunables into the applied fields. */
+    private void readProfileTunables() {
+        appliedCruiseVelocity = Tunables.pivotCruiseVelocity();
+        appliedMaxAcceleration = Tunables.pivotMaxAcceleration();
+        appliedMaxJerk = Tunables.pivotMaxJerk();
+    }
+
+    /** True if any profile tunable differs from what is applied to the TalonFX. */
+    private boolean profileTunablesChanged() {
+        return Tunables.pivotCruiseVelocity() != appliedCruiseVelocity
+            || Tunables.pivotMaxAcceleration() != appliedMaxAcceleration
+            || Tunables.pivotMaxJerk() != appliedMaxJerk;
+    }
+
+    /**
+     * Motion Magic profile from the applied tunables. The tunables are in
+     * degrees; Phoenix wants mechanism rotations. The jerk limit turns the
+     * trapezoid into an S-curve: no step change in acceleration, so the arm
+     * never snaps into or out of motion.
+     */
+    private MotionMagicConfigs motionMagicConfig() {
+        return new MotionMagicConfigs()
+            .withMotionMagicCruiseVelocity(appliedCruiseVelocity / 360.0)
+            .withMotionMagicAcceleration(appliedMaxAcceleration / 360.0)
+            .withMotionMagicJerk(appliedMaxJerk / 360.0);
     }
 
     private void configureIntakeMotor(TalonFX motor) {
@@ -397,6 +436,26 @@ public class CorAl extends SubsystemBase {
         return intakeMotor.getDutyCycle().getValueAsDouble();
     }
 
+    // ------------------------------------------------------------------
+    // Applied Motion Magic profile (the Superstructure planner derives its
+    // handoff heights from these, so they must be the values in effect)
+    // ------------------------------------------------------------------
+
+    /** Cruise velocity (deg/s) currently applied to the pivot. */
+    public double cruiseVelocity() {
+        return appliedCruiseVelocity;
+    }
+
+    /** Acceleration (deg/s^2) currently applied to the pivot. */
+    public double maxAcceleration() {
+        return appliedMaxAcceleration;
+    }
+
+    /** Jerk limit (deg/s^3) currently applied to the pivot. */
+    public double maxJerk() {
+        return appliedMaxJerk;
+    }
+
     @Override
     public void periodic() {
         // Debounced game piece detection using the CANrange's on-device
@@ -415,6 +474,17 @@ public class CorAl extends SubsystemBase {
         // shifts the reference frame and makes the arm land off target.
         if (!positionControlActive && !manualControlActive) {
             syncMotorToThroughBore();
+        }
+
+        // Re-apply an edited Motion Magic profile (Testing-tab tunables)
+        // only while DISABLED - a config apply mid-move would stutter the
+        // arm - polled twice a second. Only the MotionMagic group is sent,
+        // so gains, limits, and the sensor ratio are untouched.
+        if (DriverStation.isDisabled()
+            && tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)
+            && profileTunablesChanged()) {
+            readProfileTunables();
+            pivotMotor.getConfigurator().apply(motionMagicConfig());
         }
     }
 

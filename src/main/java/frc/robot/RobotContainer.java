@@ -34,7 +34,7 @@ import frc.robot.Constants.ElevatorConstants;
 import frc.robot.subsystems.Swerve;
 import frc.robot.subsystems.Elevator;
 import frc.robot.subsystems.CorAl;
-import frc.robot.subsystems.LEDs;
+// CANdle disabled (no CANdle on the robot): import frc.robot.subsystems.LEDs;
 import frc.robot.subsystems.Vision;
 import frc.robot.util.Tunables;
 
@@ -123,7 +123,7 @@ public class RobotContainer {
     public final Swerve swerve;
     private final Elevator elevator = new Elevator();
     private final CorAl coral = new CorAl();
-    private final LEDs leds;
+    // CANdle disabled (no CANdle on the robot): private final LEDs leds;
 
     @AutoLogOutput (key = "Draggables/DesiredComponents3d")
     public static Pose3d[] desiredComponents3d = {new Pose3d(), new Pose3d(), new Pose3d(), new Pose3d()};
@@ -145,9 +145,10 @@ public class RobotContainer {
         // second one here would double up pose updates and dashboard widgets.
         swerve = TunerConstants.createDrivetrain();
 
-        // LEDs derive their state from the other subsystems through these
-        // suppliers - no further wiring needed anywhere else.
-        leds = new LEDs(coral::isGamePieceDetected, swerve::isVisionTrackingEnabled);
+        // CANdle disabled (no CANdle on the robot). LEDs derive their state
+        // from the other subsystems through these suppliers; restore this
+        // line, the field, the import, and the Dashboard argument together:
+        // leds = new LEDs(coral::isGamePieceDetected, swerve::isVisionTrackingEnabled);
 
         // Auto chooser is populated with every auto in deploy/pathplanner/autos.
         // LoggedDashboardChooser publishes it under SmartDashboard/Auto Mode
@@ -167,7 +168,7 @@ public class RobotContainer {
         // the subsystems above were configured from the stored values.)
 
         // All Elastic/NetworkTables publishing is centralized here.
-        dashboard = new Dashboard(swerve, elevator, coral, leds, superstructure);
+        dashboard = new Dashboard(swerve, elevator, coral, /* CANdle disabled: leds, */ superstructure);
 
         configureBindings();
     }

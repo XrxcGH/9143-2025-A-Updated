@@ -31,7 +31,7 @@ import frc.robot.Constants.LoggingConstants;
 import frc.robot.Constants.VisionConstants;
 import frc.robot.subsystems.CorAl;
 import frc.robot.subsystems.Elevator;
-import frc.robot.subsystems.LEDs;
+// CANdle disabled (no CANdle on the robot): import frc.robot.subsystems.LEDs;
 import frc.robot.subsystems.Swerve;
 import frc.robot.util.Elastic;
 import frc.robot.util.Tunables;
@@ -67,7 +67,7 @@ public class Dashboard {
     private final Swerve swerve;
     private final Elevator elevator;
     private final CorAl coral;
-    private final LEDs leds;
+    // CANdle disabled (no CANdle on the robot): private final LEDs leds;
     private final Superstructure superstructure;
 
     // Last published derived handoff heights (the string is only rebuilt
@@ -156,12 +156,12 @@ public class Dashboard {
      * RobotContainer after the subsystems exist. (The auto chooser is a
      * LoggedDashboardChooser that publishes itself - see RobotContainer.)
      */
-    public Dashboard(Swerve swerve, Elevator elevator, CorAl coral, LEDs leds,
+    public Dashboard(Swerve swerve, Elevator elevator, CorAl coral, /* CANdle disabled: LEDs leds, */
             Superstructure superstructure) {
         this.swerve = swerve;
         this.elevator = elevator;
         this.coral = coral;
-        this.leds = leds;
+        // CANdle disabled (no CANdle on the robot): this.leds = leds;
         this.superstructure = superstructure;
 
         // --- Independent mechanism test controls (Testing tab) ---
@@ -373,9 +373,11 @@ public class Dashboard {
         }
         SmartDashboard.putString("Vision/Branch Side", vision.getBranchSide().name());
 
-        // --- LEDs ---
-        SmartDashboard.putString("LEDs/State",
-            leds.getState() != null ? leds.getState().name() : "INIT");
+        // --- LEDs (CANdle code commented out - no CANdle on the robot) ---
+        // Restore with the subsystem:
+        // SmartDashboard.putString("LEDs/State",
+        //     leds.getState() != null ? leds.getState().name() : "INIT");
+        SmartDashboard.putString("LEDs/State", "CANdle code commented out");
 
         // --- Superstructure: resolved handoff heights ---
         // Derived from the motion profiles + arrival-offset tunables, so the

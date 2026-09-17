@@ -48,10 +48,13 @@ class SuperstructureCorridorTest {
     }
 
     @Test
-    void presetPosesAreInsideExceptTheKnownTightL3() {
+    void presetPosesAreAllInside() {
         assertTrue(Superstructure.poseClear(BASE, PivotPresetAngles.BASE.getAngle()));
         assertTrue(Superstructure.poseClear(BASE, PivotPresetAngles.CORAL_L1.getAngle()));
         assertTrue(Superstructure.poseClear(PresetHeights.CORAL_L2.getHeight(), PivotPresetAngles.CORAL_L2.getAngle()));
+        // L2 keeps its margin even when the chain lets the arm sag 2.5 deg
+        assertTrue(Superstructure.poseClear(PresetHeights.CORAL_L2.getHeight(), PivotPresetAngles.CORAL_L2.getAngle() - 2.5));
+        assertTrue(Superstructure.poseClear(PresetHeights.CORAL_L3.getHeight(), PivotPresetAngles.CORAL_L3.getAngle()));
         assertTrue(Superstructure.poseClear(PresetHeights.CORAL_L4.getHeight(), PivotPresetAngles.CORAL_L4.getAngle()));
         assertTrue(Superstructure.poseClear(PresetHeights.ALGAE_LOW_INTAKE.getHeight(), PivotPresetAngles.ALGAE_INTAKE.getAngle()));
         assertTrue(Superstructure.poseClear(PresetHeights.ALGAE_HIGH_INTAKE.getHeight(), PivotPresetAngles.ALGAE_INTAKE.getAngle()));
@@ -59,11 +62,8 @@ class SuperstructureCorridorTest {
         // RAISE is the travel angle: clear from the base to the top
         assertTrue(Superstructure.elevatorPathClear(BASE, ElevatorConstants.ELEVATOR_MAX_POSITION,
             PivotPresetAngles.RAISE.getAngle()));
-        // The operator's L3 pose is the documented exception: the model puts
-        // it inside a band, and the startup audit must say so.
-        String audit = Superstructure.presetAuditMessage();
-        assertTrue(audit.contains("L3"), "audit names the tight L3 pose: " + audit);
-        assertFalse(audit.contains("L4"), "L4 must be clear: " + audit);
+        // Nothing is inside a band any more, so the startup audit is silent.
+        assertEquals("", Superstructure.presetAuditMessage());
     }
 
     @Test
@@ -110,8 +110,14 @@ class SuperstructureCorridorTest {
         }
         assertTrue(Superstructure.pivotPathClear(SuperstructureConstants.L4_RETURN_STAGE_ANGLE, PivotPresetAngles.RAISE.getAngle(),
             SuperstructureConstants.L4_STATION_HEIGHT));
-        // L3 return lift window: 25 deg up to RAISE clear at the lift height
-        assertTrue(Superstructure.pivotPathClear(25.0, PivotPresetAngles.RAISE.getAngle(),
+        // L3 approach: the RAISE -> L3 rotation is clear across the whole rotate window
+        for (double h = PresetHeights.CORAL_L3.getHeight() - SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET;
+                h <= PresetHeights.CORAL_L3.getHeight() + SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET; h += 0.25) {
+            assertTrue(Superstructure.pivotPathClear(PivotPresetAngles.CORAL_L3.getAngle(), PivotPresetAngles.RAISE.getAngle(), h),
+                "L3 rotation at " + h);
+        }
+        // L3 return lift window: the L3 angle up to RAISE clear at the lift height
+        assertTrue(Superstructure.pivotPathClear(PivotPresetAngles.CORAL_L3.getAngle(), PivotPresetAngles.RAISE.getAngle(),
             SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT));
         // Algae: the stage angle is clear from the base; the intake angle needs the minimum height
         assertTrue(Superstructure.elevatorPathClear(BASE, ElevatorConstants.ELEVATOR_MAX_POSITION, SuperstructureConstants.HIGH_ANGLE_STAGE));

@@ -215,7 +215,7 @@ public final class Constants {
 			BASE(0.0),
 			CORAL_L1(0.0),
 			CORAL_L2(12.0),
-			CORAL_L3(29.0),
+			CORAL_L3(30.5),
 			CORAL_L4(52.5),
 			ALGAE_LOW_INTAKE(20.5),
 			ALGAE_HIGH_INTAKE(37.5),
@@ -385,11 +385,17 @@ public final class Constants {
 			BASE(0.0),          // Coral intake position
 			RAISE(100.0),       // Safe travel / algae hold position
 			CORAL_L1(100.0),
-			// L2 scores at 10 rather than the geometric 5: the pivot chain
+			// L2 scores at 12.5 rather than the geometric 5: the pivot chain
 			// currently has backlash, so the arm sags a few degrees past
-			// where the rotor thinks it is. Revisit when the chain is fixed.
-			CORAL_L2(10.0),
-			CORAL_L3(22.5),
+			// where the rotor thinks it is. At 12 in the CAD gives 10 deg a
+			// full inch to the cross bar but only 0.5 in at 7.5; 12.5 keeps
+			// the inch even 2.5 deg low. Revisit when the chain is fixed.
+			CORAL_L2(12.5),
+			// L3 was 22.5 at 29 in, a pose the CAD puts ~0.25 in from the
+			// middle-stage top sprocket shaft. 25 deg at 30.5 in is the
+			// nearest pose with a full inch (claw tip 0.7 in further forward
+			// and 1.6 in higher); 27.5 deg there has 1.75 in if it ever rubs.
+			CORAL_L3(25.0),
 			// L4 was 45, then asked to be 35 "to bring the claw back more".
 			// The CAD map says neither is reachable at 52.5 in: from ~25 to
 			// ~85 deg the claw's lower rear meets the middle-stage top tube
@@ -456,10 +462,10 @@ public final class Constants {
 	 * real). The planner's staged sequences were simulated against the full
 	 * model with the 15:1 elevator (50 in/s, 400 in/s^2) and the softened
 	 * pivot profile, sampled every 10 ms: every transit clears by >= 1.0 in,
-	 * also with the arm slowed to 150 deg/s (chain backlash). The one thing
-	 * inside a band is the L3 pose itself (29 in, 22.5 deg): the model puts
-	 * it within ~0.25 in of the top sprocket shaft. It works on the robot;
-	 * (25 deg, 30.5 in) is the nearest pose with a full inch.
+	 * also with the arm slowed to 150 deg/s (chain backlash). Every preset
+	 * is inside a corridor: the L3 pose moved from (29 in, 22.5 deg), which
+	 * the model put within ~0.25 in of the top sprocket shaft, to
+	 * (30.5 in, 25 deg), the nearest pose with a full inch.
 	 */
 	public static final class SuperstructureConstants {
 		// --- CAD free corridors ---
@@ -509,7 +515,7 @@ public final class Constants {
 		// Highest carriage height with the arm fully tucked (< ARM_CLEAR_MIN_ANGLE).
 		public static final double ARM_TUCK_MAX_HEIGHT = 8.5;       // Inches
 		// Smallest arm angle that may leave the tuck zone (5 deg is only
-		// clear to ~10 in; 7.5 deg to ~21 in). L2 is 10 deg.
+		// clear to ~10 in; 7.5 deg to ~21 in). L2 is 12.5 deg.
 		public static final double ARM_CLEAR_MIN_ANGLE = 8.0;       // Degrees
 		// Highest carriage height with the arm ANYWHERE from 8 to 75 deg
 		// (the low box roof: 17.5 in at 60-70 deg is the tightest).
@@ -534,8 +540,10 @@ public final class Constants {
 
 		// --- Mid-height scoring poses (L3): 17 < height < L4_ZONE_MIN_HEIGHT ---
 		// The arm starts its final rotation (from RAISE) once the carriage is
-		// this close below the target; the carriage keeps settling meanwhile.
-		public static final double MID_POSE_ROTATE_BELOW_TARGET = 1.0; // Inches
+		// this close to the target; the carriage keeps settling meanwhile.
+		// 0.5 because the L3 pose (30.5 in, 25 deg) sits half an inch above
+		// the 25-30 deg corridor floor (30 in).
+		public static final double MID_POSE_ROTATE_BELOW_TARGET = 0.5; // Inches
 		// Leaving a mid pose: lift to here (all of 25-100 deg is clear at
 		// 31-35 in) while the arm swings up; only descend once the arm is at
 		// BAND_PASS_MIN_ANGLE. This is the fix for the L3 return hitting the

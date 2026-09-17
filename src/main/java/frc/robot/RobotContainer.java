@@ -67,8 +67,8 @@ import frc.robot.util.Tunables;
  *   Right stick X       - CorAl pivot manual control (holds angle on release;
  *                         NO collision interlocks - watch the mechanism)
  *   D-pad down          - coral L1 scoring pose (0", 100 deg)
- *   D-pad left          - coral L2 scoring pose (12", 5 deg)
- *   D-pad right         - coral L3 scoring pose (29", 22.5 deg, handoff overlap)
+ *   D-pad left          - coral L2 scoring pose (12", 12.5 deg)
+ *   D-pad right         - coral L3 scoring pose (30.5", 25 deg, rotated at the target)
  *   D-pad up            - coral L4 scoring pose (52.5", 45 deg, handoff overlap)
  *   A                   - coral intake (stow to base, rollers until the
  *                         CANrange confirms a game piece)

@@ -531,13 +531,13 @@ public class Superstructure {
             .andThen(moveTo(PresetHeights.CORAL_L1, PivotPresetAngles.CORAL_L1));
     }
 
-    /** Moves to the L2 scoring pose (12 in, 10 degrees). */
+    /** Moves to the L2 scoring pose (12 in, 12.5 degrees). */
     public Command goToCoralL2() {
         return setGoal(Goal.CORAL_L2)
             .andThen(moveTo(PresetHeights.CORAL_L2, PivotPresetAngles.CORAL_L2));
     }
 
-    /** Moves to the L3 scoring pose (29 in, 22.5 degrees): climb at RAISE, rotate just below the target. */
+    /** Moves to the L3 scoring pose (30.5 in, 25 degrees): climb at RAISE, rotate within half an inch of the target. */
     public Command goToCoralL3() {
         return setGoal(Goal.CORAL_L3)
             .andThen(moveTo(PresetHeights.CORAL_L3, PivotPresetAngles.CORAL_L3));

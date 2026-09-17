@@ -7,7 +7,7 @@ This repository contains the code for Team 9143's 2025 FRC robot, updated to the
 ## Robot Overview
 
 - **Swerve Drivetrain**: CTRE Phoenix 6 swerve on a 30"×30" frame — mixed modules (front: SDS MK4i, back: SDS MK4n), **all with L3+ drive gearing**, all Kraken X60 drive/steer, CANcoders, and a Pigeon 2. Drive/coupling ratios are uniform; only the steer ratios differ and are set per module.
-- **Elevator Subsystem**: Dual NEO/Spark MAX elevator (45:1 MAXPlanetary) with MAXMotion height control in inches.
+- **Elevator Subsystem**: Dual NEO/Spark MAX elevator (15:1 MAXPlanetary) with MAXMotion height control in inches.
 - **CorAl (Coral and Algae) Subsystem**: Pivoting arm + intake rollers with absolute-encoder-referenced angle control and CANrange game piece detection.
 - **Vision System**: Three Limelights fusing MegaTag2 pose estimates into odometry, plus AprilTag tracking.
 - **LED System** *(code commented out — there is no CANdle on the robot)*: CTRE CANdle robot-state patterns, kept in [LEDs.java](src/main/java/frc/robot/subsystems/LEDs.java) for when one is installed.
@@ -39,13 +39,13 @@ All position buttons run coordinated elevator + arm sequences through the **Supe
 | Right stick X | CorAl pivot manual control (holds angle on release; **no interlocks**) |
 | D-pad down | Coral **L1** pose (0", 100°) |
 | D-pad left | Coral **L2** pose (12", 10° — 5° geometric plus chain-backlash sag) |
-| D-pad right | Coral **L3** pose (29", 22.5°, handoff overlap) |
-| D-pad up | Coral **L4** pose (52.5", 45°, handoff overlap) |
+| D-pad right | Coral **L3** pose (29", 22.5°, rotated 1" below the target) |
+| D-pad up | Coral **L4** pose (52.5", 20°, rotated at the 33" station) |
 | A | Coral intake (stow to base, rollers until CANrange confirms) |
 | X | Eject coral at the current pose (rollers 0.5 s) |
 | B | Algae **low** intake (20.5", 160°, rollers in) |
 | Back | Algae **high** intake (37.5", 160°, rollers in) |
-| Y | Algae hold (hold rollers, arm to 90°) |
+| Y | Algae hold (hold rollers, arm to 100° — the safe travel angle) |
 | Right bumper | Algae score (52.5", 105°, then eject) |
 | Left trigger | Stow to base (rollers stopped, arm tucked) |
 | Right trigger | Raise arm to safe travel angle (context-aware) |
@@ -62,22 +62,24 @@ Extends the Phoenix 6 `SwerveDrivetrain` (high-frequency odometry and module con
 **Mixed modules**: the front pair are SDS MK4i and the back pair SDS MK4n, both with **L3+ drive gearing** (5.36:1, 16T pinion) — so drive and coupling ratios are identical on all four modules, and only the **steer ratios differ** (MK4i 150/7:1 front, MK4n 18.75:1 back), set per module in [TunerConstants.java](src/main/java/frc/robot/generated/TunerConstants.java). All driving (teleop and path following) uses **closed-loop velocity** so wheel speeds track the request regardless of battery sag. Top speed ~5.96 m/s at 12 V, matched by PathPlanner's `maxDriveSpeed`.
 
 ### Elevator ([Elevator.java](src/main/java/frc/robot/subsystems/Elevator.java))
-Two NEOs on Spark MAX controllers, each through a 45:1 MAXPlanetary reduction (5:1 × 3:1 × 3:1 cartridges), a 1:1 90° gearbox, and a ½" hex shaft driving 22T #25 sprockets — 5.5" of chain per sprocket rotation, doubled by the cascade rigging. The gearing predicts **0.244" of carriage travel per motor rotation**, and 20" and 40" tape tests confirmed it to within 0.5% (the *Elevator – Travel Ratio* tunable stays at 1.0 and exists only for a re-check). Heights are measured from the **top of the base-stage 2×1 to the bottom of the carriage 2×1**, and in that frame the carriage sits at **≈0.875"** when it rests on its hard stop (*Elevator – Height At Hard Stop*), so the encoder is referenced *to* that value rather than zeroed — a commanded 20" lands the tape at 20". Travel is 0.875–53" — see *Calibrating the elevator height* below. The right controller is a hardware follower of the left, and encoder conversion factors scale everything to **inches**. The follower carries **no soft limits of its own**: REV documents only that a follower mirrors the leader's voltage output, and since the follower spins opposite the leader its encoder counts negative as the carriage rises — leader limits copied onto it would keep its reverse limit at zero in force for the whole climb and, if enforced, turn it into a brake the leader has to drag (slow, stuttering, current-limited climbs). Height moves use MAXMotion profiles on the controller with on-controller kS/kV/kG feedforward (REVLib 2026), so the carriage tracks smoothly and holds height at targets and when the operator releases the stick. Soft limits bound travel in every control mode, voltage compensation keeps response consistent as the battery sags, and configuration is persisted to flash so a brownout can't revert it.
+Two NEOs on Spark MAX controllers, each through a 15:1 MAXPlanetary reduction (5:1 × 3:1 cartridges — the second 3:1 was removed in Sept 2026 for speed), a 1:1 90° gearbox, and a ½" hex shaft driving 22T #25 sprockets — 5.5" of chain per sprocket rotation, doubled by the cascade rigging. The gearing predicts **0.733" of carriage travel per motor rotation** (0.244" at the earlier 45:1, which 20" and 40" tape tests confirmed to within 0.5%; the *Elevator – Travel Ratio* tunable stays at 1.0 and exists only for a re-check). Heights are measured from the **top of the base-stage 2×1 to the bottom of the carriage 2×1**, and in that frame the carriage sits at **≈0.875"** when it rests on its hard stop (*Elevator – Height At Hard Stop*), so the encoder is referenced *to* that value rather than zeroed — a commanded 20" lands the tape at 20". Travel is 0.875–53" — see *Calibrating the elevator height* below. The right controller is a hardware follower of the left, and encoder conversion factors scale everything to **inches**. The follower carries **no soft limits of its own**: REV documents only that a follower mirrors the leader's voltage output, and since the follower spins opposite the leader its encoder counts negative as the carriage rises — leader limits copied onto it would keep its reverse limit at zero in force for the whole climb and, if enforced, turn it into a brake the leader has to drag (slow, stuttering, current-limited climbs). Height moves use MAXMotion profiles on the controller with on-controller kS/kV/kG feedforward (REVLib 2026), so the carriage tracks smoothly and holds height at targets and when the operator releases the stick. Soft limits bound travel in every control mode, voltage compensation keeps response consistent as the battery sags, and configuration is persisted to flash so a brownout can't revert it.
 
-**Faster elevator (hardware):** the 45:1 stack caps the carriage at ≈23 in/s free speed (NEO 5676 RPM ÷ 45 × 5.5" × 2), so the shipped 20 in/s cruise is already ≈87% of that and draws ≈11 V — there is no more speed to be had in software. Dropping one 3:1 cartridge (**5×3 = 15:1**) triples the ceiling: ≈69 in/s free, a comfortable **≈50 in/s cruise with ≈400 in/s²**, full travel in **≈1.2 s instead of 2.7 s** (≈3 s saved per L4 cycle, up and down). Force margin stays large — at the 50 A limit two NEOs through 15:1 put ≈830 N (≈85 kg) on the carriage against a ≈100 N load, and holding it costs ≈6 A per motor (≈0.75 V of kG). Dropping both 3:1s (9:1) is possible but leaves ≈5× margin, ≈10 A per motor just to hold, and hotter motors — not recommended. The one real cost of 15:1: with the robot **disabled at height**, brake mode lets the carriage creep down ≈3 in/s instead of ≈0.4 in/s (braking torque scales with speed, so a lighter gearing back-drives faster) — stow before disabling, or expect it to settle to the base over ~15 s. Code changes: `ELEVATOR_GEAR_RATIO = 5.0 * 3.0` (kV re-derives itself), then on the Testing tab set *kP* ≈ 0.1 (an inch is only 1.4 rotor turns at 15:1), *kG* ≈ 0.9, *Cruise Velocity* 50, *Max Acceleration* 400, and re-run the height calibration.
+**Elevator gearing (15:1, Sept 2026):** the NEO free speed through 15:1 is ≈69 in/s at the carriage, so the shipped 50 in/s cruise is ≈72% of it (≈8.7 V of kV at cruise, leaving room for the position loop on a sagging battery) and full travel takes ≈1.2 s. Holding costs ≈6 A per motor before the constant-force springs help, so kG starts at 0.6 V and should be tuned down until the carriage just holds. One real cost of the lighter gearing: with the robot disabled at height, brake mode lets the carriage creep down ≈3 in/s — stow before disabling.
 
 ### CorAl ([CorAl.java](src/main/java/frc/robot/subsystems/CorAl.java))
 Pivot arm + intake rollers (both Kraken X60). The REV Through Bore absolute encoder is the angle reference: the motor's sensor is seeded from it at startup, before each move, and whenever the arm is idle — never mid-move. Motion Magic in degrees, closed-loop holding at targets. Game piece detection uses the CANrange's on-device proximity bit with a 0.3 s rising-edge debounce, and stops the intake automatically.
 
 ### Superstructure ([Superstructure.java](src/main/java/frc/robot/Superstructure.java))
-The command factory for all coordinated elevator + CorAl motion. The arm (0–160°) sweeps through the elevator's structure, and three contact combinations were measured on the robot: the tucked arm (0°) hits a static elevator part at 10.75" of height; a 5° arm hits the second-stage tube passing 23"; and at full height the arm cannot rotate between 90° and 45° in place.
+The command factory for all coordinated elevator + CorAl motion. The free region of (elevator height, arm angle) was computed from the robot CAD — every CorAl part's true outline swept about the pivot against the base stage, the middle stage (which rises at *half* the carriage travel), the funnel, frame and bumpers — and validated against the two contacts measured on the robot (0° at ≈10.75", 5° at ≈23", both reproduced within ½"). See *CAD clearance analysis* below for the map. The planner moves through that region in **staged, state-gated steps**: every trigger is a measured height or angle, never a timer, so the sequences stay safe at any elevator or pivot speed — only their duration changes.
 
-A **motion planner** builds each move from the real mechanism state at the moment the button is pressed, picking the fastest sequence that stays inside the safe regions:
+- **Low box.** Any arm angle from 8° up is clear below 17", so base→L2 and base→L1 move both mechanisms together. Tucked (< 8°) is allowed only below 8.5" (the cross bar under the top sprockets).
+- **Climbing out** needs the arm at ≥ 75° — the middle-stage top tube blocks roughly 18–30" for lower angles — and from **RAISE = 100°** the carriage may go anywhere. **90° is not a travel angle**: the claw's lower rear meets the middle-stage top tube from ≈36" up. Ascents give the elevator a ratcheting head start (8.5" while tucked → 17" once clear → 36" past 75° → anything once the arm reads RAISE, ≥ 97°).
+- **L3 (29", 22.5°)**: climb at RAISE, rotate 1" below the target. Leaving, the carriage **lifts to 31"** while the arm swings up and only descends once the arm is back at RAISE — the fix for the return that hit the tube.
+- **L4 (52.5", 20°)**: the top of travel is clear only at ≤ 22.5°, and the 100°→20° rotation is impossible up there, so the carriage stops at the **33" station** (where 25–100° are all clear), the arm rotates to 25°, the carriage climbs to 48", the arm finishes to 20° above 37", and only then does the carriage go to the top. Leaving mirrors it: **drop first** to 39" at 20°, stage to 45° below 43", drop to the station, swing to RAISE below 37", then descend.
+- **Algae poses (160°)** hit the bumper below ≈7.5", so the arm waits at 120° until the carriage is above 8".
+- **Stow** tucks to 0° once the descending carriage passes 8.5".
 
-- **Low-box moves run direct.** Below `LOW_TRAVEL_MAX_HEIGHT` (21") with the arm at/above `ARM_CLEAR_MIN_ANGLE` (5°), nothing contacts — so base→L2, base→L1, and base→algae-low move the arm and elevator together with **no 90° excursion**.
-- **Leaving the low box travels at the safe angle (90°)**, but ascents give the elevator a **state-gated head start** (up to the highest height safe for the current arm angle) while the arm swings up, so the swing costs little or no time.
-- **Handoff overlaps** — above the low box the arm can't rotate below 90° in place without sweeping into the second-stage tube, so the final rotation overlaps the last part of the climb for L3 (29", 22.5°) and L4 (52.5", 45°). The height where the rotation starts is **derived at plan time from both mechanisms' motion profiles** (pivot swing time vs. elevator decel/cruise) and one tunable per pose — the *arm arrival offset*: how many seconds after the elevator settles the arm finishes its rotation (negative = arm finishes early). Retuning the elevator or pivot speed therefore keeps the overlap in sync automatically; the resolved heights (≈25" for L3 and ≈40" for L4 with the shipped profiles) show live on the Testing tab. Leaving those poses mirrors the overlap with the arm swinging up during the initial descent.
-- **Stow overlaps the tuck** — the arm starts rotating to 0° as soon as the descending carriage passes the 10" tuck limit.
+Simulated against the full CAD model with the 15:1 elevator (50 in/s, 400 in/s²) and the softened pivot profile, sampled every 10 ms, every transit clears by ≥ 1.0" (model figure; about 1–1.5" real), including with the arm slowed to 150°/s by chain backlash. `SuperstructureCorridorTest` pins the station heights and the presets to the corridor table, so an edit that breaks the geometry fails the build rather than the robot.
 
 All overlaps are gated on measured heights/angles, never timing, and every command first safely escapes the **current** pose — buttons are safe in any order at any time. Manual stick control bypasses these interlocks.
 
@@ -154,18 +156,18 @@ Every tab fits **12 × 5 grid cells** (1536 × 640 px at grid size 128): on the 
 ### Testing one mechanism at a time
 The Testing tab drives each mechanism **independently** — set the *Elevator Setpoint* slider and press *Elevator Go*, and only the elevator moves; the arm stays exactly where it is (and the operator's manual stick for the other mechanism keeps working). The same goes for *Pivot Setpoint / Pivot Go* and *Intake Speed / Intake Run / Intake Stop*.
 
-These single-mechanism moves still consult the collision model in [Superstructure.java](src/main/java/frc/robot/Superstructure.java), but instead of moving the *other* mechanism out of the way (as the preset buttons do), an unsafe request is simply **refused with a toast notification** that says why — e.g. "Elevator test move refused: 30.0 in is not reachable with the arm at 0 deg — raise the arm first". Put the arm at 90° (Pivot Setpoint 90 → Pivot Go) and the elevator can be run through its full travel on its own.
+These single-mechanism moves still consult the collision model in [Superstructure.java](src/main/java/frc/robot/Superstructure.java), but instead of moving the *other* mechanism out of the way (as the preset buttons do), an unsafe request is simply **refused with a toast notification** that says why — e.g. "Elevator test move refused: 30.0 in is not reachable with the arm at 0 deg — raise the arm first". Put the arm at 100° (Pivot Setpoint 100 → Pivot Go) and the elevator can be run through its full travel on its own; the refusals come from the CAD corridor table.
 
 ### Live tuning without redeploying (Tunables)
 Empirically measured numbers live in [util/Tunables.java](src/main/java/frc/robot/util/Tunables.java), backed by **WPILib Preferences**: they appear in the Testing tab's *Tunables* widget, edits apply on the next loop (or next button press), and the roboRIO **persists them to disk** — they survive reboots, power cycles, *and* code deploys. The values in `Constants.java` are only the factory defaults; *Reset Tunables to Defaults* restores them. Because stored values survive a deploy, **changing a default in `Constants.java` does nothing on a robot that already has the key stored** — bump `DEFAULTS_VERSION` in `Tunables.java` (which overwrites every tunable once at the next boot) or press *Reset Tunables*.
 
 | Tunable | Default | Used by |
 |---|---|---|
-| Elevator – Travel Ratio (measured / modeled) | 1.0 | Carriage inches per motor rotation = 0.244 × this. Confirmed 1.0 by the 20"/40" tape tests; applied only with the carriage at its hard stop while disabled (the encoders re-reference there). See *Calibrating the elevator height* |
+| Elevator – Travel Ratio (measured / modeled) | 1.0 | Carriage inches per motor rotation = 0.733 × this (15:1). Confirmed 1.0 by the 20"/40" tape tests; applied only with the carriage at its hard stop while disabled (the encoders re-reference there). See *Calibrating the elevator height* |
 | Elevator – Height At Hard Stop (in) | 0.875 | Where the carriage sits, in the base-2×1-top → carriage-2×1-bottom frame, on its hard stop. The encoder is referenced to this value there and the reverse soft limit sits here. Measure it with a tape at rest; applied like the ratio |
-| Elevator – kP (duty per in) / kS (V) / kG (V) | 0.3 / 0 / 0.35 | Spark MAX position loop + feedforward, re-applied to both controllers the next time the robot is disabled |
+| Elevator – kP (duty per in) / kS (V) / kG (V) | 0.1 / 0.2 / 0.6 | Spark MAX position loop + feedforward, re-applied to both controllers the next time the robot is disabled |
 | Elevator – kV Scale (× free-speed model) | 1.0 | Multiplies the NEO back-EMF velocity feedforward (which is derived from the travel ratio). REV: overshoot → lower it |
-| Elevator – Cruise Velocity (in/s) / Max Acceleration (in/s²) | 20 / 200 | MAXMotion profile (full travel in ~2.7 s). 20 in/s is the ceiling of the 45:1 gearing (~11 V at cruise) — a faster elevator is a gearbox change, see *Faster elevator* above. The Superstructure handoff heights follow these automatically — re-check the *Handoffs* readout after a change |
+| Elevator – Cruise Velocity (in/s) / Max Acceleration (in/s²) | 50 / 400 | MAXMotion profile on the 15:1 gearing (full travel ≈1.2 s, ≈8.7 V at cruise). The staged superstructure sequences are gated on measured state, so a change here only alters their timing |
 | Pivot – Cruise Velocity (deg/s) / Acceleration (deg/s²) / Jerk (deg/s³) | 200 / 300 / 2000 | CorAl Motion Magic profile, re-applied to the TalonFX the next time the robot is disabled. **Softened for the pivot chain's backlash** (acceleration sets how hard the chain catches the arm at the end of a move; jerk sets how abruptly the stop begins). Once the chain is fixed, 240 / 480 / 4800 tracked cleanly. If a coral slips during a swing, lower the acceleration first. Handoff heights follow these too |
 | Elevator – Profile Error (in) | 0.3 | How far the carriage may stray from the MAXMotion profile before it is regenerated (not a settling tolerance) |
 | Vision – Reef Flush Distance (m) | 0.45 | L2–L4 + algae reef alignment (camera-read Z with bumpers flush — measure it: push the robot flush, copy `Vision Distance`) |
@@ -173,7 +175,6 @@ Empirically measured numbers live in [util/Tunables.java](src/main/java/frc/robo
 | Vision – L1 Score Distance (m) | 1.0 | L1 standoff |
 | Vision – Reef Branch Offset (m) | 0.165 | Left/right branch centering |
 | Vision – Tracking Distance / Rotation kP | 1.5 / 0.06 | Tracking aggressiveness |
-| Superstructure – L3 / L4 Arm Arrival Offset (s) | +0.8 / −0.6 | Seconds after the elevator settles that the arm finishes its rotation (negative = early). The handoff *heights* are derived from these and the motion profiles — see the Testing tab's *Handoffs* readout. L4 finishes ~11" below the top (rotation ≈ 23.5" → 41.5") because finishing at the top hit the reef bar; every −0.1 s moves it ~2" earlier. L3 starts ~4" below its target |
 | Drive – Teleop Speed Scale (0–1) | 0.25 | Fraction of top speed *and* rotation rate at full stick (0.25 = indoor testing; raise toward 1.0 for competition). Stick deadbands scale with it. |
 
 Mechanism contact geometry (tuck / low-box limits) is deliberately **not** a tunable — those are measured physical facts. The CorAl pivot's Phoenix gains are applied at boot and tuned live in Phoenix Tuner X; the elevator's Spark MAX gains *are* tunables (above) because the elevator is the mechanism that needs on-robot calibration most.
@@ -182,7 +183,7 @@ Mechanism contact geometry (tuck / low-box limits) is deliberately **not** a tun
 Heights are measured from the **top of the base-stage 2×1 to the bottom of the carriage 2×1**, with the middle stage between them. Five tape tests (2", 6", 8", 20", 40" commanded, under three different ratios) all fit one line: **tape = gearing-model travel + ≈0.875"**. Between the 20" and 40" tests the slope is 1.005, so the gearing model (0.244"/motor rotation) is right; the constant is not a scale error but the height the carriage sits at, in that frame, on its hard stop. The encoder is therefore referenced *to* the hard-stop height (*Elevator – Height At Hard Stop*, default 0.875") rather than zeroed, and the reverse soft limit sits there. A closed-loop problem looks different: the **dashboard itself** stops short of the setpoint (it should hold within ~0.1"); at kP 0.3 a 1" rest error would mean ~3.6 V pushing with no motion.
 
 1. **Measure the hard-stop height once:** disabled, carriage resting on its hard stop, tape from base-2×1 top to carriage-2×1 bottom. Enter it as *Elevator – Height At Hard Stop* (Testing tab); it applies while disabled with the carriage at the hard stop and the encoders re-reference to it (an info alert shows while it is waiting). Press *Zero Elevator* (Setup tab) whenever the carriage has been moved by hand; `Elevator/Height` must read the hard-stop height at rest — the *reads below its hard-stop height* alert fires if it reads lower.
-2. Arm at 90° (Pivot Setpoint 90 → Pivot Go). Testing tab: Elevator Setpoint **20** → Elevator Go. Let it settle, then read the **dashboard** height and the **tape**.
+2. Arm at 100° (Pivot Setpoint 100 → Pivot Go). Testing tab: Elevator Setpoint **20** → Elevator Go. Let it settle, then read the **dashboard** height and the **tape**.
 3. **Dashboard at 20.0, tape off by the same amount at 20" and 40"** → the hard-stop height is wrong; adjust it by the difference. **Tape off by a percentage** (twice as far off at 40" as at 20") → set *Elevator – Travel Ratio* = current × tape ÷ commanded; it should stay at 1.0.
 4. **Dashboard itself stops short** → closed loop: raise *kP* (rest error ≈ friction volts ÷ (12 × kP) inches) or *kS*. **Overshoot** → lower *kV Scale* first, then *kS* — REV's MAXMotion tuning order. All re-apply the next time the robot is disabled.
 5. Repeat at **40"** — dashboard and tape should agree within ⅛" at both heights. Then run L4 (52.5") once before touching *Cruise Velocity* / *Max Acceleration*.
@@ -307,12 +308,59 @@ The five STEP exports (`9143-2025-A-0000 Leviathan` and its Drivetrain / Elevato
 
 Two things the CAD shows that the code should know about: the carriage stage is rigged with 4 mm Dyneema over pulleys **and constant-force springs** (a gravity assist — expect the tuned elevator kG to land near zero or even slightly negative-feeling at the bottom), and there is a **CANivore** in the brainpan while `TunerConstants` puts the drivetrain on the roboRIO bus (empty bus name) — fine if the CANivore is unused, but if the swerve devices are wired to it the bus name must be set.
 
+### CAD clearance analysis (claw vs. elevator)
+
+The elevator tube contacts were mapped from the CAD instead of guessed: every CorAl part's B-rep edges were sampled (0.2"), projected to the side view about the pivot and filled to the part's true outline; the base stage, middle stage, funnel, frame and bumpers became obstacles (tubes as exact boxes, everything else as dilated edge samples), each tested only against claw parts it overlaps in X; the middle stage rises at half the carriage travel. The map below is the model's clearance for every (arm angle, carriage height): `#` under ¼", `x` under ½", `.` under 1", blank ≥ 1". It reproduces both contacts measured on the robot (0° at ≈10.75", 5° at ≈23") within ½", so treat its figures as *real minus 0 to ½"*.
+
+```
+      carriage height (preset frame), one column per 2": 1" ... 53"
+      1   9   17  25  33  41  49
+    0° |x.   ####.##########x      |
+    5° |x.   ##x..x########x       |
+   10° |x.        .x######x        |
+   15° |x.         .######.        |
+   20° |x.         .####x.         |
+   25° |x.         .###           x|
+   30° |x.         ###.          .#|
+   35° |x.         ###          .##|
+   40° |x.        x##x          ###|
+   45° |x.        ###.         .###|
+   50° |x.       .##x         .####|
+   55° |x.       .##.         #####|
+   60° |x.       xx.         x#####|
+   65° |x.       ..         .######|
+   70° |x.                  x######|
+   75° |x.                 .#######|
+   80° |x.                 x######x|
+   85° |x.                .######x.|
+   90° |#.                .####x.. |
+   95° |#.                ......   |
+  100° |#.                         |
+  105° |#.                         |
+  110° |x.                         |
+  115° |xx                         |
+  120° |xx                         |
+  125° |x#                         |
+  130° |##                         |
+  135° |##                         |
+  140° |##.                        |
+  145° |##.                        |
+  150° |###                        |
+  155° |###                        |
+  160° |###.                       |
+```
+
+Reading it: the blocked wedge from 18–30" for angles under 65° is **band A** (the middle-stage top tube passing the claw's top); the blocked region above ≈36–46" for angles 25–95° is **band B** (the tube and the constant-force-spring hardware, now 1–2" above the pivot, meeting the claw's lower rear) — that is the bar L4 hit, and the reason 90° is not a travel angle; the only clear columns at the top of travel are ≤ 22.5° and ≥ 97°. The bottom-left corner (angles > 130° below ≈7") is the bumper. `SuperstructureConstants.FREE_CORRIDORS` is this map with a 1" margin, and the staged sequences above were simulated against the full map. Reef branches are not in the model: at the L4 angle the claw stays inside the bumper plane (the manual gives branch tips at 31.875"/47.625"/72" inset 1⅝"/1⅝"/1⅛" from the reef face), so only the coral itself reaches the branch.
+
+Scripts (`stepbox.py`, `stepedges.py`, `clearlib.py`, `seqsim2.py`) live outside the repo in the session scratchpad; the inputs are the five STEP exports in Downloads. Re-run them if the claw, the elevator tubes or the spring hardware change.
+
 ## Pre-Competition Checklist
 
 1. **Verify the CANcoder offsets in Tuner X** (wheels aligned straight forward). `tuner-project.json` disagrees with `TunerConstants.java` on all four offsets — and note the Tuner project itself is **stale** (it models all four modules as MK4n L3+, but the real robot has MK4i L3 fronts), so do **not** blindly regenerate TunerConstants from it; the mixed per-module ratios now in TunerConstants.java match the physical robot. The MK4n (back) wheel inset is **confirmed from the CAD**: the steering-bearing axes of all four modules sit 12.375" from the frame center (2.625" in from both frame edges, MK4n and MK4i alike), matching `TunerConstants`.
 2. **Confirm the elevator hard-stop height** with a tape at rest (base-2×1 top to carriage-2×1 bottom) against *Elevator – Height At Hard Stop* (0.875"), then verify a 20" and a 40" move with the tape — see *Calibrating the elevator height*. The gearing model is confirmed; the travel ratio should stay at 1.0.
 3. **Sanity-check the CorAl pivot angle** against the through bore encoder. The 65.41:1 ratio is derived from the real gear train (10:58 → 18:58 → 12:42). Also confirm the through bore is mounted 1:1 on the pivot shaft.
-4. **Tune closed-loop gains** (elevator kP/kS/kV/kG and both mechanisms' profiles from the Testing-tab tunables — they re-apply the next time the robot is disabled; pivot kP/kS/kV/kG via Phoenix Tuner X; `AutoConstants` path-following kP) and test autos. Both mechanisms ship at **match-pace profiles**: elevator 20 in/s / 200 in/s² (the ceiling of the 45:1 gearing — see *Faster elevator*), pivot 200°/s / 300°/s² / jerk 2000°/s³, **deliberately softened while the pivot chain has backlash** (the arm was being thrown through the slop at the end of moves; 240 / 480 / 4800 is the target once the chain is fixed). First moves at these settings: watch L4 (the arm now rotates to 45° between ≈23.5" and ≈41.5" so it is clear of the reef bar before the coral reaches it — see the *Handoffs* readout; go more negative on the L4 offset if it still clips) and a held coral through a fast swing; if it slips, lower the pivot *Acceleration* first.
+4. **Tune closed-loop gains** (elevator kP/kS/kV/kG and both mechanisms' profiles from the Testing-tab tunables — they re-apply the next time the robot is disabled; pivot kP/kS/kV/kG via Phoenix Tuner X; `AutoConstants` path-following kP) and test autos. The elevator is now **15:1** (50 in/s / 400 in/s², kP 0.1, kG 0.6 — the constant-force springs may want less kG); the pivot ships at 200°/s / 300°/s² / jerk 2000, softened for the chain backlash (240 / 480 / 4800 once the chain is fixed). First moves with the new sequences: watch the **33" L4 station** (the 100°→25° rotation there, then the 20° finish above 37"), the **L4 return drop** to 39" before the arm moves, and the **L3 return lift** to 31". If a held coral slips during a swing, lower the pivot *Acceleration* first.
+4a. **The L3 pose (29", 22.5°) is the one preset the CAD model puts inside a contact band** (within ≈¼" of the top sprocket shaft; the dashboard shows an info alert saying so). It works on the robot; if it ever rubs, (25°, 30.5") is the nearest pose with a full inch of clearance.
 5. **Tune the vision goal constants**: place the robot flush on the reef base and copy the `Vision/Distance` reading into `REEF_FLUSH_DISTANCE` (same procedure backed up to the coral station for `STATION_FLUSH_DISTANCE`); verify `REEF_BRANCH_OFFSET`, the branch left/right sign, and `LIMELIGHT_FACING_SIGNS` (which cameras face front vs. rear). Verify the L3 approach **at low speed first** — its arm-arrival offset (and the ≈25" handoff it resolves to) is predicted, not measured; adjust *L3 Arm Arrival Offset* on the Testing tab if the mechanism approaches the tube during the rotation.
 6. **Firmware**: 2026 firmware on all CTRE devices (TalonFX, CANcoder, Pigeon 2, CANrange, CANdle), current Spark MAX firmware via the REV Hardware Client, 2026 roboRIO image, Limelight OS 2026.0+.
 6a. **Set the CANrange's CAN ID to 62 in Tuner X** (or change `CANRANGE_SENSOR_ID` to its actual ID). It was documented as ID 64, which is **not a legal Phoenix ID (0-62)** — robot code crashed at construction with it (caught by the unit tests).

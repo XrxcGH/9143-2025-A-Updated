@@ -1,5 +1,7 @@
 package frc.robot;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.function.DoubleSupplier;
 
@@ -8,45 +10,49 @@ import edu.wpi.first.wpilibj2.command.Commands;
 
 import frc.robot.Constants.CorAlConstants;
 import frc.robot.Constants.CorAlConstants.PivotPresetAngles;
+import frc.robot.Constants.ElevatorConstants;
 import frc.robot.Constants.ElevatorConstants.PresetHeights;
 import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.subsystems.CorAl;
 import frc.robot.subsystems.Elevator;
 import frc.robot.util.Elastic;
-import frc.robot.util.Tunables;
 
 /**
  * Coordinated elevator + CorAl motion ("superstructure") command factory.
  *
- * The elevator and the CorAl arm can collide with the elevator structure at
- * specific combinations of height and angle (see SuperstructureConstants for
- * the measured contact points). Every position command in the robot goes
- * through this class, whose motion planner picks the FASTEST sequence that
- * stays inside the safe regions, based on where the mechanisms actually are
- * when the command starts:
+ * The elevator and the CorAl claw can collide with the elevator structure
+ * at specific combinations of height and angle. The free region of
+ * (height, angle) was computed from the robot CAD - see
+ * {@link SuperstructureConstants} for the map and how it was validated
+ * against the contacts measured on the robot. Every position command in
+ * the robot goes through this class, whose planner moves through that
+ * region in staged, STATE-GATED steps: each step's trigger is a measured
+ * height or angle, never a timer, so the sequences stay safe at any
+ * elevator or pivot speed (only their duration changes).
  *
- *   - "Low box" moves (both start and end below LOW_TRAVEL_MAX_HEIGHT with
- *     the arm at/above ARM_CLEAR_MIN_ANGLE) run direct - the arm and
- *     elevator move together with no safe-angle excursion. Base to L2, base
- *     to L1, and base to the low algae intake are all single direct motions.
- *   - Moves that leave the low box travel with the arm at the safe angle
- *     (90 degrees). When ascending, the elevator gets a bounded head start
- *     (up to the highest height that is safe for the CURRENT arm angle)
- *     while the arm swings up, so the swing costs little or no time.
- *   - Handoff overlaps: above the low box the arm cannot rotate below 90
- *     degrees in place without sweeping into the second-stage tube, so the
- *     final rotation overlaps the last part of the climb for L3 (29",
- *     22.5 deg) and L4 (52.5", 45 deg). The height where the rotation
- *     starts is DERIVED from both mechanisms' motion profiles and a
- *     per-pose "arm arrival offset" tunable (see handoffHeight), so
- *     retuning either profile keeps the overlap in sync. Leaving those
- *     poses mirrors the overlap with the arm swinging up during the
- *     initial descent.
- *   - Stowing overlaps the final tuck: the arm starts rotating to 0 as soon
- *     as the descending elevator passes ARM_TUCK_MAX_HEIGHT.
- *
- * All overlaps are gated on measured state (heights and angles), never on
- * timing, so they remain safe if a mechanism runs slower than expected.
+ * The shape of the free region, and what it forces:
+ *   - Tucked (below ARM_CLEAR_MIN_ANGLE) only below ARM_TUCK_MAX_HEIGHT.
+ *   - "Low box": any angle from ARM_CLEAR_MIN_ANGLE up is free below
+ *     LOW_BOX_ROOF, so low poses (L2, L1) move both mechanisms together.
+ *   - Climbing past the low box roof needs the arm at BAND_PASS_MIN_ANGLE
+ *     or more; from SAFE_TRAVEL_MIN_ANGLE (RAISE = 100 deg) the carriage
+ *     may go anywhere. 90 deg is NOT a safe travel angle above ~36 in.
+ *   - Mid scoring poses (L3): the carriage climbs at RAISE and the arm
+ *     makes its final rotation just below the target. Leaving: the
+ *     carriage LIFTS to MID_POSE_RETURN_LIFT_HEIGHT while the arm swings
+ *     up and only descends once the arm is back at RAISE - the fix for the
+ *     L3 return hitting the middle-stage tube.
+ *   - High scoring pose (L4): the top of travel is clear only with the arm
+ *     at 22.5 deg or less, and the 90->L4 rotation is impossible up there,
+ *     so the arm rotates at the L4_STATION_HEIGHT "station" (33 in, where
+ *     25-100 deg are all clear), the carriage climbs with the arm at the
+ *     stage angle, and the last few degrees happen above
+ *     L4_FINAL_ANGLE_MIN_HEIGHT. Leaving L4 is the mirror: DROP first to
+ *     L4_RETURN_DROP_HEIGHT at the L4 angle, stage to 45 deg, drop to the
+ *     station, swing to RAISE, then descend.
+ *   - Angles beyond HIGH_ANGLE_STAGE (algae poses) hit the bumper near the
+ *     base, so the arm waits at the stage angle until the carriage is above
+ *     HIGH_ANGLE_MIN_HEIGHT.
  *
  * NOTE: the operator's manual stick controls bypass these interlocks - they
  * command the subsystems directly and rely on the operator watching the
@@ -72,6 +78,7 @@ public class Superstructure {
 
     /** Safe travel angle in degrees (RAISE preset): clear at every height. */
     private static final double SAFE_ANGLE = PivotPresetAngles.RAISE.getAngle();
+    private static final double TOL = SuperstructureConstants.SAFE_ANGLE_TOLERANCE;
 
     private final Elevator elevator;
     private final CorAl coral;
@@ -95,19 +102,127 @@ public class Superstructure {
     }
 
     // ==================================================================
-    // State predicates
+    // CAD free-region predicates (pure functions of height and angle)
     // ==================================================================
 
-    /** True when the arm is at/above the safe travel angle. */
-    private boolean armAtOrAboveSafe() {
-        return coral.getPivotAngle()
-            >= SAFE_ANGLE - SuperstructureConstants.SAFE_ANGLE_TOLERANCE;
+    /**
+     * True if the pose lies inside the CAD free corridors
+     * ({@link SuperstructureConstants#FREE_CORRIDORS}): the height is in
+     * either corridor of the angle's row. Angles beyond the table are not
+     * clear.
+     */
+    public static boolean poseClear(double height, double angle) {
+        for (double[] row : SuperstructureConstants.FREE_CORRIDORS) {
+            if (angle < row[0]) {
+                boolean low = height >= row[1] && height <= row[2];
+                boolean high = !Double.isNaN(row[3]) && height >= row[3] && height <= row[4];
+                return low || high;
+            }
+        }
+        return false;
     }
 
-    /** True when the arm has cleared the static elevator part (>= ~5 deg). */
-    private boolean armClearOfStaticPart() {
-        return coral.getPivotAngle()
-            >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE - CorAlConstants.CORAL_PIVOT_ALLOWED_ERROR;
+    /** True if every height from {@code from} to {@code to} (0.25 in steps) is clear at {@code angle}. */
+    public static boolean elevatorPathClear(double from, double to, double angle) {
+        double lo = Math.min(from, to), hi = Math.max(from, to);
+        for (double h = lo; h <= hi + 1e-9; h += 0.25) {
+            if (!poseClear(Math.min(h, hi), angle)) {
+                return false;
+            }
+        }
+        return poseClear(hi, angle);
+    }
+
+    /** True if every angle from {@code from} to {@code to} (0.5 deg steps) is clear at {@code height}. */
+    public static boolean pivotPathClear(double from, double to, double height) {
+        double lo = Math.min(from, to), hi = Math.max(from, to);
+        for (double a = lo; a <= hi + 1e-9; a += 0.5) {
+            if (!poseClear(height, Math.min(a, hi))) {
+                return false;
+            }
+        }
+        return poseClear(height, hi);
+    }
+
+    /**
+     * Audits the operator presets against the corridors at startup. Returns
+     * an empty string when every preset is clear, otherwise a message naming
+     * the ones the CAD model puts inside a contact band (the Dashboard shows
+     * it as an info alert). Presets are still commanded as given - the
+     * operator owns them - this only makes a known-tight pose visible.
+     */
+    public static String presetAuditMessage() {
+        List<String> tight = new ArrayList<>();
+        double[][] presets = {
+            {ElevatorConstants.ELEVATOR_ZERO_HEIGHT, PivotPresetAngles.BASE.getAngle()},
+            {PresetHeights.CORAL_L1.getHeight(), PivotPresetAngles.CORAL_L1.getAngle()},
+            {PresetHeights.CORAL_L2.getHeight(), PivotPresetAngles.CORAL_L2.getAngle()},
+            {PresetHeights.CORAL_L3.getHeight(), PivotPresetAngles.CORAL_L3.getAngle()},
+            {PresetHeights.CORAL_L4.getHeight(), PivotPresetAngles.CORAL_L4.getAngle()},
+            {PresetHeights.ALGAE_LOW_INTAKE.getHeight(), PivotPresetAngles.ALGAE_INTAKE.getAngle()},
+            {PresetHeights.ALGAE_HIGH_INTAKE.getHeight(), PivotPresetAngles.ALGAE_INTAKE.getAngle()},
+            {PresetHeights.ALGAE_SCORE.getHeight(), PivotPresetAngles.ALGAE_SCORE.getAngle()},
+        };
+        String[] names = {"BASE", "L1", "L2", "L3", "L4", "ALGAE LOW", "ALGAE HIGH", "ALGAE SCORE"};
+        for (int i = 0; i < presets.length; i++) {
+            double h = Math.max(presets[i][0], ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
+            if (!poseClear(h, presets[i][1])) {
+                tight.add(String.format("%s (%.1f in, %.1f deg)", names[i], h, presets[i][1]));
+            }
+        }
+        return tight.isEmpty() ? ""
+            : "CAD model puts these presets inside a contact band (< 1 in): " + String.join(", ", tight)
+                + ". They are commanded as set; watch them.";
+    }
+
+    /** One-line description of the staged-sequence stations, for the dashboard. */
+    public static String stationSummary() {
+        return String.format(
+            "L4 up: RAISE to %.0f in, rotate to %.0f deg there, climb to %.0f, finish %.0f deg above %.0f, top | "
+                + "L4 down: drop to %.0f at %.0f deg, %.0f deg below %.0f, station %.0f, RAISE below %.0f | "
+                + "L3 up: rotate %.0f in below target; down: lift to %.0f, descend at RAISE",
+            SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.L4_STAGE_ANGLE,
+            SuperstructureConstants.L4_PRE_TOP_HEIGHT, PivotPresetAngles.CORAL_L4.getAngle(),
+            SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT,
+            SuperstructureConstants.L4_RETURN_DROP_HEIGHT, PivotPresetAngles.CORAL_L4.getAngle(),
+            SuperstructureConstants.L4_RETURN_STAGE_ANGLE, SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT,
+            SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.L4_RETURN_SAFE_ROTATE_MAX_HEIGHT,
+            SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET, SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
+    }
+
+    // ==================================================================
+    // Measured-state gates and single-mechanism steps
+    // ==================================================================
+
+    private boolean armAtLeast(double angle) {
+        return coral.getPivotAngle() >= angle - TOL;
+    }
+
+    private boolean armAtMost(double angle) {
+        return coral.getPivotAngle() <= angle + TOL;
+    }
+
+    private boolean heightAtLeast(double height) {
+        return elevator.getCurrentPosition() >= height;
+    }
+
+    private boolean heightAtMost(double height) {
+        return elevator.getCurrentPosition() <= height;
+    }
+
+    private Command armTo(double angle) {
+        return Commands.runOnce(() -> coral.setPivotAngle(angle), coral);
+    }
+
+    private Command elevatorTo(double height) {
+        return Commands.runOnce(() -> elevator.setPosition(height), elevator);
+    }
+
+    private Command both(double height, double angle) {
+        return Commands.runOnce(() -> {
+            elevator.setPosition(height);
+            coral.setPivotAngle(angle);
+        }, elevator, coral);
     }
 
     /** True when both mechanisms have settled at their commanded targets. */
@@ -127,95 +242,22 @@ public class Superstructure {
             .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS);
     }
 
-    // ==================================================================
-    // Handoff derivation - keeps the L3/L4 overlap in sync with BOTH
-    // mechanisms' motion profiles
-    // ==================================================================
-
     /**
-     * Seconds for a jerk-limited trapezoidal profile to travel
-     * {@code distance} from rest to rest. Trapezoid when the move is long
-     * enough to reach cruise, triangle otherwise; each accel/decel phase is
-     * stretched by one jerk ramp (S-curve) when a jerk limit is set.
+     * Highest carriage height that is clear with the arm at the given
+     * MEASURED angle while it swings up toward RAISE (used for the climbing
+     * head start). No tolerance on the clear angle: the tuck zone is real.
      */
-    static double profileDuration(double distance, double cruise, double accel, double jerk) {
-        distance = Math.abs(distance);
-        double fullAccelDistance = cruise * cruise / accel; // accel + decel at full cruise
-        double t = distance >= fullAccelDistance
-            ? distance / cruise + cruise / accel
-            : 2.0 * Math.sqrt(distance / accel);
-        return t + (jerk > 0 ? 2.0 * accel / jerk : 0.0);
-    }
-
-    /**
-     * Distance a profile that ends at rest covers in its final
-     * {@code seconds}: pure deceleration if that window fits inside the
-     * decel phase, otherwise cruise plus the full decel.
-     */
-    static double distanceBeforeStop(double seconds, double cruise, double accel) {
-        if (seconds <= 0) {
-            return 0;
+    private static double climbCeiling(double armAngle) {
+        if (armAngle < SuperstructureConstants.ARM_CLEAR_MIN_ANGLE + SuperstructureConstants.SAFE_ANGLE_TOLERANCE) {
+            return SuperstructureConstants.ARM_TUCK_MAX_HEIGHT;
         }
-        double decelTime = cruise / accel;
-        if (seconds <= decelTime) {
-            return 0.5 * accel * seconds * seconds;
+        if (armAngle < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
+            return SuperstructureConstants.LOW_BOX_ROOF;
         }
-        return cruise * seconds - 0.5 * cruise * cruise / accel;
-    }
-
-    /**
-     * Seconds the arm's profile needs to swing from the safe angle to
-     * {@code targetAngle}. Uses the LIVE Motion Magic profile, so a
-     * Testing-tab retune of the pivot moves the handoffs with it.
-     */
-    public double armSwingSeconds(double targetAngle) {
-        return profileDuration(SAFE_ANGLE - targetAngle,
-            coral.cruiseVelocity(), coral.maxAcceleration(), coral.maxJerk());
-    }
-
-    /**
-     * Elevator height at which the arm must START its final rotation so
-     * that it FINISHES {@code arrivalOffsetSeconds} after the elevator
-     * settles at {@code targetHeight} (negative = arm finishes early).
-     *
-     * Computed from the pivot's swing time and the elevator's decel/cruise
-     * profile, so a change to either mechanism's tuning moves this height
-     * automatically. Clamped to never start inside the tube contact zone
-     * (just above the low-box roof) and to always start before the elevator
-     * arrives, so the state gate cannot deadlock.
-     */
-    public double handoffHeight(double targetHeight, double targetAngle, double arrivalOffsetSeconds) {
-        double elevatorTimeToGoAtStart = armSwingSeconds(targetAngle) - arrivalOffsetSeconds;
-        // Live profile values, so a Testing-tab retune of the elevator's
-        // cruise/acceleration moves the handoffs with it.
-        double climbDuringSwing = distanceBeforeStop(elevatorTimeToGoAtStart,
-            elevator.cruiseVelocity(), elevator.maxAcceleration());
-        double handoff = targetHeight - climbDuringSwing;
-        double floor = SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
-            + SuperstructureConstants.HANDOFF_MIN_ABOVE_LOW_BOX;
-        double ceiling = targetHeight - SuperstructureConstants.HANDOFF_MIN_BEFORE_TARGET;
-        return Math.max(floor, Math.min(ceiling, handoff));
-    }
-
-    /** True when a pose belongs to the L4 (upper) band rather than the L3 band. */
-    private static boolean isHighBand(double height) {
-        return height > (PresetHeights.CORAL_L3.getHeight() + PresetHeights.CORAL_L4.getHeight()) / 2.0;
-    }
-
-    /** Handoff for the scoring pose the mechanisms are heading to (or sitting at). */
-    private double handoffFor(double poseHeight, double poseAngle) {
-        return handoffHeight(poseHeight, poseAngle,
-            isHighBand(poseHeight) ? Tunables.l4ArmArrivalOffset() : Tunables.l3ArmArrivalOffset());
-    }
-
-    /** Resolved L3 handoff height with the current profiles and tunables (dashboard readout). */
-    public double l3HandoffHeight() {
-        return handoffFor(PresetHeights.CORAL_L3.getHeight(), PivotPresetAngles.CORAL_L3.getAngle());
-    }
-
-    /** Resolved L4 handoff height with the current profiles and tunables (dashboard readout). */
-    public double l4HandoffHeight() {
-        return handoffFor(PresetHeights.CORAL_L4.getHeight(), PivotPresetAngles.CORAL_L4.getAngle());
+        if (armAngle < SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE) {
+            return SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT;
+        }
+        return ElevatorConstants.ELEVATOR_MAX_POSITION;
     }
 
     // ==================================================================
@@ -224,9 +266,8 @@ public class Superstructure {
 
     /**
      * Returns a command that moves to the given pose safely and as fast as
-     * the safe regions allow. Deferred so the plan is built from the REAL
-     * mechanism state at the moment the command starts (not at robot init,
-     * and not at whatever pose the previous command assumed).
+     * the free corridors allow. Deferred so the plan is built from the REAL
+     * mechanism state at the moment the command starts.
      */
     private Command moveTo(PresetHeights height, PivotPresetAngles angle) {
         return Commands.defer(() -> planMove(height.getHeight(), angle.getAngle()),
@@ -235,185 +276,173 @@ public class Superstructure {
 
     /** Builds the motion sequence for a target pose from the current state. */
     private Command planMove(double targetHeight, double targetAngle) {
-        double currentHeight = elevator.getCurrentPosition();
-        double currentAngle = coral.getPivotAngle();
+        double h0 = elevator.getCurrentPosition();
+        double a0 = coral.getPivotAngle();
+        double target = Math.max(targetHeight, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
 
-        // ---- Case 1: the whole move stays inside the low box ----
-        // Below LOW_TRAVEL_MAX_HEIGHT every arm angle >= ARM_CLEAR_MIN_ANGLE
-        // is contact-free, so the two mechanisms move together. The only
-        // gate: if the arm starts fully tucked, let it clear the static part
-        // (a ~5 degree swing) before the elevator lifts off the base.
-        if (currentHeight <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
-                && targetHeight <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
-                && targetAngle >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE) {
-            return Commands.sequence(
-                Commands.runOnce(() -> coral.setPivotAngle(targetAngle), coral),
-                Commands.waitUntil(this::armClearOfStaticPart),
-                Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
-                settle()
-            );
+        // ---- Moves that never leave the low box need no RAISE excursion ----
+        boolean startsLow = h0 <= SuperstructureConstants.LOW_BOX_ROOF;
+        boolean endsLow = target <= SuperstructureConstants.LOW_BOX_ROOF;
+        boolean armStartsClear = a0 >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE;
+        if (startsLow && endsLow && targetAngle < SuperstructureConstants.HIGH_ANGLE_STAGE) {
+            if (targetAngle < SuperstructureConstants.ARM_CLEAR_MIN_ANGLE) {
+                // Tuck target (BASE): descend at the current angle (the low
+                // box is clear at any angle from ARM_CLEAR_MIN_ANGLE up),
+                // tuck once below the tuck limit. From the base pose this is
+                // (almost) a no-op instead of a 0 -> 100 -> 0 round trip.
+                // A tucked arm ABOVE the tuck limit is a manual-control-only
+                // state: swing it clear first, in place.
+                Command clearFirst = (!armStartsClear && h0 > SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)
+                    ? armTo(SuperstructureConstants.ARM_CLEAR_MIN_ANGLE + TOL)
+                        .andThen(Commands.waitUntil(() -> coral.getPivotAngle()
+                            >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE))
+                    : Commands.none();
+                return clearFirst
+                    .andThen(elevatorTo(target))
+                    .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)))
+                    .andThen(armTo(targetAngle))
+                    .andThen(settle());
+            }
+            // Low pose (L2, L1): arm first if it starts tucked (it only has
+            // to clear ~8 degrees before the carriage may leave the base),
+            // then both together.
+            return armTo(targetAngle)
+                .andThen(Commands.waitUntil(() -> coral.getPivotAngle()
+                    >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE || a0 >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE))
+                .andThen(elevatorTo(target))
+                .andThen(settle());
         }
 
-        // ---- Case 2: tuck target (BASE) from inside the low box ----
-        // A tucked arm is only allowed near the base, but the descent to get
-        // there is safe at ANY arm angle while inside the low box - so skip
-        // the 90-degree excursion entirely: send the elevator down, then
-        // tuck once the carriage is below the tuck limit. From the base pose
-        // itself this reduces to (almost) a no-op instead of a pointless
-        // 0 -> 90 -> 0 arm round trip. The currentAngle guard excludes the
-        // (manual-control-only) pathological state of a tucked arm above the
-        // tuck limit, which routes to the general path's escape instead.
-        if (targetAngle < SuperstructureConstants.ARM_CLEAR_MIN_ANGLE
-                && currentHeight <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
-                && targetHeight <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT
-                && (currentAngle >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE
-                        - CorAlConstants.CORAL_PIVOT_ALLOWED_ERROR
-                    || currentHeight <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)) {
-            return Commands.sequence(
-                Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
-                Commands.waitUntil(() ->
-                    elevator.getCurrentPosition() <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT),
-                Commands.runOnce(() -> coral.setPivotAngle(targetAngle), coral),
-                settle()
-            );
-        }
-
-        // ---- General path: escape the current pose, travel at the safe
-        //      angle, finish at the target ----
-        return escapeCurrentPose(targetHeight, targetAngle)
-            .andThen(travelAndFinish(targetHeight, targetAngle));
+        // ---- General path: get the arm to RAISE (with every head start the
+        //      corridors allow), then approach the target ----
+        return escapeToSafe(target).andThen(approach(target, targetAngle));
     }
 
     /**
-     * Gets the arm to/above the safe travel angle from wherever it is now,
-     * as cheaply as possible:
-     *  - already safe: nothing to do;
-     *  - high pose with the arm below safe (e.g. sitting at L4): rotating up
-     *    in place would strike the second-stage tube, so descend toward the
-     *    handoff height while the arm swings up (mirror of the L4 approach);
-     *  - ascending move: give the elevator a head start toward the target,
-     *    bounded by the highest height that is safe for the current arm
-     *    angle, so the swing overlaps useful travel;
-     *  - otherwise: swing up in place.
-     *
-     * The arm is sent to the FINAL angle when that angle is itself at/above
-     * safe (everything >= 90 degrees is contact-free at every height), so a
-     * free-zone target like the algae intake sweeps up in one continuous
-     * motion instead of decelerating at 90 and re-accelerating when
-     * travelAndFinish retargets it.
+     * Gets the arm to RAISE from wherever the mechanisms are now, at a
+     * height from which the carriage can travel freely, using the staged
+     * exits for the L3/L4 poses and a climbing head start from the low box.
+     * Ends with the arm at/above SAFE_TRAVEL_MIN_ANGLE. Never times out:
+     * these are safety gates.
      */
-    private Command escapeCurrentPose(double targetHeight, double targetAngle) {
-        double currentHeight = elevator.getCurrentPosition();
-        double currentAngle = coral.getPivotAngle();
+    private Command escapeToSafe(double targetHeight) {
+        double h0 = elevator.getCurrentPosition();
+        double a0 = coral.getPivotAngle();
 
-        // Where the arm swings during the escape: the final angle if it is
-        // already in the free zone, otherwise the safe travel angle.
-        double escapeAngle = Math.max(SAFE_ANGLE, targetAngle);
-
-        // Already at/above the safe angle: no escape needed
-        if (currentAngle >= SAFE_ANGLE - SuperstructureConstants.SAFE_ANGLE_TOLERANCE) {
-            return Commands.none();
+        if (a0 >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE - TOL) {
+            return Commands.none(); // already free to travel
+        }
+        if (h0 >= SuperstructureConstants.L4_ZONE_MIN_HEIGHT && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
+            return leaveHighPose();
+        }
+        if (h0 > SuperstructureConstants.LOW_BOX_ROOF && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
+            return leaveMidPose(h0);
+        }
+        if (h0 > SuperstructureConstants.LOW_BOX_ROOF) {
+            // Arm between the band-pass and safe-travel angles above the low
+            // box (e.g. 90 deg at 38 in after manual control): rotating on
+            // toward RAISE moves the claw's rear away from the tube.
+            return armTo(SAFE_ANGLE)
+                .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
         }
 
-        // Arm below safe above the low box (the L3/L4 scoring poses):
-        // in-place rotation would sweep into the second-stage tube, so
-        // mirror the approach overlap - descend toward the pose's handoff
-        // height while the arm swings up. Never commands upward.
-        if (currentHeight > SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            // The handoff is derived from the profiles + live tunables at plan
-            // time (mirror of this pose's approach), so a dashboard edit or a
-            // profile retune applies to the very next button press.
-            double handoff = handoffFor(currentHeight, currentAngle);
-            double escapeFloor = Math.min(handoff, currentHeight);
-            return Commands.runOnce(() -> {
-                    elevator.setPosition(escapeFloor);
-                    coral.setPivotAngle(escapeAngle);
-                }, elevator, coral)
-                .andThen(Commands.waitUntil(this::armAtOrAboveSafe));
+        // In the low box. Swing up; when the move is upward, let the carriage
+        // climb as far as the arm's MEASURED angle allows, re-evaluated every
+        // loop so the ceiling ratchets up as the arm swings (tuck limit ->
+        // low box roof -> mid corridor -> anything). MAXMotion re-profiles
+        // each retarget from the current motion state, so the carriage keeps
+        // climbing smoothly. Never commands downward.
+        Command swing = armTo(SAFE_ANGLE);
+        if (targetHeight > h0) {
+            return swing.andThen(Commands.run(() -> {
+                double ceiling = climbCeiling(coral.getPivotAngle());
+                elevator.setPosition(Math.max(Math.min(targetHeight, ceiling), elevator.getCurrentPosition()));
+            }, elevator).until(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
         }
-
-        // Ascending: head start up to the height that is safe at the arm's
-        // MEASURED angle, re-evaluated every loop so the ceiling ratchets up
-        // as the arm swings (tuck limit while fully tucked, low box roof once
-        // the arm clears the static part). Computing the bound once at plan
-        // time would park the elevator at the stale bound waiting for the
-        // arm - a stop-and-go stutter; here the target only ever moves up,
-        // and MAXMotion re-profiles each retarget from the current motion
-        // state, so the carriage keeps climbing smoothly until the arm is
-        // safe and travelAndFinish hands it the final height.
-        // Never commands downward.
-        if (targetHeight > currentHeight) {
-            return Commands.runOnce(() -> coral.setPivotAngle(escapeAngle), coral)
-                .andThen(Commands.run(() -> {
-                    double ceiling = armClearOfStaticPart()
-                        ? SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
-                        : SuperstructureConstants.ARM_TUCK_MAX_HEIGHT;
-                    elevator.setPosition(Math.max(Math.min(targetHeight, ceiling),
-                        elevator.getCurrentPosition()));
-                }, elevator).until(this::armAtOrAboveSafe));
-        }
-
-        // Descending (or staying): swing up in place. Descending with the
-        // arm low is NOT safe in general (the 5-degree tube contact zone is
-        // bidirectional), so no downward head start.
-        return Commands.runOnce(() -> coral.setPivotAngle(escapeAngle), coral)
-            .andThen(Commands.waitUntil(this::armAtOrAboveSafe));
+        return swing.andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
     }
 
     /**
-     * Travels to the target height and settles at the target angle, given
-     * the arm is already at/above the safe angle. Picks the finishing
-     * strategy by target type.
+     * Leaves a mid-height scoring pose (L3): lift to the return-lift height
+     * while the arm swings to RAISE, and only hand the carriage on once the
+     * arm is free to travel. Descending any earlier sweeps the claw into
+     * the middle-stage top tube.
      */
-    private Command travelAndFinish(double targetHeight, double targetAngle) {
-        // Target angle in the free zone (>= safe angle): the elevator and
-        // arm move simultaneously the whole way
-        if (targetAngle >= SAFE_ANGLE - SuperstructureConstants.SAFE_ANGLE_TOLERANCE) {
-            return Commands.sequence(
-                Commands.runOnce(() -> {
-                    elevator.setPosition(targetHeight);
-                    coral.setPivotAngle(targetAngle);
-                }, elevator, coral),
-                settle()
-            );
-        }
+    private Command leaveMidPose(double currentHeight) {
+        double lift = Math.max(currentHeight, SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
+        return both(lift, SAFE_ANGLE)
+            .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
+    }
 
-        // Full tuck (0 degrees): descend at the safe angle and start the
-        // tuck as soon as the carriage passes the tuck limit
+    /**
+     * Leaves the high scoring pose (L4): drop first at the L4 angle, stage
+     * the arm to 45 deg while low enough, drop to the station, swing to
+     * RAISE below the safe-rotate height, then the carriage is free.
+     */
+    private Command leaveHighPose() {
+        return elevatorTo(SuperstructureConstants.L4_RETURN_DROP_HEIGHT)
+            .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT)))
+            .andThen(armTo(SuperstructureConstants.L4_RETURN_STAGE_ANGLE))
+            .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE)))
+            .andThen(elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT))
+            .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_SAFE_ROTATE_MAX_HEIGHT)))
+            .andThen(armTo(SAFE_ANGLE))
+            .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
+    }
+
+    /**
+     * Travels to the target and settles at the target angle, given the arm
+     * is at/above the safe travel angle. Picks the strategy by target type.
+     */
+    private Command approach(double targetHeight, double targetAngle) {
+        // Tuck target (BASE) from above: descend at RAISE, tuck below the limit
         if (targetAngle < SuperstructureConstants.ARM_CLEAR_MIN_ANGLE) {
-            return Commands.sequence(
-                Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
-                Commands.waitUntil(() ->
-                    elevator.getCurrentPosition() <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT),
-                Commands.runOnce(() -> coral.setPivotAngle(targetAngle), coral),
-                settle()
-            );
+            return elevatorTo(targetHeight)
+                .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)))
+                .andThen(armTo(targetAngle))
+                .andThen(settle());
         }
-
-        // Scoring pose above the low box with the arm below safe (L3, L4):
-        // overlap the final rotation with the last part of the climb, past
-        // the pose's handoff height, so the mechanism sweeps in behind the
-        // second-stage tube instead of into it
-        if (targetHeight > SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            double handoff = handoffFor(targetHeight, targetAngle);
-            return Commands.sequence(
-                Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
-                Commands.waitUntil(() -> elevator.getCurrentPosition() >= handoff),
-                Commands.runOnce(() -> coral.setPivotAngle(targetAngle), coral),
-                settle()
-            );
+        // Free-zone target (RAISE .. stage angle, e.g. L1, algae score): together
+        if (targetAngle >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE
+                && targetAngle <= SuperstructureConstants.HIGH_ANGLE_STAGE) {
+            return both(targetHeight, targetAngle).andThen(settle());
         }
-
-        // Scoring pose inside the low box (L2 at 12", 5 deg), reached from
-        // above: descend at the safe angle and start the final rotation as
-        // soon as the carriage is back inside the low box
-        return Commands.sequence(
-            Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
-            Commands.waitUntil(() ->
-                elevator.getCurrentPosition() <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT),
-            Commands.runOnce(() -> coral.setPivotAngle(targetAngle), coral),
-            settle()
-        );
+        // High-angle target (algae intake): hold the arm at the stage angle
+        // until the carriage is above the bumper zone, then finish
+        if (targetAngle > SuperstructureConstants.HIGH_ANGLE_STAGE) {
+            return both(targetHeight, SuperstructureConstants.HIGH_ANGLE_STAGE)
+                .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT)))
+                .andThen(armTo(targetAngle))
+                .andThen(settle());
+        }
+        // Low pose reached from above (L2, L1 at a low angle): descend at
+        // RAISE and rotate only once inside the low box
+        if (targetHeight <= SuperstructureConstants.LOW_BOX_ROOF) {
+            return elevatorTo(targetHeight)
+                .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.LOW_BOX_ROOF)))
+                .andThen(armTo(targetAngle))
+                .andThen(settle());
+        }
+        // Mid scoring pose (L3): climb at RAISE, final rotation just below the target
+        if (targetHeight < SuperstructureConstants.L4_ZONE_MIN_HEIGHT) {
+            double rotateAt = targetHeight - SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET;
+            return elevatorTo(targetHeight)
+                .andThen(Commands.waitUntil(() -> heightAtLeast(rotateAt)))
+                .andThen(armTo(targetAngle))
+                .andThen(settle());
+        }
+        // High scoring pose (L4): staged through the station
+        double stageAngle = Math.min(targetAngle, SuperstructureConstants.L4_STAGE_ANGLE);
+        return elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT)
+            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)))
+            .andThen(armTo(stageAngle))
+            .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.L4_STAGE_DONE_ANGLE)))
+            .andThen(elevatorTo(SuperstructureConstants.L4_PRE_TOP_HEIGHT))
+            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT)))
+            .andThen(armTo(targetAngle))
+            .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)))
+            .andThen(elevatorTo(targetHeight))
+            .andThen(settle());
     }
 
     // ==================================================================
@@ -431,14 +460,15 @@ public class Superstructure {
     }
 
     /**
-     * Swings the arm to the safe travel angle at the current height,
-     * automatically handling a high pose that needs the overlapped escape.
+     * Swings the arm to the safe travel angle from wherever the mechanisms
+     * are, using the staged exits when leaving L3 or L4.
      */
     public Command raiseArm() {
         return Commands.defer(() ->
-            escapeCurrentPose(elevator.getCurrentPosition(), SAFE_ANGLE)
-                .andThen(Commands.runOnce(() -> coral.setPivotAngle(SAFE_ANGLE), coral))
-                .andThen(Commands.waitUntil(coral::isAtTargetAngle)),
+            escapeToSafe(elevator.getCurrentPosition())
+                .andThen(armTo(SAFE_ANGLE))
+                .andThen(Commands.waitUntil(coral::isAtTargetAngle)
+                    .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS)),
             Set.of(elevator, coral));
     }
 
@@ -463,25 +493,25 @@ public class Superstructure {
             .unless(coral::isGamePieceDetected);
     }
 
-    /** Moves to the L1 scoring pose (0 in, 100 degrees). */
+    /** Moves to the L1 scoring pose (base height, 100 degrees). */
     public Command goToCoralL1() {
         return setGoal(Goal.CORAL_L1)
             .andThen(moveTo(PresetHeights.CORAL_L1, PivotPresetAngles.CORAL_L1));
     }
 
-    /** Moves to the L2 scoring pose (12 in, 5 degrees). */
+    /** Moves to the L2 scoring pose (12 in, 10 degrees). */
     public Command goToCoralL2() {
         return setGoal(Goal.CORAL_L2)
             .andThen(moveTo(PresetHeights.CORAL_L2, PivotPresetAngles.CORAL_L2));
     }
 
-    /** Moves to the L3 scoring pose (29 in, 22.5 degrees) with the mid handoff overlap. */
+    /** Moves to the L3 scoring pose (29 in, 22.5 degrees): climb at RAISE, rotate just below the target. */
     public Command goToCoralL3() {
         return setGoal(Goal.CORAL_L3)
             .andThen(moveTo(PresetHeights.CORAL_L3, PivotPresetAngles.CORAL_L3));
     }
 
-    /** Moves to the L4 scoring pose (52.5 in, 45 degrees) with the high handoff overlap. */
+    /** Moves to the L4 scoring pose (52.5 in, 20 degrees) through the 33 in rotation station. */
     public Command goToCoralL4() {
         return setGoal(Goal.CORAL_L4)
             .andThen(moveTo(PresetHeights.CORAL_L4, PivotPresetAngles.CORAL_L4));
@@ -520,8 +550,8 @@ public class Superstructure {
 
     /**
      * Holds an algae: light inward roller pressure and the arm at the hold
-     * angle (90 degrees - also the safe travel angle, so the elevator stays
-     * free to move). The elevator is left where it is.
+     * angle (RAISE = 100 degrees, the safe travel angle, so the elevator
+     * stays free to move anywhere). The elevator is left where it is.
      */
     public Command holdAlgae() {
         return Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED), coral)
@@ -547,48 +577,20 @@ public class Superstructure {
     // ==================================================================
     // These commands move ONE mechanism and leave the other exactly where
     // it is, so each can be tuned and exercised on its own from the
-    // dashboard. They still consult the same safe-region model as the
-    // planner - but instead of moving the other mechanism out of the way,
-    // an unsafe request is simply REFUSED with a dashboard notification
-    // explaining why. Every command requires only the mechanism it moves,
-    // so the operator's manual control of the other one keeps working.
+    // dashboard. They consult the same CAD corridors as the planner - but
+    // instead of moving the other mechanism out of the way, an unsafe
+    // request is simply REFUSED with a dashboard notification explaining
+    // why. Every command requires only the mechanism it moves, so the
+    // operator's manual control of the other one keeps working.
 
-    /**
-     * True if the elevator can move from its current height to the target
-     * with the arm held exactly where it is now.
-     */
+    /** True if the elevator can move from its current height to the target with the arm held where it is. */
     public boolean isElevatorOnlyMoveSafe(double targetHeight) {
-        double height = elevator.getCurrentPosition();
-        if (armAtOrAboveSafe()) {
-            return true; // Free zone: clear at every height
-        }
-        if (armClearOfStaticPart()) {
-            // Low box: any height up to its roof is clear at this angle
-            return height <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
-                && targetHeight <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT;
-        }
-        // Fully tucked: only the region below the tuck limit is clear
-        return height <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT
-            && targetHeight <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT;
+        return elevatorPathClear(elevator.getCurrentPosition(), targetHeight, coral.getPivotAngle());
     }
 
-    /**
-     * True if the arm can rotate from its current angle to the target with
-     * the elevator held exactly where it is now.
-     */
+    /** True if the arm can rotate from its current angle to the target with the elevator held where it is. */
     public boolean isPivotOnlyMoveSafe(double targetAngle) {
-        double height = elevator.getCurrentPosition();
-        if (height <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT) {
-            return true; // Near the base every angle is clear
-        }
-        if (height <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            // Inside the low box: anything except a full tuck
-            return targetAngle >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE;
-        }
-        // Above the low box: rotating below the safe angle in place sweeps
-        // into the second-stage tube, so both ends must be in the free zone
-        return armAtOrAboveSafe()
-            && targetAngle >= SAFE_ANGLE - SuperstructureConstants.SAFE_ANGLE_TOLERANCE;
+        return pivotPathClear(coral.getPivotAngle(), targetAngle, elevator.getCurrentPosition());
     }
 
     /**
@@ -602,12 +604,12 @@ public class Superstructure {
                 Elastic.sendNotification(new Elastic.Notification(
                     Elastic.NotificationLevel.WARNING,
                     "Elevator test move refused",
-                    String.format("%.1f in is not reachable with the arm at %.0f deg - raise the arm "
-                        + "(Pivot Setpoint 90 + Pivot Go, or the Raise button) first.",
-                        target, coral.getPivotAngle())));
+                    String.format("%.1f in is not reachable with the arm at %.0f deg (CAD contact band). "
+                        + "Put the arm at %.0f deg (Pivot Setpoint %.0f + Pivot Go) for full travel.",
+                        target, coral.getPivotAngle(), SAFE_ANGLE, SAFE_ANGLE)));
                 return Commands.none();
             }
-            return Commands.runOnce(() -> elevator.setPosition(target), elevator);
+            return elevatorTo(target);
         }, Set.of(elevator));
     }
 
@@ -622,13 +624,13 @@ public class Superstructure {
                 Elastic.sendNotification(new Elastic.Notification(
                     Elastic.NotificationLevel.WARNING,
                     "Pivot test move refused",
-                    String.format("%.0f deg is not reachable with the elevator at %.1f in - lower the "
-                        + "elevator into the low box (below %.0f in) first, or use a preset button.",
-                        target, elevator.getCurrentPosition(),
-                        SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT)));
+                    String.format("%.0f deg is not reachable with the elevator at %.1f in (CAD contact band). "
+                        + "All of 25-100 deg is clear at %.0f in; the low box (below %.0f in) allows %.0f deg and up.",
+                        target, elevator.getCurrentPosition(), SuperstructureConstants.L4_STATION_HEIGHT,
+                        SuperstructureConstants.LOW_BOX_ROOF, SuperstructureConstants.ARM_CLEAR_MIN_ANGLE)));
                 return Commands.none();
             }
-            return Commands.runOnce(() -> coral.setPivotAngle(target), coral);
+            return armTo(target);
         }, Set.of(coral));
     }
 

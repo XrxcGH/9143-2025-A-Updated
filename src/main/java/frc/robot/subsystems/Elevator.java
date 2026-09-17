@@ -26,7 +26,7 @@ import frc.robot.util.Tunables;
 
 /**
  * Elevator subsystem driven by two NEO brushless motors on Spark MAX
- * controllers, each through a 45:1 MAXPlanetary reduction (5:1 x 3:1 x 3:1
+ * controllers, each through a 15:1 MAXPlanetary reduction (5:1 x 3:1
  * cartridges) and a 90-degree gearbox to the 22T sprocket shaft.
  *
  * Control architecture:

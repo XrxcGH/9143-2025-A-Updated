@@ -61,8 +61,6 @@ public final class Tunables {
     private static final String REEF_BRANCH_OFFSET = "Vision - Reef Branch Offset (m)";
     private static final String TRACKING_DISTANCE_KP = "Vision - Tracking Distance kP (m/s per m)";
     private static final String TRACKING_ROTATION_KP = "Vision - Tracking Rotation kP (rad/s per deg)";
-    private static final String L3_ARM_ARRIVAL_OFFSET = "Superstructure - L3 Arm Arrival Offset (s)";
-    private static final String L4_ARM_ARRIVAL_OFFSET = "Superstructure - L4 Arm Arrival Offset (s)";
     private static final String DEFAULTS_VERSION_KEY = "Tunables - Defaults Version (do not edit)";
 
     /**
@@ -82,8 +80,11 @@ public final class Tunables {
      *   5: elevator 20 in/s, 200 in/s^2 (gearing ceiling); pivot softened
      *      to 200 / 300 / 2000 for chain backlash; L4 arm arrival -0.6 s
      *      (was hitting the bar), L3 +0.8 s
+     *   6: elevator regeared 15:1 - 50 in/s, 400 in/s^2, kP 0.1, kG 0.6;
+     *      arm arrival offsets retired (the Superstructure now runs
+     *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 5;
+    private static final int DEFAULTS_VERSION = 6;
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -116,8 +117,6 @@ public final class Tunables {
         Preferences.initDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.initDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.initDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
-        Preferences.initDouble(L3_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L3_ARM_ARRIVAL_OFFSET_SECONDS);
-        Preferences.initDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
     }
 
     /**
@@ -145,8 +144,6 @@ public final class Tunables {
         Preferences.setDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.setDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.setDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
-        Preferences.setDouble(L3_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L3_ARM_ARRIVAL_OFFSET_SECONDS);
-        Preferences.setDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
     }
 
     /** Reads a key, falling back to its default, and clamps the result to [min, max]. */
@@ -287,20 +284,4 @@ public final class Tunables {
         return Preferences.getDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
     }
 
-    // ------------------------------------------------------------------
-    // Superstructure handoff timing (seconds) - read at plan time. The
-    // handoff HEIGHTS are derived from these plus the motion profiles, so
-    // they stay in sync with any elevator/pivot retune (see
-    // Superstructure.handoffHeight).
-    // ------------------------------------------------------------------
-
-    /** Seconds after the elevator settles at L3 that the arm finishes its rotation (negative = early). */
-    public static double l3ArmArrivalOffset() {
-        return Preferences.getDouble(L3_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L3_ARM_ARRIVAL_OFFSET_SECONDS);
-    }
-
-    /** Seconds after the elevator settles at L4 that the arm finishes its rotation (negative = early). */
-    public static double l4ArmArrivalOffset() {
-        return Preferences.getDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
-    }
 }

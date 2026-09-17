@@ -70,10 +70,6 @@ public class Dashboard {
     // CANdle disabled (no CANdle on the robot): private final LEDs leds;
     private final Superstructure superstructure;
 
-    // Last published derived handoff heights (the string is only rebuilt
-    // when one of them changes - normally only after a tunable edit)
-    private double lastL3Handoff = Double.NaN;
-    private double lastL4Handoff = Double.NaN;
 
     // Dashboard-editable test setpoints (Testing tab). These are READ by the
     // robot, never written in update() - a periodic put would clobber the
@@ -149,6 +145,7 @@ public class Dashboard {
         "Elevator reads below its hard-stop height - it was zeroed with the carriage raised. Lower "
             + "it to the hard stop and press Zero Elevator, or every height will land high.",
         AlertType.kWarning);
+    private final Alert presetAuditAlert = new Alert("", AlertType.kInfo);
     private final Alert elevatorRatioPendingAlert = new Alert(
         "New elevator calibration (travel ratio / hard-stop height) not applied yet - lower the "
             + "carriage to its hard stop and disable; it applies and re-zeros there automatically.",
@@ -169,6 +166,14 @@ public class Dashboard {
         this.coral = coral;
         // CANdle disabled (no CANdle on the robot): this.leds = leds;
         this.superstructure = superstructure;
+
+        // Staged-sequence stations (CAD-derived constants; fixed at compile
+        // time) and a one-time audit of the presets against the CAD free
+        // corridors - published once, they never change at runtime.
+        SmartDashboard.putString("Superstructure/Handoffs", Superstructure.stationSummary());
+        String audit = Superstructure.presetAuditMessage();
+        presetAuditAlert.setText(audit.isEmpty() ? "" : audit);
+        presetAuditAlert.set(!audit.isEmpty());
 
         // --- Independent mechanism test controls (Testing tab) ---
         // Setpoints are plain NT doubles the dashboard sliders write to;
@@ -385,19 +390,6 @@ public class Dashboard {
         //     leds.getState() != null ? leds.getState().name() : "INIT");
         SmartDashboard.putString("LEDs/State", "CANdle code commented out");
 
-        // --- Superstructure: resolved handoff heights ---
-        // Derived from the motion profiles + arrival-offset tunables, so the
-        // team can see exactly where the L3/L4 rotations will start.
-        double l3Handoff = superstructure.l3HandoffHeight();
-        double l4Handoff = superstructure.l4HandoffHeight();
-        if (l3Handoff != lastL3Handoff || l4Handoff != lastL4Handoff) {
-            SmartDashboard.putString("Superstructure/Handoffs",
-                String.format("L3 %.1f in | L4 %.1f in", l3Handoff, l4Handoff));
-            lastL3Handoff = l3Handoff;
-            lastL4Handoff = l4Handoff;
-        }
-        Logger.recordOutput("Superstructure/L3HandoffInches", l3Handoff);
-        Logger.recordOutput("Superstructure/L4HandoffInches", l4Handoff);
 
         // --- Alerts (persistent conditions) ---
         boolean throughBoreConnected = coral.isThroughBoreConnected();

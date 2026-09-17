@@ -68,6 +68,12 @@ public class Dashboard {
     private final Elevator elevator;
     private final CorAl coral;
     private final LEDs leds;
+    private final Superstructure superstructure;
+
+    // Last published derived handoff heights (the string is only rebuilt
+    // when one of them changes - normally only after a tunable edit)
+    private double lastL3Handoff = Double.NaN;
+    private double lastL4Handoff = Double.NaN;
 
     // Dashboard-editable test setpoints (Testing tab). These are READ by the
     // robot, never written in update() - a periodic put would clobber the
@@ -148,6 +154,7 @@ public class Dashboard {
         this.elevator = elevator;
         this.coral = coral;
         this.leds = leds;
+        this.superstructure = superstructure;
 
         // --- Independent mechanism test controls (Testing tab) ---
         // Setpoints are plain NT doubles the dashboard sliders write to;
@@ -355,6 +362,20 @@ public class Dashboard {
         // --- LEDs ---
         SmartDashboard.putString("LEDs/State",
             leds.getState() != null ? leds.getState().name() : "INIT");
+
+        // --- Superstructure: resolved handoff heights ---
+        // Derived from the motion profiles + arrival-offset tunables, so the
+        // team can see exactly where the L3/L4 rotations will start.
+        double l3Handoff = superstructure.l3HandoffHeight();
+        double l4Handoff = superstructure.l4HandoffHeight();
+        if (l3Handoff != lastL3Handoff || l4Handoff != lastL4Handoff) {
+            SmartDashboard.putString("Superstructure/Handoffs",
+                String.format("L3 %.1f in | L4 %.1f in", l3Handoff, l4Handoff));
+            lastL3Handoff = l3Handoff;
+            lastL4Handoff = l4Handoff;
+        }
+        Logger.recordOutput("Superstructure/L3HandoffInches", l3Handoff);
+        Logger.recordOutput("Superstructure/L4HandoffInches", l4Handoff);
 
         // --- Alerts (persistent conditions) ---
         boolean throughBoreConnected = coral.isThroughBoreConnected();

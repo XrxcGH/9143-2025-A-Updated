@@ -8,6 +8,7 @@ import edu.wpi.first.wpilibj2.command.Commands;
 
 import frc.robot.Constants.CorAlConstants;
 import frc.robot.Constants.CorAlConstants.PivotPresetAngles;
+import frc.robot.Constants.ElevatorConstants;
 import frc.robot.Constants.ElevatorConstants.PresetHeights;
 import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.subsystems.CorAl;
@@ -35,10 +36,13 @@ import frc.robot.util.Tunables;
  *     while the arm swings up, so the swing costs little or no time.
  *   - Handoff overlaps: above the low box the arm cannot rotate below 90
  *     degrees in place without sweeping into the second-stage tube, so the
- *     final rotation overlaps the last part of the climb - past
- *     MID_HANDOFF_HEIGHT for L3 (29", 22.5 deg) and HIGH_HANDOFF_HEIGHT for
- *     L4 (52.5", 45 deg). Leaving those poses mirrors the overlap with the
- *     arm swinging up during the initial descent.
+ *     final rotation overlaps the last part of the climb for L3 (29",
+ *     22.5 deg) and L4 (52.5", 45 deg). The height where the rotation
+ *     starts is DERIVED from both mechanisms' motion profiles and a
+ *     per-pose "arm arrival offset" tunable (see handoffHeight), so
+ *     retuning either profile keeps the overlap in sync. Leaving those
+ *     poses mirrors the overlap with the arm swinging up during the
+ *     initial descent.
  *   - Stowing overlaps the final tuck: the arm starts rotating to 0 as soon
  *     as the descending elevator passes ARM_TUCK_MAX_HEIGHT.
  *
@@ -122,6 +126,93 @@ public class Superstructure {
     private Command settle() {
         return Commands.waitUntil(this::atTargets)
             .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS);
+    }
+
+    // ==================================================================
+    // Handoff derivation - keeps the L3/L4 overlap in sync with BOTH
+    // mechanisms' motion profiles
+    // ==================================================================
+
+    /**
+     * Seconds for a jerk-limited trapezoidal profile to travel
+     * {@code distance} from rest to rest. Trapezoid when the move is long
+     * enough to reach cruise, triangle otherwise; each accel/decel phase is
+     * stretched by one jerk ramp (S-curve) when a jerk limit is set.
+     */
+    static double profileDuration(double distance, double cruise, double accel, double jerk) {
+        distance = Math.abs(distance);
+        double fullAccelDistance = cruise * cruise / accel; // accel + decel at full cruise
+        double t = distance >= fullAccelDistance
+            ? distance / cruise + cruise / accel
+            : 2.0 * Math.sqrt(distance / accel);
+        return t + (jerk > 0 ? 2.0 * accel / jerk : 0.0);
+    }
+
+    /**
+     * Distance a profile that ends at rest covers in its final
+     * {@code seconds}: pure deceleration if that window fits inside the
+     * decel phase, otherwise cruise plus the full decel.
+     */
+    static double distanceBeforeStop(double seconds, double cruise, double accel) {
+        if (seconds <= 0) {
+            return 0;
+        }
+        double decelTime = cruise / accel;
+        if (seconds <= decelTime) {
+            return 0.5 * accel * seconds * seconds;
+        }
+        return cruise * seconds - 0.5 * cruise * cruise / accel;
+    }
+
+    /** Seconds the arm's profile needs to swing from the safe angle to {@code targetAngle}. */
+    public double armSwingSeconds(double targetAngle) {
+        return profileDuration(SAFE_ANGLE - targetAngle,
+            CorAlConstants.CORAL_PIVOT_MAX_VELOCITY,
+            CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION,
+            CorAlConstants.CORAL_PIVOT_MAX_JERK);
+    }
+
+    /**
+     * Elevator height at which the arm must START its final rotation so
+     * that it FINISHES {@code arrivalOffsetSeconds} after the elevator
+     * settles at {@code targetHeight} (negative = arm finishes early).
+     *
+     * Computed from the pivot's swing time and the elevator's decel/cruise
+     * profile, so a change to either mechanism's tuning moves this height
+     * automatically. Clamped to never start inside the tube contact zone
+     * (just above the low-box roof) and to always start before the elevator
+     * arrives, so the state gate cannot deadlock.
+     */
+    public double handoffHeight(double targetHeight, double targetAngle, double arrivalOffsetSeconds) {
+        double elevatorTimeToGoAtStart = armSwingSeconds(targetAngle) - arrivalOffsetSeconds;
+        double climbDuringSwing = distanceBeforeStop(elevatorTimeToGoAtStart,
+            ElevatorConstants.ELEVATOR_MAX_VELOCITY, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
+        double handoff = targetHeight - climbDuringSwing;
+        double floor = SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
+            + SuperstructureConstants.HANDOFF_MIN_ABOVE_LOW_BOX;
+        double ceiling = targetHeight - SuperstructureConstants.HANDOFF_MIN_BEFORE_TARGET;
+        return Math.max(floor, Math.min(ceiling, handoff));
+    }
+
+    /** True when a pose belongs to the L4 (upper) band rather than the L3 band. */
+    private static boolean isHighBand(double height) {
+        return height > (PresetHeights.CORAL_L3.getHeight() + PresetHeights.CORAL_L4.getHeight()) / 2.0;
+    }
+
+    /** Handoff for the scoring pose the mechanisms are heading to (or sitting at). */
+    private double handoffFor(double poseHeight, double poseAngle) {
+        return handoffHeight(poseHeight, poseAngle,
+            isHighBand(poseHeight) ? Tunables.l4ArmArrivalOffset() : Tunables.l3ArmArrivalOffset());
+    }
+
+    /** Resolved L3 handoff height with the current profiles and tunables (dashboard readout). */
+    public double l3HandoffHeight() {
+        return handoffFor(PresetHeights.CORAL_L3.getHeight(), PivotPresetAngles.CORAL_L3.getAngle());
+    }
+
+    /** Resolved L4 handoff height with the current profiles and tunables (dashboard readout). */
+    public double l4HandoffHeight() {
+        return handoffFor(PresetHeights.CORAL_L4.getHeight(), PivotPresetAngles.CORAL_L4.getAngle());
     }
 
     // ==================================================================
@@ -226,11 +317,10 @@ public class Superstructure {
         // mirror the approach overlap - descend toward the pose's handoff
         // height while the arm swings up. Never commands upward.
         if (currentHeight > SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            // Handoff heights are live-tunable (Tunables -> Preferences) and
-            // read here at plan time, so a dashboard edit applies to the very
-            // next button press.
-            double highHandoff = Tunables.highHandoffHeight();
-            double handoff = currentHeight > highHandoff ? highHandoff : Tunables.midHandoffHeight();
+            // The handoff is derived from the profiles + live tunables at plan
+            // time (mirror of this pose's approach), so a dashboard edit or a
+            // profile retune applies to the very next button press.
+            double handoff = handoffFor(currentHeight, currentAngle);
             double escapeFloor = Math.min(handoff, currentHeight);
             return Commands.runOnce(() -> {
                     elevator.setPosition(escapeFloor);
@@ -302,8 +392,7 @@ public class Superstructure {
         // the pose's handoff height, so the mechanism sweeps in behind the
         // second-stage tube instead of into it
         if (targetHeight > SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            double highHandoff = Tunables.highHandoffHeight();
-            double handoff = targetHeight > highHandoff ? highHandoff : Tunables.midHandoffHeight();
+            double handoff = handoffFor(targetHeight, targetAngle);
             return Commands.sequence(
                 Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
                 Commands.waitUntil(() -> elevator.getCurrentPosition() >= handoff),

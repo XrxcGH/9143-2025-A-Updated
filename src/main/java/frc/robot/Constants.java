@@ -78,8 +78,13 @@ public final class Constants {
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.244 = ~23 in/s
 		// theoretical top speed. Cruise stays well below that so the profile
 		// remains achievable under load.
-		public static final double ELEVATOR_MAX_VELOCITY = 12.0;     // Cruise velocity (in/s)
-		public static final double ELEVATOR_MAX_ACCELERATION = 40.0; // Acceleration (in/s^2)
+		// FIRST-POWER-ON VALUES: deliberately gentle (full 53 in of travel in
+		// ~7 s, cruise reached in 0.33 s) so nothing slams while the gains are
+		// being tuned. The profile always decelerates INTO the setpoint, so the
+		// carriage settles rather than hitting the target. Once holding and
+		// tracking are clean, raise toward 16 in/s and 60 in/s^2.
+		public static final double ELEVATOR_MAX_VELOCITY = 8.0;      // Cruise velocity (in/s)
+		public static final double ELEVATOR_MAX_ACCELERATION = 24.0; // Acceleration (in/s^2)
 
 		// --- Closed-Loop PID Gains (Spark MAX slot 0; error in inches) ---
 		// TUNE - first power-on procedure:
@@ -89,6 +94,11 @@ public final class Constants {
 		//   2. Raise kG until the carriage just holds its height at rest.
 		//   3. Command a preset and raise kP until tracking is crisp;
 		//      add kD only if it oscillates.
+		// kP sanity: 0.4 duty/inch is ~0.1 duty per motor rotation (1 in =
+		// 4.1 rotations), which is REV's own MAXMotion starting gain scaled to
+		// this mechanism's units - the loop only has to track the profiled
+		// setpoint (kV/kG carry the motion), so this is firm without ringing.
+		// Symptoms: sluggish settle -> raise kP; buzz/hunt at rest -> lower.
 		public static final double ELEVATOR_kP = 0.4; // Duty cycle per inch of position error
 		public static final double ELEVATOR_kI = 0.0; // Leave 0 - kG handles gravity sag
 		public static final double ELEVATOR_kD = 0.0; // Duty cycle per in/s of error derivative
@@ -163,7 +173,11 @@ public final class Constants {
 		public static final boolean CORAL_INTAKE_MOTOR_INVERTED = true; // True if positive output should be flipped (positive must intake coral)
 
 		// --- Current Limits (amps) ---
-		public static final int CORAL_PIVOT_CURRENT_LIMIT = 30;  // Pivot supply current limit
+		public static final int CORAL_PIVOT_CURRENT_LIMIT = 30;  // Pivot supply current limit (breaker protection)
+		// Stator limit caps the pivot's TORQUE (a Kraken through 65:1 can
+		// otherwise exert hundreds of N*m against a hard stop). 60 A is far
+		// more than the arm needs to move, but well under a damaging slam.
+		public static final int CORAL_PIVOT_STATOR_CURRENT_LIMIT = 60;
 		public static final int CORAL_INTAKE_CURRENT_LIMIT = 20; // Intake supply current limit
 
 		// --- Mechanism Gearing ---
@@ -178,8 +192,14 @@ public final class Constants {
 		// swing takes ~1.5 s, full 160-degree travel ~2.3 s (90 deg/s =
 		// 16.4 rotor rps through 65.41:1 - well within a Kraken).
 		// TUNE: raise once gains feel solid.
-		public static final double CORAL_PIVOT_MAX_VELOCITY = 90.0;      // Cruise velocity (deg/s)
-		public static final double CORAL_PIVOT_MAX_ACCELERATION = 180.0; // Acceleration (deg/s^2)
+		// FIRST-POWER-ON VALUES: deliberately gentle (full 160 deg sweep in
+		// ~3 s). 60 deg/s is only 11 rotor rps through 65.41:1 - a tenth of a
+		// Kraken's free speed - and the jerk limit rounds the profile corners
+		// so the arm eases into and out of every move instead of snapping.
+		// Once tracking is clean, raise toward 120 deg/s and 240 deg/s^2.
+		public static final double CORAL_PIVOT_MAX_VELOCITY = 60.0;      // Cruise velocity (deg/s)
+		public static final double CORAL_PIVOT_MAX_ACCELERATION = 120.0; // Acceleration (deg/s^2)
+		public static final double CORAL_PIVOT_MAX_JERK = 1200.0;        // Jerk limit (deg/s^3); ~10x accel = ~0.1 s to reach full accel
 
 		// --- Closed-Loop Gains (Phoenix 6 slot 0; voltage-based, error in mechanism rotations) ---
 		// TUNE - starting points for first power-on:
@@ -189,10 +209,23 @@ public final class Constants {
 		//      it oscillates.
 		//   3. kG only works if 0 degrees = arm horizontal (Arm_Cosine);
 		//      otherwise leave it 0.
+		// kP sanity: 40 V/rot is 0.11 V per degree - the 2-degree at-target
+		// tolerance is worth only 0.22 V, so this cannot ring on its own; the
+		// profile feedforwards below do the moving and kP just corrects error.
+		// Symptoms: stops short of the angle -> raise kP; buzz at rest -> lower.
 		public static final double CORAL_PIVOT_kP = 40.0; // Volts per rotation of position error (~0.11 V/deg)
 		public static final double CORAL_PIVOT_kI = 0.0;  // Leave 0 - use kG for gravity
 		public static final double CORAL_PIVOT_kD = 0.0;  // Volts per rot/s of error derivative
 		public static final double CORAL_PIVOT_kG = 0.0;  // Volts to hold the arm horizontal (requires 0 deg = horizontal)
+
+		// --- Profile Feedforward (volts) ---
+		// Physics-based so Motion Magic tracks its profile instead of lagging
+		// it and catching up (which is what shows up as overshoot/oscillation
+		// at the end of a move). kV = 12 V / free speed at the mechanism
+		// (100 rotor rps / 65.41 = 1.53 pivot rot/s). kS overcomes static
+		// friction so the arm starts moving without kP winding up first.
+		public static final double CORAL_PIVOT_kS = 0.2;  // Volts to overcome static friction (TUNE: raise until motion starts)
+		public static final double CORAL_PIVOT_kV = 7.85; // Volts per pivot rot/s of profile velocity
 
 		// --- Pivot Angle Limits (degrees) ---
 		// The pivot is zeroed at its base position on initialization, so the
@@ -301,24 +334,35 @@ public final class Constants {
 		// safe-angle excursion.
 		public static final double LOW_TRAVEL_MAX_HEIGHT = 21.0; // Inches
 
-		// During the L4 approach, the elevator rises with the arm at 90 deg
-		// until this height, then the arm starts rotating toward 45 deg while
-		// the elevator finishes the climb (reversed when leaving L4).
-		// TUNE: raise if the mechanism still clips the second-stage tube;
-		// lower to make L4 cycles faster. With the current profiles the arm
-		// completes its 90->45 swing around 50-51 in of elevator height, so
-		// check clearance at THAT height specifically, not just at 52.5.
-		public static final double HIGH_HANDOFF_HEIGHT = 40.0; // Inches
+		// --- Handoff Overlap (L3 / L4 approaches) ---
+		// Above the low box the arm cannot rotate below 90 deg in place, so
+		// its final rotation overlaps the end of the elevator's climb. The
+		// heights where that rotation starts are NOT stored anywhere: they
+		// are DERIVED at plan time from the two mechanisms' motion profiles
+		// (Superstructure.handoffHeight), so retuning either the elevator or
+		// the pivot profile can never leave the overlap out of sync.
+		//
+		// The one tunable per pose is the RELATIONSHIP between the two
+		// arrivals: how many seconds after the elevator settles the arm
+		// finishes its rotation (negative = the arm finishes early).
+		//   L4: -0.30 s -> with the shipped profiles the rotation starts at
+		//       ~40 in and completes ~0.3 s before the elevator settles at
+		//       52.5 in (arm done near 50 in - check tube clearance THERE).
+		//   L3: +1.15 s -> starts at ~25 in; most of the rotation happens as
+		//       the elevator settles at 29 in, so the mechanism sweeps in
+		//       behind the tube rather than into it. PREDICTED - first test
+		//       at low speed with a hand on the disable switch.
+		// Both are editable live ("Superstructure - L3/L4 Arm Arrival
+		// Offset (s)"); the resolved heights show on the Testing tab.
+		public static final double L4_ARM_ARRIVAL_OFFSET_SECONDS = -0.30;
+		public static final double L3_ARM_ARRIVAL_OFFSET_SECONDS = 1.15;
 
-		// Same idea for the L3 approach (29 in, 22.5 deg): the elevator rises
-		// at 90 deg until this height, then the arm rotates toward 22.5 deg
-		// while the elevator finishes the climb, so the mechanism sweeps in
-		// behind the second-stage tube instead of into it (reversed when
-		// leaving L3).
-		// TUNE ON ROBOT AT LOW SPEED FIRST: this is a predicted value - start
-		// the first test with a hand on the disable switch and raise it if
-		// the mechanism approaches the tube during the rotation.
-		public static final double MID_HANDOFF_HEIGHT = 25.0; // Inches
+		// Derived handoffs are clamped to start no lower than this far above
+		// the low-box roof (never inside the tube contact zone) ...
+		public static final double HANDOFF_MIN_ABOVE_LOW_BOX = 1.0; // Inches
+		// ... and no later than this far below the target, so the state gate
+		// always opens before the elevator settles.
+		public static final double HANDOFF_MIN_BEFORE_TARGET = 0.5; // Inches
 
 		// Extra settling margin used when checking "arm is at/above the safe
 		// travel angle" (degrees).
@@ -349,6 +393,22 @@ public final class Constants {
 
 		// --- Timing (seconds) ---
 		public static final double ENDGAME_WARNING_TIME = 20.0; // Teleop time remaining when the endgame pattern starts
+	}
+
+	/**
+	 * Constants for teleop driving.
+	 */
+	public static final class DriveConstants {
+		// Fraction of the drivetrain's theoretical top speed (and top
+		// rotation rate) the driver sticks command at full deflection. This
+		// is the DEFAULT for the "Drive - Teleop Speed Scale" tunable, which
+		// can be changed from the dashboard without a redeploy: 0.25 for
+		// indoor testing, raise toward 1.0 for competition driving.
+		public static final double TELEOP_SPEED_SCALE = 0.25;
+
+		// Stick deadband as a fraction of the SCALED top speed (so it stays
+		// 20% of stick travel at every speed scale).
+		public static final double STICK_DEADBAND = 0.2;
 	}
 
 	/**
@@ -385,6 +445,18 @@ public final class Constants {
 
 		// --- Pipelines ---
 		public static final int APRILTAG_PIPELINE = 0; // Pipeline index used for AprilTag detection
+
+		// --- Thermal Management ---
+		// Limelight "throttle": the camera processes one frame, then skips
+		// this many. While the robot is DISABLED (pit, queue, between
+		// periods - most of the camera's powered-on life) full-rate AprilTag
+		// processing is wasted work that just heats the camera and spins the
+		// fan; Limelight's guidance is 100-200. Full rate (0) is restored
+		// the instant the robot enables, so tracking performance is
+		// unaffected. At ~90 fps, 100 still yields ~1 solve/s while disabled,
+		// plenty for the pre-match heading seed.
+		public static final int DISABLED_THROTTLE = 100;
+		public static final int ENABLED_THROTTLE = 0;
 
 		// --- Camera Mounting ---
 		// Facing sign per Limelight, same order as LIMELIGHT_NAMES:

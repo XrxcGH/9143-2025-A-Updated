@@ -2,6 +2,7 @@ package frc.robot.util;
 
 import edu.wpi.first.wpilibj.Preferences;
 
+import frc.robot.Constants.DriveConstants;
 import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.Constants.VisionConstants;
 
@@ -35,14 +36,15 @@ public final class Tunables {
     // ------------------------------------------------------------------
     // Keys as shown in the Robot Preferences widget (grouped by prefix)
     // ------------------------------------------------------------------
+    private static final String TELEOP_SPEED_SCALE = "Drive - Teleop Speed Scale (0-1)";
     private static final String REEF_FLUSH_DISTANCE = "Vision - Reef Flush Distance (m)";
     private static final String STATION_FLUSH_DISTANCE = "Vision - Station Flush Distance (m)";
     private static final String L1_SCORE_DISTANCE = "Vision - L1 Score Distance (m)";
     private static final String REEF_BRANCH_OFFSET = "Vision - Reef Branch Offset (m)";
     private static final String TRACKING_DISTANCE_KP = "Vision - Tracking Distance kP (m/s per m)";
     private static final String TRACKING_ROTATION_KP = "Vision - Tracking Rotation kP (rad/s per deg)";
-    private static final String MID_HANDOFF_HEIGHT = "Superstructure - L3 Mid Handoff Height (in)";
-    private static final String HIGH_HANDOFF_HEIGHT = "Superstructure - L4 High Handoff Height (in)";
+    private static final String L3_ARM_ARRIVAL_OFFSET = "Superstructure - L3 Arm Arrival Offset (s)";
+    private static final String L4_ARM_ARRIVAL_OFFSET = "Superstructure - L4 Arm Arrival Offset (s)";
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -50,26 +52,42 @@ public final class Tunables {
      * robot startup.
      */
     public static void init() {
+        Preferences.initDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.initDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.initDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.initDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
         Preferences.initDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.initDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.initDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
-        Preferences.initDouble(MID_HANDOFF_HEIGHT, SuperstructureConstants.MID_HANDOFF_HEIGHT);
-        Preferences.initDouble(HIGH_HANDOFF_HEIGHT, SuperstructureConstants.HIGH_HANDOFF_HEIGHT);
+        Preferences.initDouble(L3_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L3_ARM_ARRIVAL_OFFSET_SECONDS);
+        Preferences.initDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
     }
 
     /** Overwrites every tunable with its Constants default (the "Reset Tunables" dashboard button). */
     public static void resetToDefaults() {
+        Preferences.setDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.setDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.setDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.setDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
         Preferences.setDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.setDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.setDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
-        Preferences.setDouble(MID_HANDOFF_HEIGHT, SuperstructureConstants.MID_HANDOFF_HEIGHT);
-        Preferences.setDouble(HIGH_HANDOFF_HEIGHT, SuperstructureConstants.HIGH_HANDOFF_HEIGHT);
+        Preferences.setDouble(L3_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L3_ARM_ARRIVAL_OFFSET_SECONDS);
+        Preferences.setDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
+    }
+
+    // ------------------------------------------------------------------
+    // Driving
+    // ------------------------------------------------------------------
+
+    /**
+     * Fraction of theoretical top speed / rotation rate at full stick,
+     * clamped to [0.05, 1.0] so a bad dashboard entry can neither disable
+     * driving nor exceed the drivetrain's capability.
+     */
+    public static double teleopSpeedScale() {
+        double scale = Preferences.getDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
+        return Math.max(0.05, Math.min(1.0, scale));
     }
 
     // ------------------------------------------------------------------
@@ -111,16 +129,19 @@ public final class Tunables {
     }
 
     // ------------------------------------------------------------------
-    // Superstructure handoff heights (inches) - read at plan time
+    // Superstructure handoff timing (seconds) - read at plan time. The
+    // handoff HEIGHTS are derived from these plus the motion profiles, so
+    // they stay in sync with any elevator/pivot retune (see
+    // Superstructure.handoffHeight).
     // ------------------------------------------------------------------
 
-    /** Height where the arm starts rotating toward the L3 angle during the climb. */
-    public static double midHandoffHeight() {
-        return Preferences.getDouble(MID_HANDOFF_HEIGHT, SuperstructureConstants.MID_HANDOFF_HEIGHT);
+    /** Seconds after the elevator settles at L3 that the arm finishes its rotation (negative = early). */
+    public static double l3ArmArrivalOffset() {
+        return Preferences.getDouble(L3_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L3_ARM_ARRIVAL_OFFSET_SECONDS);
     }
 
-    /** Height where the arm starts rotating toward the L4 angle during the climb. */
-    public static double highHandoffHeight() {
-        return Preferences.getDouble(HIGH_HANDOFF_HEIGHT, SuperstructureConstants.HIGH_HANDOFF_HEIGHT);
+    /** Seconds after the elevator settles at L4 that the arm finishes its rotation (negative = early). */
+    public static double l4ArmArrivalOffset() {
+        return Preferences.getDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
     }
 }

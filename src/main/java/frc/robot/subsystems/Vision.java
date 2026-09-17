@@ -83,8 +83,33 @@ public class Vision extends SubsystemBase {
         for (String tableName : limelightTableNames) {
             // Set all Limelights to the AprilTag pipeline
             LimelightHelpers.setPipelineIndex(tableName, VisionConstants.APRILTAG_PIPELINE);
-            // Turn off Limelight LEDs during initialization
+            // LEDs stay OFF permanently: AprilTags are detected in ambient
+            // light and gain nothing from illumination, while the LED array
+            // is the camera's single largest heat source (fan noise).
             LimelightHelpers.setLEDMode_ForceOff(tableName);
+        }
+    }
+
+    /**
+     * Frame throttle currently applied to the cameras (-1 = not yet sent).
+     * Tracked so the NT write happens only on enable/disable transitions.
+     */
+    private int appliedThrottle = -1;
+
+    /**
+     * Throttles AprilTag processing while the robot is disabled and restores
+     * full rate when enabled - the cameras spend most of their powered-on
+     * life disabled in the pit, where full-rate processing only makes heat.
+     */
+    private void updateThrottle() {
+        int throttle = DriverStation.isDisabled()
+            ? VisionConstants.DISABLED_THROTTLE
+            : VisionConstants.ENABLED_THROTTLE;
+        if (throttle != appliedThrottle) {
+            for (String tableName : limelightTableNames) {
+                LimelightHelpers.SetThrottle(tableName, throttle);
+            }
+            appliedThrottle = throttle;
         }
     }
 
@@ -93,18 +118,13 @@ public class Vision extends SubsystemBase {
         return LimelightHelpers.getTV(limelightTableNames[index]);
     }
 
-    // Toggles AprilTag tracking and controls Limelight LEDs.
+    /**
+     * Records whether AprilTag tracking is active. Deliberately does NOT
+     * touch the LEDs: they add nothing to AprilTag detection and were the
+     * main reason the cameras ran hot (and loud) whenever tracking was on.
+     */
     public void toggleTracking(boolean enabled) {
-        if (enabled != trackingEnabled) {
-            trackingEnabled = enabled;
-            for (String tableName : limelightTableNames) {
-                if (trackingEnabled) {
-                    LimelightHelpers.setLEDMode_ForceOn(tableName);
-                } else {
-                    LimelightHelpers.setLEDMode_ForceOff(tableName);
-                }
-            }
-        }
+        trackingEnabled = enabled;
     }
 
     // Returns whether AprilTag tracking is enabled.
@@ -357,6 +377,9 @@ public class Vision extends SubsystemBase {
 
     @Override
     public void periodic() {
+        // Full-rate processing only while enabled (thermal / fan noise)
+        updateThrottle();
+
         // Refresh the best-target cache once per loop; all readers use this.
         cachedBestTarget = findBestTarget();
 

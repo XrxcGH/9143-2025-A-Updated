@@ -134,6 +134,10 @@ public class CorAl extends SubsystemBase {
 
         config.CurrentLimits.SupplyCurrentLimit = CorAlConstants.CORAL_PIVOT_CURRENT_LIMIT;
         config.CurrentLimits.SupplyCurrentLimitEnable = true;
+        // Stator limit = torque cap: bounds how hard the 65:1 arm can ever
+        // push if it meets a stop or a mis-tuned setpoint
+        config.CurrentLimits.StatorCurrentLimit = CorAlConstants.CORAL_PIVOT_STATOR_CURRENT_LIMIT;
+        config.CurrentLimits.StatorCurrentLimitEnable = true;
 
         // Rotor-to-mechanism gearing: position feedback is in pivot rotations.
         // (Phoenix divides rotor rotations by this ratio; do NOT put a
@@ -146,10 +150,17 @@ public class CorAl extends SubsystemBase {
         config.Slot0.kD = CorAlConstants.CORAL_PIVOT_kD;
         config.Slot0.kG = CorAlConstants.CORAL_PIVOT_kG;
         config.Slot0.GravityType = GravityTypeValue.Arm_Cosine;
+        // Profile feedforward: Motion Magic feeds these its profiled velocity
+        // so the arm follows the profile instead of lagging and overshooting
+        config.Slot0.kS = CorAlConstants.CORAL_PIVOT_kS;
+        config.Slot0.kV = CorAlConstants.CORAL_PIVOT_kV;
 
         // Motion Magic profile (constants are in degrees; Phoenix wants rotations)
         config.MotionMagic.MotionMagicCruiseVelocity = CorAlConstants.CORAL_PIVOT_MAX_VELOCITY / 360.0;
         config.MotionMagic.MotionMagicAcceleration = CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION / 360.0;
+        // Jerk limit turns the trapezoid into an S-curve: no step change in
+        // acceleration, so the arm never snaps into or out of motion
+        config.MotionMagic.MotionMagicJerk = CorAlConstants.CORAL_PIVOT_MAX_JERK / 360.0;
 
         // Soft limits keep the arm inside its travel in every control mode
         config.SoftwareLimitSwitch.ForwardSoftLimitThreshold = CorAlConstants.CORAL_PIVOT_MAX_ANGLE / 360.0;

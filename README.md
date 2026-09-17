@@ -20,7 +20,7 @@ This repository contains the code for Team 9143's 2025 FRC robot, updated to the
 ### Driver (Xbox controller, port 0)
 | Input | Action |
 |---|---|
-| Left stick | Field-centric translation (currently scaled to 25% for practice) |
+| Left stick | Field-centric translation (scaled by the *Teleop Speed Scale* tunable — 25% by default for indoor testing) |
 | Right stick X | Rotate |
 | A (hold) | X-lock wheels (brake) |
 | B (hold) | Point modules at left-stick direction |
@@ -74,7 +74,7 @@ A **motion planner** builds each move from the real mechanism state at the momen
 
 - **Low-box moves run direct.** Below `LOW_TRAVEL_MAX_HEIGHT` (21") with the arm at/above `ARM_CLEAR_MIN_ANGLE` (5°), nothing contacts — so base→L2, base→L1, and base→algae-low move the arm and elevator together with **no 90° excursion**.
 - **Leaving the low box travels at the safe angle (90°)**, but ascents give the elevator a **state-gated head start** (up to the highest height safe for the current arm angle) while the arm swings up, so the swing costs little or no time.
-- **Handoff overlaps** — above the low box the arm can't rotate below 90° in place without sweeping into the second-stage tube, so the final rotation overlaps the last part of the climb: past `MID_HANDOFF_HEIGHT` (25", TUNE) for L3 (29", 22.5°) and past `HIGH_HANDOFF_HEIGHT` (40", TUNE) for L4 (52.5", 45°). Leaving those poses mirrors the overlap with the arm swinging up during the initial descent.
+- **Handoff overlaps** — above the low box the arm can't rotate below 90° in place without sweeping into the second-stage tube, so the final rotation overlaps the last part of the climb for L3 (29", 22.5°) and L4 (52.5", 45°). The height where the rotation starts is **derived at plan time from both mechanisms' motion profiles** (pivot swing time vs. elevator decel/cruise) and one tunable per pose — the *arm arrival offset*: how many seconds after the elevator settles the arm finishes its rotation (negative = arm finishes early). Retuning the elevator or pivot speed therefore keeps the overlap in sync automatically; the resolved heights (≈25" for L3 and ≈40" for L4 with the shipped profiles) show live on the Testing tab. Leaving those poses mirrors the overlap with the arm swinging up during the initial descent.
 - **Stow overlaps the tuck** — the arm starts rotating to 0° as soon as the descending carriage passes the 10" tuck limit.
 
 All overlaps are gated on measured heights/angles, never timing, and every command first safely escapes the **current** pose — buttons are safe in any order at any time. Manual stick control bypasses these interlocks.
@@ -92,6 +92,19 @@ Sends the gyro heading to each Limelight and fuses the returned **MegaTag2** pos
 | Barge (4, 5, 14, 15) + processor (3, 16) | Intentionally blank — the tracker ignores them |
 
 All "flush" distances are what the camera *reads* in that condition — tune by physically placing the robot in the goal position and copying the `Vision/Distance` dashboard value into the constant.
+
+**Heat and fan noise.** Two things the code does to keep the Limelights cool without giving up tracking performance: the **LEDs are never turned on** (AprilTags need no illumination, and the LED array is the camera's biggest heat source), and processing is **throttled while the robot is disabled** (one frame processed per 100 skipped — still ~1 solve/s for the pre-match heading seed) with full rate restored the instant it enables. The rest is configured on each camera's web UI (`http://limelight-<name>.local:5801`), where these settings dominate CPU/GPU load and therefore fan speed:
+
+| Setting | Recommendation |
+|---|---|
+| Pipeline type | **AprilTag** only — make sure no retroreflective/neural pipeline is selected by default |
+| Detector downscale | **2** (or 3): halves the detection workload; the full-resolution corner refinement still runs, so accuracy is essentially unchanged at reef distances |
+| Capture resolution / FPS | The lowest mode that still detects tags across the field — 640×480 @ 90 fps is plenty; full 1280×960 doubles the load for no benefit on a 5 m reef approach |
+| Stream resolution ("Stream" settings) | Lowest offered; the MJPEG encoder for the dashboard feed is pure overhead (only the Setup tab shows all three feeds) |
+| Multi-target / 3D solve | Leave **enabled** — MegaTag2 depends on it and it is cheap relative to detection |
+| Camera exposure/gain | Shorter exposure lowers sensor heat slightly; keep just enough to detect tags reliably |
+
+If a camera still runs hot with those, check its mounting: the fan intake needs clear airflow, and a camera boxed in next to the Kraken or the roboRIO will run warm regardless of settings.
 
 ### LEDs ([LEDs.java](src/main/java/frc/robot/subsystems/LEDs.java))
 CTRE CANdle. State is derived automatically each loop — no commands needed:
@@ -124,7 +137,7 @@ All dashboard integration goes through **[Elastic](https://frc-elastic.gitbook.i
 | **Teleop** | Driving | **Field widget**, match timer, big game-piece box, swerve module widget, vision tracking + **branch side**, elevator/pivot position bars |
 | **Testing** | Independent mechanism testing + diagnostics | **Elevator / Pivot / Intake setpoint sliders with Go/Run/Stop buttons**, **Tunables (Robot Preferences) editor**, command scheduler, subsystem widgets, current graphs, vision + CANrange readouts |
 
-Every tab fits 14 × 6 grid cells (1792 × 768 px) so nothing hides behind the Driver Station window docked at the bottom of the screen. The robot **switches Elastic to the right tab automatically** on mode changes (disabled → Setup, auto → Autonomous, teleop → Teleop, test → Testing) via ElasticLib ([util/Elastic.java](src/main/java/frc/robot/util/Elastic.java)).
+Every tab fits **12 × 5 grid cells** (1536 × 640 px at grid size 128): on the drive laptop's display scaling each cell renders ~155 px, so the window shows ~12.9 columns, and a docked Driver Station leaves ~5 rows visible. The layout is generated from a small script that also verifies no widget overlaps or overflows (see the commit history) — to change it, either edit in Elastic and `File → Export Layout`, or regenerate. The robot **switches Elastic to the right tab automatically** on mode changes (disabled → Setup, auto → Autonomous, teleop → Teleop, test → Testing) via ElasticLib ([util/Elastic.java](src/main/java/frc/robot/util/Elastic.java)).
 
 ### Testing one mechanism at a time
 The Testing tab drives each mechanism **independently** — set the *Elevator Setpoint* slider and press *Elevator Go*, and only the elevator moves; the arm stays exactly where it is (and the operator's manual stick for the other mechanism keeps working). The same goes for *Pivot Setpoint / Pivot Go* and *Intake Speed / Intake Run / Intake Stop*.
@@ -141,7 +154,8 @@ Empirically measured numbers live in [util/Tunables.java](src/main/java/frc/robo
 | Vision – L1 Score Distance (m) | 1.0 | L1 standoff |
 | Vision – Reef Branch Offset (m) | 0.165 | Left/right branch centering |
 | Vision – Tracking Distance / Rotation kP | 1.5 / 0.06 | Tracking aggressiveness |
-| Superstructure – L3 Mid / L4 High Handoff Height (in) | 25 / 40 | Where the arm starts its final rotation during the L3 / L4 climb |
+| Superstructure – L3 / L4 Arm Arrival Offset (s) | +1.15 / −0.30 | Seconds after the elevator settles that the arm finishes its rotation (negative = early). The handoff *heights* are derived from these and the motion profiles — see the Testing tab's *Handoffs* readout |
+| Drive – Teleop Speed Scale (0–1) | 0.25 | Fraction of top speed *and* rotation rate at full stick (0.25 = indoor testing; raise toward 1.0 for competition). Stick deadbands scale with it. |
 
 Mechanism contact geometry (tuck / low-box limits) and motor-controller gains are deliberately **not** tunables: the former are measured physical facts, the latter are applied at boot and tuned live in the REV Hardware Client / Phoenix Tuner X.
 
@@ -251,12 +265,12 @@ Swerve hardware constants are in [TunerConstants.java](src/main/java/frc/robot/g
 1. **Verify the CANcoder offsets in Tuner X** (wheels aligned straight forward). `tuner-project.json` disagrees with `TunerConstants.java` on all four offsets — and note the Tuner project itself is **stale** (it models all four modules as MK4n L3+, but the real robot has MK4i L3 fronts), so do **not** blindly regenerate TunerConstants from it; the mixed per-module ratios now in TunerConstants.java match the physical robot. Also confirm the MK4n (back) wheel inset from the SDS layout drawing — the code assumes 2.625" from the frame edge like the MK4i.
 2. **Sanity-check the elevator height reading** against a tape measure. The conversion (5.5"/45 per motor rotation) is derived from the real gearing — 45:1 MAXPlanetary → 90° box → 22T #25 sprocket — but confirm the 90° gearbox is 1:1 and the rigging doesn't multiply travel.
 3. **Sanity-check the CorAl pivot angle** against the through bore encoder. The 65.41:1 ratio is derived from the real gear train (10:58 → 18:58 → 12:42). Also confirm the through bore is mounted 1:1 on the pivot shaft.
-4. **Tune closed-loop gains** (elevator kP/kS/kV/kG via REV Hardware Client, pivot kP/kG via Phoenix Tuner X, `AutoConstants` path-following kP) and test autos.
-5. **Tune the vision goal constants**: place the robot flush on the reef base and copy the `Vision/Distance` reading into `REEF_FLUSH_DISTANCE` (same procedure backed up to the coral station for `STATION_FLUSH_DISTANCE`); verify `REEF_BRANCH_OFFSET`, the branch left/right sign, and `LIMELIGHT_FACING_SIGNS` (which cameras face front vs. rear). Verify `MID_HANDOFF_HEIGHT` on the L3 approach **at low speed first**.
+4. **Tune closed-loop gains** (elevator kP/kS/kV/kG via REV Hardware Client, pivot kP/kS/kV/kG via Phoenix Tuner X, `AutoConstants` path-following kP) and test autos. The shipped motion profiles are deliberately **gentle first-power-on values** (elevator 8 in/s, pivot 60°/s with a jerk limit and a 60 A stator cap) so nothing can slam while gains are dialed in — raise them in `Constants.java` once holding and tracking are clean (targets are noted in the comments).
+5. **Tune the vision goal constants**: place the robot flush on the reef base and copy the `Vision/Distance` reading into `REEF_FLUSH_DISTANCE` (same procedure backed up to the coral station for `STATION_FLUSH_DISTANCE`); verify `REEF_BRANCH_OFFSET`, the branch left/right sign, and `LIMELIGHT_FACING_SIGNS` (which cameras face front vs. rear). Verify the L3 approach **at low speed first** — its arm-arrival offset (and the ≈25" handoff it resolves to) is predicted, not measured; adjust *L3 Arm Arrival Offset* on the Testing tab if the mechanism approaches the tube during the rotation.
 6. **Firmware**: 2026 firmware on all CTRE devices (TalonFX, CANcoder, Pigeon 2, CANrange, CANdle), current Spark MAX firmware via the REV Hardware Client, 2026 roboRIO image, Limelight OS 2026.0+.
 6a. **Set the CANrange's CAN ID to 62 in Tuner X** (or change `CANRANGE_SENSOR_ID` to its actual ID). It was documented as ID 64, which is **not a legal Phoenix ID (0-62)** — robot code crashed at construction with it (caught by the unit tests).
 7. **Set `LEDConstants.LED_COUNT`** to the actual LED strip length.
-8. Raise the driver translation scale in RobotContainer (currently 25% for practice) as appropriate.
+8. Raise the *Drive – Teleop Speed Scale* tunable on the Testing tab (25% for indoor testing) as the drivers are ready — no redeploy needed.
 
 ---
 

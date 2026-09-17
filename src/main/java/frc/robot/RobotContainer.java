@@ -28,6 +28,7 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
 import frc.robot.generated.TunerConstants;
+import frc.robot.Constants.DriveConstants;
 import frc.robot.Constants.ElevatorConstants;
 
 import frc.robot.subsystems.Swerve;
@@ -94,9 +95,12 @@ public class RobotContainer {
     // NOTE: drive requests use CLOSED-LOOP velocity, not open-loop voltage:
     // every module tracks the true requested ground speed regardless of
     // battery sag, and teleop behavior matches autonomous path following.
-    /** Standard field-centric drive with a 20% stick deadband. */
+    /**
+     * Standard field-centric drive. Speed scaling and the matching deadbands
+     * are applied per loop in the default command (the scale is a dashboard
+     * tunable), so nothing speed-dependent is baked in here.
+     */
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
-        .withDeadband(MaxSpeed * 0.2).withRotationalDeadband(MaxAngularRate * 0.2)
         .withDriveRequestType(DriveRequestType.Velocity);
     /** X-locks the wheels to resist being pushed. */
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
@@ -188,14 +192,24 @@ public class RobotContainer {
         // velocity; see the drive request note above).
         // Note that X is defined as forward according to WPILib convention,
         // and Y is defined as to the left according to WPILib convention.
-        // Translation is scaled to 25% for driver practice - raise toward 1.0
-        // as driver confidence grows.
+        //
+        // Both translation AND rotation are scaled by the "Drive - Teleop
+        // Speed Scale" tunable (default 25% for indoor testing; edit it on
+        // the dashboard, no redeploy). The deadbands scale with it: a fixed
+        // deadband sized for full speed would swallow most of the stick's
+        // travel at a small scale.
         swerve.setDefaultCommand(
-            swerve.applyRequest(() ->
-                drive.withVelocityX(-driver_controller.getLeftY() * MaxSpeed * 0.25) // Forward with negative Y (stick up)
-                    .withVelocityY(-driver_controller.getLeftX() * MaxSpeed * 0.25)  // Left with negative X
-                    .withRotationalRate(-driver_controller.getRightX() * MaxAngularRate) // CCW with negative X (stick left)
-            )
+            swerve.applyRequest(() -> {
+                double scale = Tunables.teleopSpeedScale();
+                double maxSpeed = MaxSpeed * scale;
+                double maxAngularRate = MaxAngularRate * scale;
+                return drive
+                    .withDeadband(maxSpeed * DriveConstants.STICK_DEADBAND)
+                    .withRotationalDeadband(maxAngularRate * DriveConstants.STICK_DEADBAND)
+                    .withVelocityX(-driver_controller.getLeftY() * maxSpeed)       // Forward with negative Y (stick up)
+                    .withVelocityY(-driver_controller.getLeftX() * maxSpeed)       // Left with negative X
+                    .withRotationalRate(-driver_controller.getRightX() * maxAngularRate); // CCW with negative X (stick left)
+            })
         );
 
         // A: X-lock wheels; B: point modules at the left-stick direction

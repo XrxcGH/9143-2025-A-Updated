@@ -1,5 +1,8 @@
 package frc.robot;
 
+import edu.wpi.first.apriltag.AprilTagFields;
+import edu.wpi.first.math.geometry.Translation2d;
+
 /**
  * Robot-wide numerical and boolean constants, grouped by subsystem.
  * This class should not be used for any other purpose - all constants are
@@ -638,6 +641,10 @@ public final class Constants {
 		public static final double ROTATION_kP = 5.0; // TUNE - PathPlanner's recommended starting point
 		public static final double ROTATION_kI = 0.0;
 		public static final double ROTATION_kD = 0.0;
+
+		// Named-command timeout: how long an auto waits at a coral station for
+		// the CANrange to confirm a coral before moving on
+		public static final double AUTO_INTAKE_TIMEOUT_SECONDS = 3.0;
 	}
 
 	/**
@@ -667,16 +674,17 @@ public final class Constants {
 		public static final int DISABLED_THROTTLE = 100;
 		public static final int ENABLED_THROTTLE = 0;
 
-		// --- Camera Mounting ---
-		// Facing sign per Limelight, same order as LIMELIGHT_NAMES:
-		// +1 = camera faces the robot's FRONT, -1 = faces the REAR. The
-		// tracker mirrors its drive commands for rear-facing cameras (used
-		// when backing up to the coral station). VERIFY against the actual
-		// camera mounting.
-		public static final double[] LIMELIGHT_FACING_SIGNS = {
-			-1.0, // funnel - rear-facing (watches the coral station behind the robot)
-			1.0,  // barge  - front-facing
-			1.0,  // reef   - front-facing
+		// --- Camera Roles ---
+		// Which tag class each Limelight may supply to the ALIGNMENT tracker,
+		// same order as LIMELIGHT_NAMES (every camera still feeds MegaTag pose
+		// estimation with whatever tags it sees). The rear funnel camera is
+		// the only one that should ever align on a coral station, and the
+		// barge camera's pose is a placeholder, so it aligns on nothing.
+		public enum TagClass { REEF, CORAL_STATION, NONE }
+		public static final TagClass[] LIMELIGHT_TRACKING_CLASSES = {
+			TagClass.CORAL_STATION, // funnel - rear-facing, watches the coral station behind the robot
+			TagClass.NONE,          // barge  - placeholder pose; set to REEF once it is measured
+			TagClass.REEF,          // reef   - front-left, yawed toward the centerline
 		};
 
 		// --- Camera Poses in Robot Space ---
@@ -711,6 +719,14 @@ public final class Constants {
 				this.yawDegrees = yawDegrees;
 				this.measured = measured;
 			}
+
+			/**
+			 * The lens position in the WPILib robot frame (+X forward,
+			 * +Y left): Limelight's side axis is positive to the RIGHT.
+			 */
+			public Translation2d lensOnRobot() {
+				return new Translation2d(forwardMeters, -sideMeters);
+			}
 		}
 
 		// Same order as LIMELIGHT_NAMES.
@@ -740,37 +756,99 @@ public final class Constants {
 			new CameraPose(11.04 * 0.0254, -11.25 * 0.0254, 15.78 * 0.0254, 0.0, -20.0, -30.0, true),
 		};
 
+		// --- Field (2025 Reefscape) ---
+		// The AprilTag layout the alignment heading and the pose plausibility
+		// gate use, and the field size PathPlanner's alliance flip must use.
+		// Welded is the standard event field; switch to
+		// k2025ReefscapeAndyMark for an AndyMark field.
+		public static final AprilTagFields FIELD_LAYOUT = AprilTagFields.k2025ReefscapeWelded;
+		public static final double FIELD_LENGTH_METERS = 17.548;
+		public static final double FIELD_WIDTH_METERS = 8.052;
+		// A fused pose may lie this far outside the field before it is rejected
+		public static final double FIELD_BOUNDS_MARGIN_METERS = 0.5;
+
+		// --- Pose-estimate plausibility gates ---
+		// Single-tag MegaTag1 solves (the heading seed) are only trusted when
+		// unambiguous and close; these are Limelight's documented thresholds.
+		public static final double MT1_SINGLE_TAG_MAX_AMBIGUITY = 0.7;
+		public static final double MT1_SINGLE_TAG_MAX_DISTANCE_METERS = 3.0;
+		// Heading std devs (rad) for MegaTag1 while seeding. The estimator only
+		// closes part of the heading error per fused solve (about 2/3 at 0.05
+		// against its 0.1 rad state std dev), and the disabled throttle yields
+		// ~1 solve/s, so 2+ tag solves are trusted tightly to converge in a
+		// few seconds; a lone tag (already gated on ambiguity/distance) less so.
+		public static final double MT1_MULTI_TAG_ROTATION_STD_DEV = 0.05;
+		public static final double MT1_SINGLE_TAG_ROTATION_STD_DEV = 0.3;
+		// MegaTag2 translations from very far tags add little and can jump
+		public static final double MT2_MAX_AVG_TAG_DISTANCE_METERS = 6.0;
+		// How recently a trusted MegaTag1 solve must have been fused for the
+		// heading to count as field-referenced (auto start then keeps it
+		// instead of the path's nominal heading), and how far it may disagree
+		// with the nominal heading before the nominal one wins.
+		public static final double HEADING_SEED_FRESHNESS_SECONDS = 3.0;
+		public static final double HEADING_SEED_MAX_DISAGREEMENT_DEGREES = 20.0;
+		// ...and the estimator heading must have CONVERGED on that solve: it
+		// must agree with the solve's own heading within this much
+		public static final double HEADING_SEED_AGREEMENT_DEGREES = 3.0;
+		// Driver heading re-seed (left bumper while enabled): MegaTag1 is fused
+		// for this long so the heading corrects from tag geometry
+		public static final double HEADING_RESEED_WINDOW_SECONDS = 2.0;
+
 		// --- Tag Classes (2025 Reefscape field) ---
 		// Only reef and coral station tags are tracked; barge (4, 5, 14, 15)
 		// and processor (3, 16) tags are intentionally left blank for now -
-		// the tracker ignores them entirely.
+		// the tracker ignores them entirely. (All tags still feed MegaTag.)
 		public static final int[] REEF_TAGS = {6, 7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 22};
 		public static final int[] CORAL_STATION_TAGS = {1, 2, 12, 13};
 
-		// --- Tracking Goal Distances (meters, camera-space Z) ---
-		// All "flush" distances are what the camera READS in that condition,
-		// not a field dimension. TUNE by physically placing the robot in the
-		// goal position and copying the Vision/Distance dashboard value.
-		public static final double REEF_FLUSH_DISTANCE = 0.45;    // Front bumpers flush with the reef base (L2-L4 + algae)
+		// --- Tracking Goal Distances (meters, ROBOT frame) ---
+		// Where the tag should sit relative to the robot CENTER when in
+		// position; the tracker works in the robot frame, so these are
+		// geometry, not camera readings. Flush = the tag's face at the bumper
+		// face: half the bumper-to-bumper length (36.5 in / 2 = 0.464 m) plus
+		// a little standoff. TUNE by pushing the robot into position and
+		// copying the Vision/Distance (forward) reading.
+		public static final double REEF_FLUSH_DISTANCE = 0.47;    // Front bumpers flush with the reef base (L2-L4 + algae)
 		public static final double L1_SCORE_DISTANCE = 1.0;       // Standoff for L1 so the CorAl can swing to 100 deg without hitting
-		public static final double STATION_FLUSH_DISTANCE = 0.45; // Rear bumpers flush with the coral station wall (rear camera reading)
+		public static final double STATION_FLUSH_DISTANCE = 0.47; // Rear bumpers flush with the coral station wall (tag BEHIND the robot)
 
-		// --- Reef Branch Alignment (meters, camera-space X) ---
-		// Each reef face has two scoring branches, one either side of the
-		// tag. Lateral offset from tag center to a branch center (~13 in
-		// branch spacing / 2). TUNE on the field.
+		// --- Reef Branch Alignment (meters, robot-frame Y) ---
+		// Each reef face has two scoring branches, one either side of the tag,
+		// 13 in apart (game manual) -> 6.5 in from the tag center. Centering
+		// on the LEFT branch puts the tag this far to the robot's RIGHT. TUNE
+		// on the field (Vision/Lateral with the robot centered on a branch).
 		public static final double REEF_BRANCH_OFFSET = 0.165;
+
+		// A camera-space Z (forward) below this is not a real tag solve (an
+		// empty or zeroed targetpose array)
+		public static final double MIN_CAMERA_Z = 0.1;
 
 		// --- Tracking Gains and Limits ---
 		public static final class TrackingGains {
 			public static final double DISTANCE_kP = 1.5;  // TUNE - m/s of drive per meter of position error
-			public static final double ROTATION_kP = 0.06; // TUNE - rad/s of rotation per DEGREE of tx error
+			public static final double ROTATION_kP = 0.06; // TUNE - rad/s of rotation per DEGREE of heading error
 
-			public static final double POSITION_ERROR_DEADBAND = 0.05; // Meters; errors below this are treated as zero
-			public static final double ROTATION_ERROR_DEADBAND = 1.0;  // Degrees of tx; errors below this are treated as zero
+			// Deadbands: errors below these are treated as zero. Lateral is
+			// tight because a coral on a branch has only ~3 cm of clearance
+			// per side; fore/aft is absorbed by the reef base when flush.
+			public static final double FORWARD_ERROR_DEADBAND = 0.03;  // Meters
+			public static final double LATERAL_ERROR_DEADBAND = 0.015; // Meters
+			public static final double ROTATION_ERROR_DEADBAND = 1.0;  // Degrees of heading error
 
+			// Smallest drive command outside a deadband: a P command below
+			// this would not overcome static friction and the robot would
+			// stall just outside the deadband
+			public static final double MIN_LINEAR_VELOCITY = 0.12; // m/s
 			public static final double MAX_LINEAR_VELOCITY = 2.0;  // m/s command clamp while tracking
 			public static final double MAX_ANGULAR_VELOCITY = 1.0; // rad/s command clamp while tracking
+
+			// The tracker keeps its first tag, and while that tag is out of
+			// view carries its last sighting on odometry, for this long: the
+			// goal cannot flip between adjacent reef faces, and an approach
+			// whose tag leaves the camera's view at the end (the rear funnel
+			// camera loses the station tag ~0.55 m from the wall) still
+			// finishes on dead reckoning.
+			public static final double TARGET_MEMORY_SECONDS = 1.5;
 		}
 	}
 
@@ -778,6 +856,12 @@ public final class Constants {
 	 * Constants for AdvantageKit / AdvantageScope logging output.
 	 */
 	public static final class LoggingConstants {
+		// When no USB stick is mounted the .wpilog files go to the roboRIO's
+		// internal storage: keep at least this much free by deleting the oldest
+		// logs (never the newest few), so a full disk cannot break Preferences.
+		public static final long INTERNAL_LOG_MIN_FREE_BYTES = 100L * 1024 * 1024;
+		public static final int INTERNAL_LOG_KEEP_NEWEST = 5;
+
 		// Indices into the Components3d / DesiredComponents3d Pose3d arrays
 		// published for AdvantageScope's articulated 3D robot model. This
 		// robot's three moving components, in the order the code publishes

@@ -6,6 +6,7 @@ import org.littletonrobotics.junction.Logger;
 import edu.wpi.first.cameraserver.CameraServer;
 import edu.wpi.first.cscore.HttpCamera;
 import edu.wpi.first.cscore.HttpCamera.HttpCameraKind;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation3d;
@@ -20,6 +21,7 @@ import edu.wpi.first.wpilibj.Alert.AlertType;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+import edu.wpi.first.wpilibj.smartdashboard.FieldObject2d;
 import edu.wpi.first.wpilibj.smartdashboard.Mechanism2d;
 import edu.wpi.first.wpilibj.smartdashboard.MechanismLigament2d;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -91,6 +93,8 @@ public class Dashboard {
 
     // Precomputed "Vision/<name> Has Target" keys (avoids per-loop concatenation)
     private final String[] visionHasTargetKeys;
+    // Field2d objects showing each camera's last fused pose (cleared when stale)
+    private final FieldObject2d[] visionFieldObjects;
 
     // ------------------------------------------------------------------
     // Superstructure visualization
@@ -254,8 +258,10 @@ public class Dashboard {
         };
 
         visionHasTargetKeys = new String[VisionConstants.LIMELIGHT_NAMES.length];
+        visionFieldObjects = new FieldObject2d[VisionConstants.LIMELIGHT_NAMES.length];
         for (int i = 0; i < VisionConstants.LIMELIGHT_NAMES.length; i++) {
             visionHasTargetKeys[i] = "Vision/" + VisionConstants.LIMELIGHT_NAMES[i] + " Has Target";
+            visionFieldObjects[i] = field.getObject("Vision " + VisionConstants.LIMELIGHT_NAMES[i]);
         }
 
         // --- Limelight camera streams ---
@@ -275,7 +281,10 @@ public class Dashboard {
      */
     public void update() {
         // --- Field + drivetrain ---
-        var driveState = swerve.getState();
+        // A private snapshot: getState() returns the object the odometry
+        // thread rewrites at 100 Hz, so pose/speeds/modules read below would
+        // otherwise come from different odometry ticks
+        var driveState = swerve.getStateCopy();
         field.setRobotPose(driveState.Pose);
 
         SmartDashboard.putNumber("Swerve/Speed",
@@ -376,20 +385,46 @@ public class Dashboard {
         SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
 
         // --- Vision ---
-        // One best-target read reused for every consumer this loop
+        // Best VISIBLE tag (any trackable class, ignoring the goal filter and
+        // the latch) so the readouts work with the robot pushed into position
+        // while disabled; positions are in the ROBOT frame
         var vision = swerve.getVision();
-        var bestTarget = vision.getBestTarget();
+        var bestTarget = vision.getBestVisibleTarget();
         SmartDashboard.putNumber("Vision/Best Tag",
             bestTarget.map(t -> (double) t.id).orElse(-1.0));
         SmartDashboard.putNumber("Vision/TX",
             bestTarget.map(t -> t.tx).orElse(0.0));
+        // Forward distance from the robot center to the tag (negative = behind)
         SmartDashboard.putNumber("Vision/Distance",
-            bestTarget.map(t -> t.groundDistance()).orElse(0.0));
+            bestTarget.map(t -> t.robotFrame.getX()).orElse(0.0));
+        // Lateral position of the tag (+ = to the robot's left)
+        SmartDashboard.putNumber("Vision/Lateral",
+            bestTarget.map(t -> t.robotFrame.getY()).orElse(0.0));
+        SmartDashboard.putNumber("Vision/Square Heading",
+            bestTarget.flatMap(t -> t.squareHeading).map(Rotation2d::getDegrees).orElse(0.0));
         Logger.recordOutput("Vision/BestTag", bestTarget.map(t -> t.id).orElse(-1));
         for (int i = 0; i < visionHasTargetKeys.length; i++) {
             SmartDashboard.putBoolean(visionHasTargetKeys[i], vision.hasTarget(i));
+            // Last pose fused from each camera, drawn on the field beside the
+            // robot; cleared once that camera has not fused for a second
+            final int camera = i;
+            vision.getLastFusedPose(i).ifPresentOrElse(
+                visionFieldObjects[camera]::setPose,
+                () -> visionFieldObjects[camera].setPoses(java.util.List.of()));
         }
         SmartDashboard.putString("Vision/Branch Side", vision.getBranchSide().name());
+        SmartDashboard.putNumber("Vision/Latched Tag", vision.getLatchedTagId());
+        SmartDashboard.putBoolean("Vision/Heading Seed Fresh", vision.hasFreshHeadingSeed());
+        SmartDashboard.putBoolean("Vision/Reseeding Heading", vision.isReseedingHeading());
+        SmartDashboard.putBoolean("Vision/Auto Kept Heading", swerve.lastAutoResetKeptHeading());
+        // Alignment servo state (robot frame)
+        SmartDashboard.putBoolean("Vision/Target Visible", swerve.isAlignmentTargetVisible());
+        SmartDashboard.putBoolean("Vision/Target From Memory",
+            vision.getBestTarget().map(t -> t.fromMemory).orElse(false));
+        SmartDashboard.putBoolean("Vision/Aligned", swerve.isAligned());
+        SmartDashboard.putNumber("Vision/Forward Error", swerve.getAlignmentForwardError());
+        SmartDashboard.putNumber("Vision/Lateral Error", swerve.getAlignmentLateralError());
+        SmartDashboard.putNumber("Vision/Heading Error", swerve.getAlignmentHeadingErrorDegrees());
 
         // --- LEDs (CANdle code commented out - no CANdle on the robot) ---
         // Restore with the subsystem:

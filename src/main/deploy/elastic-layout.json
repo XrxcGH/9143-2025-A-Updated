@@ -527,7 +527,7 @@
               "period": 0.033,
               "topic": "/SmartDashboard/Swerve Drive",
               "show_robot_rotation": true,
-              "rotation_unit": "Degrees"
+              "rotation_unit": "Radians"
             }
           },
           {

@@ -1,33 +1,56 @@
 package frc.robot.subsystems;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.VecBuilder;
-import edu.wpi.first.math.geometry.Pose3d;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.LimelightHelpers;
+import frc.robot.LimelightHelpers.PoseEstimate;
+import frc.robot.LimelightHelpers.RawFiducial;
 import frc.robot.Superstructure;
 import frc.robot.Constants.VisionConstants;
+import frc.robot.Constants.VisionConstants.CameraPose;
+import frc.robot.Constants.VisionConstants.TagClass;
 import frc.robot.util.Tunables;
 
 /**
  * Vision subsystem: multi-Limelight AprilTag targeting and pose estimation.
  *
- * Pose estimation uses MegaTag2: the robot's gyro heading is sent to each
- * Limelight every loop, and the returned pose estimates are fused into the
- * swerve drivetrain's odometry with distance/tag-count based confidence.
+ * Pose estimation: while ENABLED the robot's heading is sent to each
+ * Limelight every loop and the returned MegaTag2 poses are fused into the
+ * swerve pose estimator with distance/tag-count based confidence. While
+ * DISABLED (and for a short window after the driver asks for a heading
+ * re-seed) MegaTag1 is fused instead, because its solve carries an absolute
+ * heading from tag geometry - that is what seeds the heading MegaTag2 then
+ * depends on. Every camera frame is fused at most once (the NT sample
+ * timestamp identifies a frame), estimates are inserted oldest first so a
+ * late camera cannot erase an earlier camera's correction, single-tag
+ * MegaTag1 solves are gated on ambiguity and distance before their heading
+ * is trusted, and a camera whose mounting pose is not measured never seeds
+ * the heading.
  *
- * The "best target" (closest TRACKABLE tag - reef or coral station; barge
- * and processor tags are ignored) is computed once per loop in periodic()
- * and cached, so dashboard widgets and the tracking command can read it
- * without re-querying NetworkTables dozens of times per cycle.
- *
- * Tracking goals depend on what the robot is doing, not just which tag it
- * sees: the resolver combines the tag's class (reef / coral station) with
- * the superstructure's current goal (L1 standoff vs. L2-L4 flush-on-branch
- * vs. algae flush-centered) and the driver-selected branch side.
+ * Targeting: each camera's primary tag is converted from Limelight camera
+ * space into the ROBOT frame using that camera's mounting pose (lens
+ * offset, yaw and pitch), so the tracking command servos on where the tag
+ * is relative to the robot's center, whichever camera saw it. The tag's
+ * field heading (from the AprilTag field layout) gives the heading at which
+ * the robot is square to the tag's face. Cameras only report the tag class
+ * they are mounted for (rear funnel camera: coral stations; reef camera:
+ * reef). Once tracking starts the first chosen tag is latched so the goal
+ * cannot flip between adjacent reef faces mid-approach, and if the latched
+ * tag drops out of view (the rear camera loses the station tag before the
+ * bumpers are flush) its last sighting is carried on odometry for a short
+ * time so the approach finishes.
  *
  * Dashboard note: this subsystem publishes nothing itself. All telemetry is
  * read through the public getters by the central {@link frc.robot.Dashboard}
@@ -41,16 +64,64 @@ public class Vision extends SubsystemBase {
         RIGHT
     }
 
-    /** A resolved alignment goal in camera space (meters). */
+    /**
+     * A resolved alignment goal: where the tag should sit in the ROBOT frame
+     * (WPILib: +X forward, +Y left, meters) when the robot is in position.
+     */
     public static class TrackingGoal {
-        /** Desired camera-space X of the tag (+ = tag to the robot's right). */
-        public final double lateral;
-        /** Desired camera-space Z distance to the tag. */
-        public final double distance;
+        /** Desired robot-frame X of the tag; negative for a rear (backed-up) approach. */
+        public final double forward;
+        /** Desired robot-frame Y of the tag (+ = tag to the robot's LEFT). */
+        public final double left;
 
-        public TrackingGoal(double lateral, double distance) {
-            this.lateral = lateral;
-            this.distance = distance;
+        public TrackingGoal(double forward, double left) {
+            this.forward = forward;
+            this.left = left;
+        }
+    }
+
+    /**
+     * An AprilTag target: seen by a Limelight this loop, or (fromMemory) the
+     * latched tag's last sighting carried on odometry. The camera-space
+     * numbers are kept for display; the driving math uses
+     * {@link #robotFrame} and {@link #squareHeading}.
+     */
+    public static class AprilTagTarget {
+        public final int id;
+        public final TagClass tagClass;
+        public final String limelightName;
+        public final int cameraIndex;
+        public final double tx; // Horizontal angle to target (degrees, + = right), display only
+        public final double ty; // Vertical angle to target (degrees), display only
+        /** Raw Limelight camera-space position: X right, Y down, Z forward (meters). */
+        public final double cameraX, cameraY, cameraZ;
+        /** Tag position in the robot frame (+X forward, +Y left), meters. */
+        public final Translation2d robotFrame;
+        /** Field heading at which the robot is square to this tag's face (empty if the tag is not in the layout). */
+        public final Optional<Rotation2d> squareHeading;
+        /** True when no camera sees the tag and this is its last sighting carried on odometry. */
+        public final boolean fromMemory;
+
+        public AprilTagTarget(int id, TagClass tagClass, String limelightName, int cameraIndex,
+                double tx, double ty, double cameraX, double cameraY, double cameraZ,
+                Translation2d robotFrame, Optional<Rotation2d> squareHeading, boolean fromMemory) {
+            this.id = id;
+            this.tagClass = tagClass;
+            this.limelightName = limelightName;
+            this.cameraIndex = cameraIndex;
+            this.tx = tx;
+            this.ty = ty;
+            this.cameraX = cameraX;
+            this.cameraY = cameraY;
+            this.cameraZ = cameraZ;
+            this.robotFrame = robotFrame;
+            this.squareHeading = squareHeading;
+            this.fromMemory = fromMemory;
+        }
+
+        /** Ground-plane distance from the robot center to the tag, in meters. */
+        public double distance() {
+            return robotFrame.getNorm();
         }
     }
 
@@ -65,20 +136,58 @@ public class Vision extends SubsystemBase {
     /** Where the superstructure goal comes from (wired in RobotContainer). */
     private Supplier<Superstructure.Goal> goalSupplier = () -> Superstructure.Goal.STOW;
 
-    // Best target cache, refreshed once per periodic()
-    private Optional<AprilTagTarget> cachedBestTarget = Optional.empty();
+    // Target caches, refreshed once per periodic()
+    private Optional<AprilTagTarget> cachedBestTarget = Optional.empty();   // matches the current goal (drives the tracker)
+    private Optional<AprilTagTarget> cachedBestVisible = Optional.empty();  // any trackable tag (dashboard / tuning)
+
+    // Tag latch while tracking: -1 = none. The latched tag's last sighting is
+    // remembered as a field position so odometry can carry it while unseen.
+    private int latchedTagId = -1;
+    private double latchedLastSeenTime = 0.0;
+    private TagClass latchedTagClass = TagClass.NONE;
+    private Optional<Rotation2d> latchedSquareHeading = Optional.empty();
+    private Translation2d latchedTagFieldPosition = null;
 
     // Precomputed "limelight-<name>" NT table names (avoids per-loop string
     // concatenation in the hot paths)
     private final String[] limelightTableNames;
 
+    // Per-camera fusion bookkeeping (same indexing as LIMELIGHT_NAMES)
+    private final double[] lastSeenTimestamp;      // NT timestamp of the last frame examined (dedupe)
+    private final Pose2d[] lastFusedPose;          // last estimate fused from each camera (display)
+    private final double[] lastFusedTime;          // FPGA time it was fused
+
+    // Heading seed bookkeeping
+    private double lastHeadingSeedTime = -1e9;        // FPGA time any trusted MegaTag1 solve was fused
+    private double lastStrongHeadingSeedTime = -1e9;  // FPGA time a two-or-more-tag MegaTag1 solve was fused
+    private Rotation2d lastStrongSeedHeading = null;  // that solve's own heading
+    private double reseedUntil = -1.0;                // FPGA time until which MegaTag1 is fused while enabled
+
+    // 2025 field layout (blue-alliance origin, matching the wpiBlue poses)
+    private final AprilTagFieldLayout fieldLayout;
+
     public Vision(Swerve swerve) {
         this.swerve = swerve;
 
-        limelightTableNames = new String[VisionConstants.LIMELIGHT_NAMES.length];
-        for (int i = 0; i < VisionConstants.LIMELIGHT_NAMES.length; i++) {
+        int n = VisionConstants.LIMELIGHT_NAMES.length;
+        limelightTableNames = new String[n];
+        lastSeenTimestamp = new double[n];
+        lastFusedPose = new Pose2d[n];
+        lastFusedTime = new double[n];
+        for (int i = 0; i < n; i++) {
             limelightTableNames[i] = "limelight-" + VisionConstants.LIMELIGHT_NAMES[i];
+            lastSeenTimestamp[i] = Double.NaN;
+            lastFusedTime[i] = -1e9;
         }
+
+        AprilTagFieldLayout layout = null;
+        try {
+            layout = AprilTagFieldLayout.loadField(VisionConstants.FIELD_LAYOUT);
+        } catch (Exception ex) {
+            DriverStation.reportError("Failed to load the AprilTag field layout; alignment falls back to tag bearing",
+                ex.getStackTrace());
+        }
+        fieldLayout = layout;
 
         for (int i = 0; i < limelightTableNames.length; i++) {
             String tableName = limelightTableNames[i];
@@ -91,14 +200,79 @@ public class Vision extends SubsystemBase {
             // Push the measured lens position/orientation so MegaTag's
             // robot pose is computed from the right camera offset (unmeasured
             // cameras keep their web-UI configuration).
-            VisionConstants.CameraPose pose = VisionConstants.LIMELIGHT_POSES[i];
+            CameraPose pose = VisionConstants.LIMELIGHT_POSES[i];
             if (pose.measured) {
                 LimelightHelpers.setCameraPose_RobotSpace(tableName,
                     pose.forwardMeters, pose.sideMeters, pose.upMeters,
                     pose.rollDegrees, pose.pitchDegrees, pose.yawDegrees);
             }
+            LimelightHelpers.setPriorityTagID(tableName, -1);
         }
     }
+
+    // ------------------------------------------------------------------
+    // Geometry (static, unit-tested)
+    // ------------------------------------------------------------------
+
+    /**
+     * Converts a Limelight camera-space tag position (X right, Y down,
+     * Z forward along the optical axis, meters) into the robot frame
+     * (+X forward, +Y left) using the camera's mounting pose. The pitch
+     * tilts the optical axis, so the ground-plane distance along the
+     * camera's heading is Z*cos(pitch) + Y*sin(pitch); the yaw and the lens
+     * offset then place the point on the robot.
+     */
+    public static Translation2d tagPositionInRobotFrame(CameraPose camera, double cameraX, double cameraY, double cameraZ) {
+        double pitch = Math.toRadians(camera.pitchDegrees);
+        double forwardAlongCameraHeading = cameraZ * Math.cos(pitch) + cameraY * Math.sin(pitch);
+        double leftOfCameraHeading = -cameraX;
+        Translation2d inCameraHeadingFrame = new Translation2d(forwardAlongCameraHeading, leftOfCameraHeading)
+            .rotateBy(Rotation2d.fromDegrees(camera.yawDegrees));
+        return camera.lensOnRobot().plus(inCameraHeadingFrame);
+    }
+
+    /** A robot-frame point (+X forward, +Y left) expressed as a field position, given the robot's field pose. */
+    public static Translation2d robotFrameToField(Pose2d robot, Translation2d inRobotFrame) {
+        return robot.getTranslation().plus(inRobotFrame.rotateBy(robot.getRotation()));
+    }
+
+    /** A field position expressed in the robot frame (+X forward, +Y left), given the robot's field pose. */
+    public static Translation2d fieldToRobotFrame(Pose2d robot, Translation2d onField) {
+        return onField.minus(robot.getTranslation()).rotateBy(robot.getRotation().unaryMinus());
+    }
+
+    /**
+     * Field heading at which the robot is square to the given tag's face:
+     * facing it for reef tags, backed up to it for coral-station tags.
+     */
+    public static Optional<Rotation2d> squareHeading(AprilTagFieldLayout layout, int tagId, TagClass tagClass) {
+        if (layout == null) {
+            return Optional.empty();
+        }
+        return layout.getTagPose(tagId).map(pose -> {
+            Rotation2d tagFacing = pose.toPose2d().getRotation();
+            return tagClass == TagClass.CORAL_STATION ? tagFacing : tagFacing.plus(Rotation2d.k180deg);
+        });
+    }
+
+    /** The class of a 2025 Reefscape tag: reef, coral station, or NONE (barge / processor / unknown). */
+    public static TagClass classOf(int tagId) {
+        for (int tag : VisionConstants.REEF_TAGS) {
+            if (tag == tagId) {
+                return TagClass.REEF;
+            }
+        }
+        for (int tag : VisionConstants.CORAL_STATION_TAGS) {
+            if (tag == tagId) {
+                return TagClass.CORAL_STATION;
+            }
+        }
+        return TagClass.NONE;
+    }
+
+    // ------------------------------------------------------------------
+    // Throttle
+    // ------------------------------------------------------------------
 
     /**
      * Frame throttle currently applied to the cameras (-1 = not yet sent).
@@ -123,6 +297,10 @@ public class Vision extends SubsystemBase {
         }
     }
 
+    // ------------------------------------------------------------------
+    // Tracking state
+    // ------------------------------------------------------------------
+
     /** Whether the Limelight at the given LIMELIGHT_NAMES index sees a target. */
     public boolean hasTarget(int index) {
         return LimelightHelpers.getTV(limelightTableNames[index]);
@@ -132,9 +310,13 @@ public class Vision extends SubsystemBase {
      * Records whether AprilTag tracking is active. Deliberately does NOT
      * touch the LEDs: they add nothing to AprilTag detection and were the
      * main reason the cameras ran hot (and loud) whenever tracking was on.
+     * Turning tracking off releases the tag latch.
      */
     public void toggleTracking(boolean enabled) {
         trackingEnabled = enabled;
+        if (!enabled) {
+            releaseLatch();
+        }
     }
 
     // Returns whether AprilTag tracking is enabled.
@@ -159,73 +341,64 @@ public class Vision extends SubsystemBase {
         return branchSide;
     }
 
-    private static boolean isReefTag(int tagId) {
-        for (int tag : VisionConstants.REEF_TAGS) {
-            if (tag == tagId) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean isCoralStationTag(int tagId) {
-        for (int tag : VisionConstants.CORAL_STATION_TAGS) {
-            if (tag == tagId) {
-                return true;
-            }
-        }
-        return false;
+    /** The tag id the tracker is latched onto, or -1. */
+    public int getLatchedTagId() {
+        return latchedTagId;
     }
 
     /**
-     * Resolves the alignment goal for a tag, combining the tag's class with
-     * the superstructure's current goal and the selected branch side.
-     * Returns empty for tags that are intentionally not tracked (barge and
-     * processor) - the tracker treats those like no target at all.
+     * Resolves the alignment goal for a target, combining the tag's class
+     * with the superstructure's current goal and the selected branch side.
+     * Goals are in the ROBOT frame: forward = where the tag should be along
+     * +X (negative = behind the robot, i.e. a backed-up approach), left =
+     * where it should be along +Y.
      *
      * Reef goals:
      *  - CORAL_L1: centered, held L1_SCORE_DISTANCE away so the arm can
      *    swing to its 100-degree pose without hitting the reef.
-     *  - CORAL_L2/L3/L4: bumpers flush, laterally centered on the selected
-     *    branch. Moving the ROBOT left makes the tag appear further RIGHT
-     *    in the camera, so the LEFT branch means a POSITIVE desired camera
-     *    X (VERIFY the sign convention on the robot).
+     *  - CORAL_L2/L3/L4: bumpers flush, robot centered on the selected
+     *    branch. The LEFT branch is REEF_BRANCH_OFFSET to the robot's left
+     *    of the tag, so centering on it puts the tag that far to the
+     *    robot's RIGHT (negative left).
      *  - Everything else (algae intakes, stow, ...): bumpers flush, centered.
      *
      * Coral station goals: rear bumpers flush with the wall, centered
-     * (approached backward via the rear-facing camera).
+     * (approached backward, so the tag sits BEHIND the robot center).
      */
-    public Optional<TrackingGoal> getTrackingGoal(int tagId) {
-        // Distances/offsets are live-tunable from the dashboard (Tunables ->
-        // WPILib Preferences), so a measured flush distance can be dialed in
-        // on the practice field without a redeploy.
-        if (isReefTag(tagId)) {
-            switch (goalSupplier.get()) {
-                case CORAL_L1:
-                    return Optional.of(new TrackingGoal(0.0, Tunables.l1ScoreDistance()));
-                case CORAL_L2:
-                case CORAL_L3:
-                case CORAL_L4:
-                    double branchOffset = Tunables.reefBranchOffset();
-                    double lateral = branchSide == BranchSide.LEFT ? branchOffset : -branchOffset;
-                    return Optional.of(new TrackingGoal(lateral, Tunables.reefFlushDistance()));
-                default:
-                    return Optional.of(new TrackingGoal(0.0, Tunables.reefFlushDistance()));
-            }
+    public Optional<TrackingGoal> getTrackingGoal(AprilTagTarget target) {
+        switch (target.tagClass) {
+            case REEF:
+                switch (goalSupplier.get()) {
+                    case CORAL_L1:
+                        return Optional.of(new TrackingGoal(Tunables.l1ScoreDistance(), 0.0));
+                    case CORAL_L2:
+                    case CORAL_L3:
+                    case CORAL_L4:
+                        double branchOffset = Tunables.reefBranchOffset();
+                        double left = branchSide == BranchSide.LEFT ? -branchOffset : branchOffset;
+                        return Optional.of(new TrackingGoal(Tunables.reefFlushDistance(), left));
+                    default:
+                        return Optional.of(new TrackingGoal(Tunables.reefFlushDistance(), 0.0));
+                }
+            case CORAL_STATION:
+                return Optional.of(new TrackingGoal(-Tunables.stationFlushDistance(), 0.0));
+            default:
+                return Optional.empty();
         }
-        if (isCoralStationTag(tagId)) {
-            return Optional.of(new TrackingGoal(0.0, Tunables.stationFlushDistance()));
-        }
-        // Barge (4, 5, 14, 15) and processor (3, 16): intentionally blank
-        return Optional.empty();
+    }
+
+    /** The target the tracker should drive to this loop (cached; refreshed in periodic). */
+    public Optional<AprilTagTarget> getBestTarget() {
+        return cachedBestTarget;
     }
 
     /**
-     * The best (closest) AprilTag target seen this loop (cached; refreshed
-     * in periodic).
+     * The closest trackable tag of ANY class seen this loop, regardless of
+     * the superstructure goal or the latch - for the dashboard and for
+     * measuring the flush distances with the robot pushed into position.
      */
-    public Optional<AprilTagTarget> getBestTarget() {
-        return cachedBestTarget;
+    public Optional<AprilTagTarget> getBestVisibleTarget() {
+        return cachedBestVisible;
     }
 
     /**
@@ -236,56 +409,138 @@ public class Vision extends SubsystemBase {
      * tag seen by the rear camera at 3 m could out-"close" the intended
      * reef tag at 4 m and hijack a scoring alignment.
      */
-    private boolean tagMatchesCurrentGoal(int tagId) {
+    private boolean tagMatchesCurrentGoal(TagClass tagClass) {
         if (goalSupplier.get() == Superstructure.Goal.STOW) {
-            return isCoralStationTag(tagId);
+            return tagClass == TagClass.CORAL_STATION;
         }
-        return isReefTag(tagId);
+        return tagClass == TagClass.REEF;
     }
 
-    // Queries every Limelight and picks the CLOSEST visible tag whose class
-    // matches the current superstructure goal (reef for scoring/algae,
-    // coral station for stow/intake). Barge and processor tags never match.
-    private Optional<AprilTagTarget> findBestTarget() {
-        AprilTagTarget bestTarget = null;
-        double bestDistance = Double.MAX_VALUE;
+    private void latch(AprilTagTarget target, Pose2d robotPose) {
+        latchedTagId = target.id;
+        latchedTagClass = target.tagClass;
+        latchedSquareHeading = target.squareHeading;
+        remember(target, robotPose);
+        for (String tableName : limelightTableNames) {
+            LimelightHelpers.setPriorityTagID(tableName, target.id);
+        }
+    }
+
+    /** Records where the latched tag is on the field so odometry can carry it while unseen. */
+    private void remember(AprilTagTarget target, Pose2d robotPose) {
+        latchedLastSeenTime = Timer.getFPGATimestamp();
+        latchedTagFieldPosition = robotFrameToField(robotPose, target.robotFrame);
+    }
+
+    private void releaseLatch() {
+        if (latchedTagId < 0) {
+            return;
+        }
+        latchedTagId = -1;
+        latchedTagFieldPosition = null;
+        for (String tableName : limelightTableNames) {
+            LimelightHelpers.setPriorityTagID(tableName, -1);
+        }
+    }
+
+    /** The latched tag's last sighting, moved by the odometry since. */
+    private AprilTagTarget rememberedTarget(Pose2d robotPose) {
+        return new AprilTagTarget(latchedTagId, latchedTagClass, "memory", -1,
+            0.0, 0.0, 0.0, 0.0, 0.0,
+            fieldToRobotFrame(robotPose, latchedTagFieldPosition), latchedSquareHeading, true);
+    }
+
+    /**
+     * Queries every Limelight and refreshes both target caches: the closest
+     * trackable tag of any class (dashboard), and the closest tag matching
+     * the current goal (tracker), honoring the latch while tracking. While
+     * the latched tag is unseen (for up to TARGET_MEMORY_SECONDS) its last
+     * sighting carried on odometry stands in, so an approach whose tag
+     * leaves the camera's view at the end still finishes.
+     */
+    private void refreshTargets(Pose2d robotPose) {
+        double now = Timer.getFPGATimestamp();
+        AprilTagTarget bestVisible = null;
+        double bestVisibleDistance = Double.MAX_VALUE;
+        AprilTagTarget bestForGoal = null;
+        double bestGoalDistance = Double.MAX_VALUE;
+        boolean latchedSeen = false;
 
         for (int i = 0; i < limelightTableNames.length; i++) {
-            String name = VisionConstants.LIMELIGHT_NAMES[i];
+            TagClass allowedClass = VisionConstants.LIMELIGHT_TRACKING_CLASSES[i];
+            if (allowedClass == TagClass.NONE) {
+                continue; // camera not used for alignment
+            }
             String limelightName = limelightTableNames[i];
             if (!LimelightHelpers.getTV(limelightName)) {
                 continue;
             }
-
             int tagId = (int) LimelightHelpers.getFiducialID(limelightName);
-            if (!tagMatchesCurrentGoal(tagId)) {
-                continue; // Wrong tag class for the current goal (or untracked)
+            TagClass tagClass = classOf(tagId);
+            if (tagClass != allowedClass) {
+                continue; // wrong class for this camera (or barge/processor)
             }
-
-            // Limelight camera space: X = right, Y = down, Z = forward.
-            // Ground distance ignores the vertical (Y) axis.
-            Pose3d targetPose = LimelightHelpers.getTargetPose3d_CameraSpace(limelightName);
-            double distance = Math.hypot(targetPose.getX(), targetPose.getZ());
-            if (distance < bestDistance) {
-                bestTarget = new AprilTagTarget(
-                    tagId,
-                    LimelightHelpers.getTX(limelightName),
-                    LimelightHelpers.getTY(limelightName),
-                    targetPose.getX(),
-                    targetPose.getY(),
-                    targetPose.getZ(),
-                    name,
-                    VisionConstants.LIMELIGHT_FACING_SIGNS[i]
-                );
-                bestDistance = distance;
+            // Raw camera-space array: an empty array (no 3D solve / topic
+            // absent) or an all-zero one (3D solve disabled) must not become
+            // a "0 m away" target that wins the closest-tag selection.
+            double[] cameraSpace = LimelightHelpers.getLimelightNTDoubleArray(limelightName, "targetpose_cameraspace");
+            if (cameraSpace.length < 6 || !(cameraSpace[2] > VisionConstants.MIN_CAMERA_Z)) {
+                continue;
+            }
+            Translation2d inRobot = tagPositionInRobotFrame(VisionConstants.LIMELIGHT_POSES[i],
+                cameraSpace[0], cameraSpace[1], cameraSpace[2]);
+            AprilTagTarget target = new AprilTagTarget(
+                tagId, tagClass, VisionConstants.LIMELIGHT_NAMES[i], i,
+                LimelightHelpers.getTX(limelightName), LimelightHelpers.getTY(limelightName),
+                cameraSpace[0], cameraSpace[1], cameraSpace[2],
+                inRobot, squareHeading(fieldLayout, tagId, tagClass), false);
+            double distance = target.distance();
+            if (distance < bestVisibleDistance) {
+                bestVisible = target;
+                bestVisibleDistance = distance;
+            }
+            if (!tagMatchesCurrentGoal(tagClass)) {
+                continue;
+            }
+            if (latchedTagId >= 0 && tagId != latchedTagId) {
+                continue; // latched onto another tag
+            }
+            if (tagId == latchedTagId) {
+                latchedSeen = true;
+            }
+            if (distance < bestGoalDistance) {
+                bestForGoal = target;
+                bestGoalDistance = distance;
             }
         }
 
-        return Optional.ofNullable(bestTarget);
+        cachedBestVisible = Optional.ofNullable(bestVisible);
+        cachedBestTarget = Optional.ofNullable(bestForGoal);
+
+        // Latch management: hold the first chosen tag while tracking; while
+        // it is unseen, stand in its last sighting carried on odometry; drop
+        // it once it has been out of view for the memory time.
+        if (!trackingEnabled) {
+            releaseLatch();
+        } else if (latchedTagId < 0) {
+            if (bestForGoal != null) {
+                latch(bestForGoal, robotPose);
+            }
+        } else if (latchedSeen) {
+            remember(bestForGoal, robotPose);
+        } else if (now - latchedLastSeenTime > VisionConstants.TrackingGains.TARGET_MEMORY_SECONDS) {
+            releaseLatch();
+        } else if (latchedTagFieldPosition != null) {
+            cachedBestTarget = Optional.of(rememberedTarget(robotPose));
+        }
     }
 
+    // ------------------------------------------------------------------
+    // Pose fusion
+    // ------------------------------------------------------------------
+
     /**
-     * Enables or disables MegaTag2 pose fusion. Useful during testing to
+     * Enables or disables MegaTag pose fusion. Useful during testing to
      * compare pure wheel odometry against vision-corrected odometry.
      *
      * NOTE: intentionally unused (with its getter below) - fusion defaults
@@ -300,38 +555,87 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * An AprilTag target detected by a Limelight, in camera space:
-     * poseX = right (m), poseY = down (m), poseZ = forward (m).
-     * Driving math uses X (lateral) and Z (distance); Y is display-only.
+     * Asks for the heading to be re-seeded from tag geometry: MegaTag1 (whose
+     * solve carries an absolute heading) is fused for the next
+     * HEADING_RESEED_WINDOW_SECONDS even though the robot is enabled. This
+     * is the driver's "fix my field-centric heading" while a tag is in view;
+     * unlike a gyro re-zero it cannot feed MegaTag2 a made-up heading.
      */
-    public static class AprilTagTarget {
-        public final int id;
-        public final double tx; // Horizontal angle to target (degrees, + = right)
-        public final double ty; // Vertical angle to target (degrees)
-        public final double poseX;
-        public final double poseY;
-        public final double poseZ;
-        public final String limelightName;
-        /** +1 if the reporting camera faces the robot's front, -1 if the rear. */
-        public final double facingSign;
+    public void requestHeadingReseed() {
+        reseedUntil = Timer.getFPGATimestamp() + VisionConstants.HEADING_RESEED_WINDOW_SECONDS;
+    }
 
-        public AprilTagTarget(int id, double tx, double ty,
-                double poseX, double poseY, double poseZ, String limelightName,
-                double facingSign) {
-            this.id = id;
-            this.tx = tx;
-            this.ty = ty;
-            this.poseX = poseX;
-            this.poseY = poseY;
-            this.poseZ = poseZ;
-            this.limelightName = limelightName;
-            this.facingSign = facingSign;
-        }
+    /** True while a driver-requested heading re-seed window is open. */
+    public boolean isReseedingHeading() {
+        return Timer.getFPGATimestamp() < reseedUntil;
+    }
 
-        /** Ground-plane distance from the camera to the tag, in meters. */
-        public double groundDistance() {
-            return Math.hypot(poseX, poseZ);
+    /**
+     * True when a MegaTag1 solve with a trusted heading (two or more tags,
+     * or one close unambiguous tag) was fused within
+     * HEADING_SEED_FRESHNESS_SECONDS - i.e. the pose heading has been
+     * pulled toward a field-referenced value recently.
+     */
+    public boolean hasFreshHeadingSeed() {
+        return Timer.getFPGATimestamp() - lastHeadingSeedTime <= VisionConstants.HEADING_SEED_FRESHNESS_SECONDS;
+    }
+
+    /**
+     * True when the pose heading is CONVERGED on a strong seed: a
+     * two-or-more-tag MegaTag1 solve was fused within
+     * HEADING_SEED_FRESHNESS_SECONDS and the estimator's heading now agrees
+     * with that solve's own heading within HEADING_SEED_AGREEMENT_DEGREES.
+     * (One fused solve only closes part of the heading error, so freshness
+     * alone would trust a heading that is still converging.)
+     */
+    public boolean hasStrongHeadingSeed() {
+        if (lastStrongSeedHeading == null
+                || Timer.getFPGATimestamp() - lastStrongHeadingSeedTime > VisionConstants.HEADING_SEED_FRESHNESS_SECONDS) {
+            return false;
         }
+        Rotation2d current = swerve.getStateCopy().Pose.getRotation();
+        return Math.abs(current.minus(lastStrongSeedHeading).getDegrees()) <= VisionConstants.HEADING_SEED_AGREEMENT_DEGREES;
+    }
+
+    /** The last pose fused from the given camera, if it was fused within the last second. */
+    public Optional<Pose2d> getLastFusedPose(int index) {
+        if (lastFusedPose[index] == null || Timer.getFPGATimestamp() - lastFusedTime[index] > 1.0) {
+            return Optional.empty();
+        }
+        return Optional.of(lastFusedPose[index]);
+    }
+
+    /**
+     * Rejects estimates that cannot be right: NaN or off-field poses, far
+     * MegaTag2 solves, and single-tag MegaTag1 solves that are ambiguous or
+     * far (the classic single-tag pose flip would otherwise seed a heading
+     * that is wrong by tens of degrees).
+     */
+    private static boolean isPlausible(PoseEstimate estimate, boolean megaTag1) {
+        Translation2d t = estimate.pose.getTranslation();
+        if (Double.isNaN(t.getX()) || Double.isNaN(t.getY())) {
+            return false;
+        }
+        double margin = VisionConstants.FIELD_BOUNDS_MARGIN_METERS;
+        if (t.getX() < -margin || t.getX() > VisionConstants.FIELD_LENGTH_METERS + margin
+                || t.getY() < -margin || t.getY() > VisionConstants.FIELD_WIDTH_METERS + margin) {
+            return false;
+        }
+        if (megaTag1) {
+            if (estimate.tagCount < 2) {
+                if (estimate.rawFiducials == null || estimate.rawFiducials.length == 0) {
+                    return false;
+                }
+                RawFiducial fiducial = estimate.rawFiducials[0];
+                if (fiducial.ambiguity > VisionConstants.MT1_SINGLE_TAG_MAX_AMBIGUITY
+                        || fiducial.distToCamera > VisionConstants.MT1_SINGLE_TAG_MAX_DISTANCE_METERS) {
+                    return false;
+                }
+            }
+        } else if (estimate.avgTagDist > VisionConstants.MT2_MAX_AVG_TAG_DISTANCE_METERS) {
+            return false;
+        }
+        return true;
     }
 
     /**
@@ -340,46 +644,103 @@ public class Vision extends SubsystemBase {
      * Swerve.addVisionMeasurement().
      *
      * Two modes:
-     *  - DISABLED (pre-match / between periods): MegaTag1, whose solve
-     *    includes an absolute HEADING from tag geometry alone. Its rotation
-     *    is fused so the pose heading converges to field-correct while the
-     *    robot sits still - without this, the heading MegaTag2 depends on
-     *    would start at whatever the gyro booted to and every fused pose
-     *    would be wrong until the first manual pose/heading reset.
+     *  - DISABLED (pre-match / between periods) or a driver re-seed window:
+     *    MegaTag1, whose solve includes an absolute HEADING from tag
+     *    geometry alone. Its rotation is fused so the pose heading converges
+     *    to field-correct while the robot sits still - without this, the
+     *    heading MegaTag2 depends on would start at whatever the gyro booted
+     *    to and every fused pose would be wrong until a manual reset. Only
+     *    cameras with a measured mounting pose take part: a placeholder
+     *    lens pose would seed a biased heading.
      *  - ENABLED: MegaTag2, which takes our (now-seeded) heading and returns
      *    a far more stable translation than single-tag solves. Its heading
      *    is our own gyro echoed back, so it gets effectively zero weight.
+     *
+     * Each camera frame is fused once: the estimator applies its correction
+     * on every call, so re-adding the same sample every 20 ms loop (the
+     * camera publishes at most ~90 Hz, and only ~1 Hz while throttled) would
+     * collapse the estimate onto the raw camera pose regardless of the
+     * standard deviations. The batch is inserted oldest first because
+     * inserting an older measurement discards the corrections from newer
+     * ones. Frames that arrive while the drivetrain is rejecting vision
+     * (just after a fast spin) are dropped, not deferred.
      */
-    private void updateRobotPosition() {
-        boolean seedingHeading = DriverStation.isDisabled();
-        double headingDegrees = swerve.getState().Pose.getRotation().getDegrees();
+    private void updateRobotPosition(Pose2d robotPose) {
+        double now = Timer.getFPGATimestamp();
+        boolean seedingHeading = DriverStation.isDisabled() || now < reseedUntil;
+        boolean rejecting = swerve.isRejectingVision();
+        double headingDegrees = robotPose.getRotation().getDegrees();
 
-        for (String tableName : limelightTableNames) {
+        List<PoseEstimate> batch = new ArrayList<>(limelightTableNames.length);
+        List<Integer> batchCameras = new ArrayList<>(limelightTableNames.length);
+        for (int i = 0; i < limelightTableNames.length; i++) {
+            String tableName = limelightTableNames[i];
             // NoFlush variant: one NT flush after the loop instead of a full
             // network flush per camera per loop
             LimelightHelpers.SetRobotOrientation_NoFlush(tableName, headingDegrees, 0, 0, 0, 0, 0);
 
-            LimelightHelpers.PoseEstimate estimate = seedingHeading
+            if (seedingHeading && !VisionConstants.LIMELIGHT_POSES[i].measured) {
+                continue; // an unknown lens pose cannot seed the heading (or the translation)
+            }
+
+            PoseEstimate estimate = seedingHeading
                 ? LimelightHelpers.getBotPoseEstimate_wpiBlue(tableName)
                 : LimelightHelpers.getBotPoseEstimate_wpiBlue_MegaTag2(tableName);
 
             if (estimate == null || estimate.tagCount == 0) {
                 continue;
             }
+            // Same NT sample as last loop: this frame has already been
+            // considered (an unchanged sample reads back a bit-identical
+            // timestamp; every new frame gets a new server timestamp).
+            if (estimate.timestampSeconds == lastSeenTimestamp[i]) {
+                continue;
+            }
+            lastSeenTimestamp[i] = estimate.timestampSeconds;
+            if (rejecting || !isPlausible(estimate, seedingHeading)) {
+                continue;
+            }
+            batch.add(estimate);
+            batchCameras.add(i);
+        }
 
+        // Oldest first, so a late camera cannot erase an earlier camera's correction
+        Integer[] order = new Integer[batch.size()];
+        for (int k = 0; k < order.length; k++) {
+            order[k] = k;
+        }
+        java.util.Arrays.sort(order, Comparator.comparingDouble(k -> batch.get(k).timestampSeconds));
+
+        for (int k : order) {
+            PoseEstimate estimate = batch.get(k);
+            int camera = batchCameras.get(k);
             // Confidence scales with tag count and closeness
             double xyStdDev = 0.3
                 + 0.4 * (estimate.avgTagDist * estimate.avgTagDist) / Math.max(1, estimate.tagCount);
-            // MegaTag1 heading is trusted (loosely; tighter with 2+ tags)
-            // while disabled and stationary; MegaTag2 heading never is.
+            // MegaTag1 heading is trusted while seeding - tightly with 2+
+            // tags so the stationary heading collapses onto the solve in a
+            // few frames even at the disabled throttle's ~1 Hz - and
+            // MegaTag2's heading never is.
             double rotStdDev = seedingHeading
-                ? (estimate.tagCount >= 2 ? 0.3 : 0.9)
+                ? (estimate.tagCount >= 2
+                    ? VisionConstants.MT1_MULTI_TAG_ROTATION_STD_DEV
+                    : VisionConstants.MT1_SINGLE_TAG_ROTATION_STD_DEV)
                 : 9999999;
 
             swerve.addVisionMeasurement(
                 estimate.pose,
                 estimate.timestampSeconds,
                 VecBuilder.fill(xyStdDev, xyStdDev, rotStdDev));
+
+            lastFusedPose[camera] = estimate.pose;
+            lastFusedTime[camera] = now;
+            if (seedingHeading) {
+                lastHeadingSeedTime = now;
+                if (estimate.tagCount >= 2) {
+                    lastStrongHeadingSeedTime = now;
+                    lastStrongSeedHeading = estimate.pose.getRotation();
+                }
+            }
         }
 
         LimelightHelpers.Flush();
@@ -390,11 +751,15 @@ public class Vision extends SubsystemBase {
         // Full-rate processing only while enabled (thermal / fan noise)
         updateThrottle();
 
-        // Refresh the best-target cache once per loop; all readers use this.
-        cachedBestTarget = findBestTarget();
+        // One pose snapshot for this loop (getState() is the shared object
+        // the odometry thread rewrites)
+        Pose2d robotPose = swerve.getStateCopy().Pose;
+
+        // Refresh the target caches once per loop; all readers use these.
+        refreshTargets(robotPose);
 
         if (positionTrackingEnabled) {
-            updateRobotPosition();
+            updateRobotPosition(robotPose);
         }
     }
 }

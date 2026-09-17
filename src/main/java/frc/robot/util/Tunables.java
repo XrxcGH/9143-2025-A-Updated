@@ -86,7 +86,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 6;
+    private static final int DEFAULTS_VERSION = 7; // 7: vision goal distances re-defined in the robot frame (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -150,6 +150,16 @@ public final class Tunables {
         Preferences.setDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.setDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.setDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
+    }
+
+    /**
+     * Like {@link #clamped} but on the magnitude: the vision goal readouts
+     * are signed (a station tag reads negative), and a pasted negative
+     * value must not invert a goal.
+     */
+    private static double clampedMagnitude(String key, double defaultValue, double min, double max) {
+        double value = Math.abs(Preferences.getDouble(key, defaultValue));
+        return Math.max(min, Math.min(max, value));
     }
 
     /** Reads a key, falling back to its default, and clamps the result to [min, max]. */
@@ -268,27 +278,27 @@ public final class Tunables {
     }
 
     // ------------------------------------------------------------------
-    // Vision alignment goals (meters, camera-space)
+    // Vision alignment goals (meters, ROBOT frame: where the tag sits relative to the robot center)
     // ------------------------------------------------------------------
 
-    /** Camera-read Z distance with the front bumpers flush on the reef base. */
+    /** Forward distance from the robot center to a reef tag with the front bumpers flush on the reef base. */
     public static double reefFlushDistance() {
-        return Preferences.getDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
+        return clampedMagnitude(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE, 0.3, 2.0);
     }
 
-    /** Camera-read Z distance with the rear bumpers flush on the coral station wall. */
+    /** Distance from the robot center back to a coral-station tag with the rear bumpers flush (used as a negative forward goal). */
     public static double stationFlushDistance() {
-        return Preferences.getDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
+        return clampedMagnitude(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE, 0.3, 2.0);
     }
 
     /** Standoff distance from a reef tag for L1 scoring. */
     public static double l1ScoreDistance() {
-        return Preferences.getDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
+        return clampedMagnitude(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE, 0.3, 3.0);
     }
 
     /** Lateral offset from a reef tag center to a branch center. */
     public static double reefBranchOffset() {
-        return Preferences.getDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
+        return clampedMagnitude(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET, 0.0, 0.5);
     }
 
     // ------------------------------------------------------------------

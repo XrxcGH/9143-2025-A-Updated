@@ -511,8 +511,19 @@ public class Superstructure {
      * already held.
      */
     public Command intakeCoral() {
+        return stow().andThen(intakeRollers())
+            .unless(coral::isGamePieceDetected);
+    }
+
+    /**
+     * Roller-only intake at the current pose: run until the CANrange
+     * confirms a game piece, then stop. Skipped if a piece is already held.
+     * Autos bound THIS with a timeout (after their own stow) - a timeout
+     * around the whole intakeCoral would race the stow's settle timeout and
+     * could expire before the rollers ever start.
+     */
+    public Command intakeRollers() {
         return Commands.sequence(
-            stow(),
             Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.CORAL_INTAKE_SPEED), coral),
             Commands.waitUntil(coral::isGamePieceDetected),
             // Explicit stop: the subsystem's auto-stop only fires on the

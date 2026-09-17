@@ -27,7 +27,7 @@ This repository contains the code for Team 9143's 2025 FRC robot, updated to the
 | Y (press) | Toggle AprilTag vision tracking (goal follows the operator's selected pose) |
 | Left/Right trigger | Align on the LEFT / RIGHT reef branch (L2–L4 tracking) |
 | D-pad | Slow robot-centric nudges |
-| Left bumper | Re-zero field-centric heading |
+| Left bumper | Heading fix: **disabled** = re-zero field-centric to alliance-forward; **enabled** = re-seed the heading from AprilTags (MegaTag1 for 2 s). Back + left bumper forces the gyro re-zero while enabled |
 | Back/Start + X/Y | SysId characterization (testing only) |
 
 ### Operator (Xbox controller, port 1)
@@ -86,18 +86,20 @@ Simulated against the full CAD model with the 15:1 elevator (50 in/s, 400 in/s²
 All overlaps are gated on measured heights/angles, never timing, and every command first safely escapes the **current** pose — buttons are safe in any order at any time. Manual stick control bypasses these interlocks.
 
 ### Vision ([Vision.java](src/main/java/frc/robot/subsystems/Vision.java))
-Sends the gyro heading to each Limelight and fuses the returned **MegaTag2** pose estimates into the drivetrain with distance/tag-count-scaled confidence. Caches the closest **trackable** target once per loop for the tracking command and dashboard. Requires Limelight OS 2026.0+.
+Sends the estimated heading to each Limelight every loop and fuses the returned **MegaTag2** poses into the drivetrain with distance/tag-count-scaled confidence; while **disabled** (and during a driver re-seed) it fuses **MegaTag1** instead, whose solve carries an absolute heading, so the pose heading is field-correct before the match starts. Each camera frame is fused **once** (the NT sample timestamp identifies a frame — re-adding the same sample every loop would collapse the estimate onto the raw camera pose), the cameras' estimates are inserted oldest-first (inserting an older measurement discards newer corrections), and estimates are rejected when off-field, when a MegaTag2 solve averages more than 6 m to its tags, or when a single-tag MegaTag1 solve is ambiguous (> 0.7) or far (> 3 m). Each camera's last fused pose is drawn on the Field widget. Requires Limelight OS 2026.0+.
 
-**Tracking goals** are resolved per tag class and superstructure state (2025 Reefscape tags):
+**Alignment** works in the **robot frame**: each camera's primary tag is converted from Limelight camera space into "where is the tag relative to the robot center" using that camera's mounting pose (lens offset, yaw, pitch — `Vision.tagPositionInRobotFrame`, pinned by `VisionGeometryTest`), so the yawed reef camera and the rear funnel camera drive the same loop with no per-camera mirroring. Three P loops with deadbands and a minimum command: forward error, lateral error (1.5 cm deadband — a coral has only ~3 cm of clearance on a branch), and heading error to the field heading that is **square to the tag's face** (from the 2025 AprilTag layout; the authored paths' end rotations agree with it, which the test checks). Cameras only supply their own tag class (funnel → coral stations, reef → reef, barge → none until its pose is measured), and the first tag chosen is **latched** (and sent to the cameras as the priority tag). While the latched tag is out of view its last sighting is **carried on odometry** for up to 1.5 s, so the goal cannot flip between adjacent reef faces and an approach whose tag leaves the camera at the end still finishes — the rear funnel camera (pitched 50° up) loses the station tag about 0.55 m from the wall, before the bumpers are flush, so that last stretch is dead-reckoned (`Vision/Target From Memory`). `Vision/Forward Error`, `Vision/Lateral Error`, `Vision/Heading Error` and `Vision/Aligned` show the servo state.
+
+**Tracking goals** (where the tag should sit relative to the robot center; 2025 Reefscape tags):
 | Tags | Goal |
 |---|---|
-| Reef (6–11, 17–22), L2–L4 selected | Bumpers **flush** with the reef base, centered on the driver-selected **left/right branch** (±`REEF_BRANCH_OFFSET`) |
-| Reef, L1 selected | Centered, held **1 m** away so the arm can swing to 100° without hitting |
-| Reef, algae/other | Flush and centered |
-| Coral stations (1, 2, 12, 13) | **Rear** bumpers flush with the wall, centered — approached backward via the rear-facing funnel camera (drive terms mirrored automatically) |
-| Barge (4, 5, 14, 15) + processor (3, 16) | Intentionally blank — the tracker ignores them |
+| Reef (6–11, 17–22), L2–L4 selected | Tag `REEF_FLUSH_DISTANCE` ahead (bumpers flush) and `REEF_BRANCH_OFFSET` to the side, so the robot is centered on the driver-selected **left/right branch**, square to the face |
+| Reef, L1 selected | Tag **1 m** ahead, centered, square (room for the arm to swing to 100°) |
+| Reef, algae/other | Flush and centered, square |
+| Coral stations (1, 2, 12, 13) | Tag `STATION_FLUSH_DISTANCE` **behind** the robot (rear bumpers flush), centered, square — approached backward via the rear funnel camera |
+| Barge (4, 5, 14, 15) + processor (3, 16) | Intentionally blank — the tracker ignores them (they still feed MegaTag) |
 
-All "flush" distances are what the camera *reads* in that condition — tune by physically placing the robot in the goal position and copying the `Vision/Distance` dashboard value into the constant.
+The flush distances are geometry — half the bumper-to-bumper length (0.464 m) plus a little standoff, 0.47 m by default — and the dashboard's `Vision/Distance` (forward, negative behind) and `Vision/Lateral` (positive left) report the same robot-frame numbers, so tune by pushing the robot into position and copying them.
 
 **Camera mounting (MegaTag camera poses).** Each Limelight needs its lens position and orientation on the robot so MegaTag can turn "where the tag is in the image" into "where the robot is on the field". These live in `VisionConstants.LIMELIGHT_POSES` and are pushed to the cameras at startup — so they're version-controlled and survive a camera reset — but only for cameras marked *measured*. Limelight's robot-space convention: origin at the frame center on the floor, **X forward, Y toward the robot's right** (opposite of WPILib), Z up; pitch positive = lens tilted up; yaw = lens heading (180° = rear-facing).
 
@@ -205,7 +207,7 @@ Logging runs through **AdvantageKit** (`Robot` extends `LoggedRobot`):
 
 - **DriverStation data, joysticks, and console output** are captured automatically.
 - **Structured outputs** are recorded every loop from `Dashboard.update()`: robot `Pose2d`, `ChassisSpeeds`, swerve module states/targets, elevator/arm positions and targets, game-piece state, and the **3D component poses** (below).
-- `.wpilog` files land on a USB stick (`/U/logs`) if one is plugged into the roboRIO, otherwise `/home/lvuser/logs` (in simulation: `./logs`). Open them in **AdvantageScope**.
+- `.wpilog` files land on a USB stick (`/U/logs`) if one is mounted on the roboRIO, otherwise `/home/lvuser/logs`, where the oldest logs are pruned to keep 100 MB free and the dashboard shows a warning (in simulation: `./logs`). Open them in **AdvantageScope**. Every logged output is also published live over NetworkTables under `/AdvantageKit` (NT4Publisher).
 - **Live streaming**: AdvantageScope → *Connect to Robot* with the **RLOG** source on **port 5810** (5800 is taken by the Elastic layout server). NetworkTables live viewing works too — all dashboard topics are plain NT.
 - The auto chooser is a `LoggedDashboardChooser`, so every log records which auto was selected.
 - CTRE's **SignalLogger** (`.hoot` files) runs alongside for Phoenix signals and **SysId** (open hoot logs in Tuner X or convert for SysId).
@@ -271,7 +273,10 @@ Two path-authoring tools feed the **same** auto chooser (`SmartDashboard/Auto Mo
 
 ### PathPlanner
 - Autos live in `src/main/deploy/pathplanner/autos`, paths in `.../paths` (2025.X file format, which PathPlanner 2026 uses as well).
-- Every auto resets odometry to the path's starting pose (`resetOdom: true`).
+- Every auto resets odometry to the path's starting pose (`resetOdom: true`) through `Swerve.resetPoseForAuto`, which **keeps the vision-seeded heading** (resetting only the translation) when a two-or-more-tag MegaTag1 solve was fused in the last 3 s, the estimator heading has converged on it (within 3° — one fused solve only closes part of the error), and it agrees with the nominal heading within 20°; otherwise the full nominal pose is used. `Vision/Auto Kept Heading` shows which happened. (MegaTag2 trusts that heading absolutely for the whole period, so overwriting a good one with the nominal placement would bias every vision pose.)
+- The match autos (`Left Wall - 3 Piece`, `Right Wall - 3 Piece`) run **named commands** between paths: `scoreL4` (raise, eject, stow) at each reef face and `intakeCoral` (stow, rollers until the CANrange confirms, 3 s timeout) at each station; `scoreL3`, `scoreL2` and `stow` are registered too for the PathPlanner GUI. Sequenced, three L4 cycles take well over 15 s — trim in the GUI once real cycle times are known. `Practice - Two Piece ...` start at a coral station (not a legal match start) and `Test - ...` are drivetrain checks: neither belongs in a match.
+- `FlippingUtil` is set to the 2025 field (17.548 × 8.052 m) before AutoBuilder is configured — PathPlannerLib 2026 otherwise mirrors red-alliance paths, odometry resets and Choreo start poses about the 2026 field's centerline, about 1 m off.
+- If `settings.json` cannot be loaded, the chooser offers only `None` and an error alert says so, instead of the robot program crashing on the chooser build.
 - Path constraints: 3 m/s, 4 m/s² (robot max is ~5.96 m/s).
 - Path-following feedback gains live in `Constants.AutoConstants` (translation/rotation kP = 5.0). PathPlanner supplies feedforward from the path; these PIDs correct pose error.
 - `FollowPathCommand.warmupCommand()` is scheduled at startup so the first path of auto starts without a stutter.
@@ -364,7 +369,7 @@ Scripts (`stepbox.py`, `stepedges.py`, `clearlib.py`, `seqsim2.py`) live outside
 3. **Sanity-check the CorAl pivot angle** against the through bore encoder. The 65.41:1 ratio is derived from the real gear train (10:58 → 18:58 → 12:42). Also confirm the through bore is mounted 1:1 on the pivot shaft.
 4. **Tune closed-loop gains** (elevator kP/kS/kV/kG and both mechanisms' profiles from the Testing-tab tunables — they re-apply the next time the robot is disabled; pivot kP/kS/kV/kG via Phoenix Tuner X; `AutoConstants` path-following kP) and test autos. The elevator is now **15:1** (50 in/s / 400 in/s², kP 0.1, kG 0.6 — the constant-force springs may want less kG); the pivot ships at 200°/s / 300°/s² / jerk 2000, softened for the chain backlash (240 / 480 / 4800 once the chain is fixed). First moves with the new sequences: watch the **33" L4 station** (the 100°→25° rotation there, then the 20° finish above 37"), the **L4 return drop** to 39" before the arm moves, and the **L3 return lift** to 31". If a held coral slips during a swing, lower the pivot *Acceleration* first.
 4a. **Every preset is now inside the CAD corridors.** The L3 pose moved from (29", 22.5°) — within ≈¼" of the top sprocket shaft in the model — to (30.5", 25°): the claw tip sits 0.7" further forward and 1.6" higher, so re-check the coral's landing on the L3 branch; if it ever rubs, 27.5° at 30.5" has 1¾". L2 went from 10° to 12.5° so the arm keeps a full inch to the cross bar even when the chain lets it sag 2.5°.
-5. **Tune the vision goal constants**: place the robot flush on the reef base and copy the `Vision/Distance` reading into `REEF_FLUSH_DISTANCE` (same procedure backed up to the coral station for `STATION_FLUSH_DISTANCE`); verify `REEF_BRANCH_OFFSET`, the branch left/right sign, and `LIMELIGHT_FACING_SIGNS` (which cameras face front vs. rear).
+5. **Tune the vision goal constants**: push the robot flush on the reef base and copy `Vision/Distance` into *Vision – Reef Flush Distance*; center it on a branch and copy the magnitude of `Vision/Lateral` into *Reef Branch Offset*; for the station, note that the funnel camera loses the tag about 0.55 m from the wall (its +50° pitch), so read `Vision/Distance` at the last position it still shows a tag and keep *Station Flush Distance* at the geometric 0.47 m — the tracker finishes the last stretch on odometry. All readouts are robot-frame, so the camera that sees the tag does not matter, and a pasted negative value is taken by magnitude. The alignment servo is **untested on the robot**: first runs at a low *Tracking Distance kP* with the mechanism stowed, watching `Vision/Forward Error`, `Vision/Lateral Error`, `Vision/Heading Error` and `Vision/Aligned` — if an axis drives the wrong way, the camera pose (not a sign flag) is what to check, in the camera's web-UI 3D preview.
 6. **Firmware**: 2026 firmware on all CTRE devices (TalonFX, CANcoder, Pigeon 2, CANrange, CANdle), current Spark MAX firmware via the REV Hardware Client, 2026 roboRIO image, Limelight OS 2026.0+.
 6a. **Set the CANrange's CAN ID to 62 in Tuner X** (or change `CANRANGE_SENSOR_ID` to its actual ID). It was documented as ID 64, which is **not a legal Phoenix ID (0-62)** — robot code crashed at construction with it (caught by the unit tests).
 7. **LEDs**: skip while the CANdle code is commented out. When one is installed, un-comment the subsystem and set `LEDConstants.LED_COUNT` to the actual LED strip length.

@@ -15,6 +15,7 @@ import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
+import com.pathplanner.lib.util.FlippingUtil;
 
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -69,8 +70,21 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds()
 		.withDriveRequestType(com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType.Velocity);
 
-	// Swerve request reused by the AprilTag tracking command (avoids allocating a new request every loop)
-	private final SwerveRequest.RobotCentric m_visionTrackRequest = new SwerveRequest.RobotCentric();
+	// Swerve request reused by the AprilTag tracking command (avoids allocating
+	// a new request every loop). Closed-loop velocity like every other drive
+	// request: the small commands the alignment servo produces near its
+	// deadbands would never overcome static friction open-loop.
+	private final SwerveRequest.RobotCentric m_visionTrackRequest = new SwerveRequest.RobotCentric()
+		.withDriveRequestType(com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType.Velocity);
+
+	// Alignment telemetry (robot frame: meters / degrees), refreshed by the tracking command
+	private boolean m_alignHasTarget = false;
+	private boolean m_aligned = false;
+	private double m_alignForwardError = 0.0;
+	private double m_alignLateralError = 0.0;
+	private double m_alignHeadingErrorDeg = 0.0;
+	// Whether the last autonomous pose reset kept the vision-seeded heading
+	private boolean m_lastAutoResetKeptHeading = false;
 
 	// Vision-measurement spin rejection: angular rate above which vision
 	// poses are untrustworthy, and how long after the spin ends they stay
@@ -232,11 +246,19 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	}
 
 	private void configureAutoBuilder() {
+		// PathPlannerLib 2026 defaults its alliance flip to the 2026 field size
+		// (16.54 x 8.07 m); this robot plays on the 2025 Reefscape field
+		// (17.548 x 8.052 m, matching navgrid.json and the tag layout). Without
+		// this every red-alliance path, odometry reset and Choreo start pose
+		// would be mirrored about the wrong centerline, about 1 m off in X.
+		FlippingUtil.symmetryType = FlippingUtil.FieldSymmetry.kRotational;
+		FlippingUtil.fieldSizeX = VisionConstants.FIELD_LENGTH_METERS;
+		FlippingUtil.fieldSizeY = VisionConstants.FIELD_WIDTH_METERS;
 		try {
 			var config = RobotConfig.fromGUISettings();
 			AutoBuilder.configure(
 				() -> getState().Pose,      // Supplier of current robot pose
-				this::resetPose,            // Consumer for seeding pose against auto
+				this::resetPoseForAuto,     // Consumer for seeding pose against auto (keeps a fresh vision heading)
 				() -> getState().Speeds,    // Supplier of current robot speeds
 				// Consumer of ChassisSpeeds and feedforwards to drive the robot
 				(speeds, feedforwards) -> setControl(
@@ -346,20 +368,25 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
 	/**
 	 * Creates the AprilTag tracking command: while vision tracking is
-	 * enabled, drives the robot toward the CLOSEST visible trackable tag
-	 * until it sits at the resolved alignment goal (which depends on the
-	 * tag's class, the superstructure's goal, and the selected reef branch
-	 * side - see Vision.getTrackingGoal), rotating to face the tag.
+	 * enabled, drives the robot toward the latched/closest trackable tag
+	 * until the tag sits at the resolved alignment goal in the ROBOT frame
+	 * (which depends on the tag's class, the superstructure's goal, and the
+	 * selected reef branch side - see Vision.getTrackingGoal) and the robot
+	 * is square to the tag's face.
 	 *
-	 * Coordinate frames:
-	 *   Camera space: X = right (m), Z = forward (m)
-	 *   Robot space (WPILib): +X = forward, +Y = LEFT, +omega = CCW
-	 * Rear-mounted cameras (the coral station camera) see the world rotated
-	 * 180 degrees, which negates the two TRANSLATION terms - handled by the
-	 * target's facingSign. The ROTATION term is NOT mirrored: for any rigidly
-	 * mounted camera, robot CCW rotation (+omega) moves a fixed target toward
-	 * the right of that camera's image (d(angle)/dt = +omega) regardless of
-	 * mounting yaw, so the correction is always omega = -k * angleError.
+	 * Frames: Vision converts each camera's tag position into the robot
+	 * frame (+X forward, +Y left) using that camera's mounting pose, so a
+	 * rear camera, a yawed camera or an offset lens all drive the same loop:
+	 * vx closes the forward error, vy the lateral error, and omega turns the
+	 * estimated field heading to the heading that is square to the tag's
+	 * face (from the field layout; if the tag is not in the layout, the
+	 * bearing to the goal point is used instead). Nothing is mirrored per
+	 * camera.
+	 *
+	 * Each axis is a P controller with a deadband and a minimum command, so
+	 * the last few centimeters are actually driven instead of being lost to
+	 * static friction; the lateral deadband is tighter than the forward one
+	 * because a coral has only ~3 cm of lateral clearance on a branch.
 	 *
 	 * If no trackable tag is visible (or the target is lost mid-approach)
 	 * the command actively commands zero velocity - swerve requests latch,
@@ -372,11 +399,11 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		return run(() -> {
 			Optional<Vision.AprilTagTarget> target =
 				isVisionTrackingEnabled ? vision.getBestTarget() : Optional.empty();
-			Optional<Vision.TrackingGoal> goal =
-				target.flatMap(tag -> vision.getTrackingGoal(tag.id));
+			Optional<Vision.TrackingGoal> goal = target.flatMap(vision::getTrackingGoal);
 
 			if (target.isEmpty() || goal.isEmpty()) {
 				// No trackable target (or tracking off while still scheduled): stop.
+				clearAlignmentTelemetry();
 				setControl(m_visionTrackRequest
 					.withVelocityX(0)
 					.withVelocityY(0)
@@ -385,36 +412,35 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			}
 
 			Vision.AprilTagTarget tag = target.get();
+			Vision.TrackingGoal g = goal.get();
 
-			// Errors between where the tag is and where we want it to be.
-			// Positive distanceError = too far away -> close the distance.
-			// Positive lateralError = tag is right of the goal in the image.
-			// The angle error is derived from the same pose solve as the
-			// other two terms (rather than the separately-published tx) so
-			// one camera frame can never mix with another.
-			double distanceError = tag.poseZ - goal.get().distance;
-			double lateralError = tag.poseX - goal.get().lateral;
-			double angleError = Math.toDegrees(Math.atan2(tag.poseX, tag.poseZ)); // + = tag right of camera axis
+			// Errors between where the tag is and where we want it (robot frame).
+			// Positive forward error = tag further ahead than wanted -> drive forward.
+			// Positive lateral error = tag further left than wanted -> drive left.
+			double forwardError = tag.robotFrame.getX() - g.forward;
+			double lateralError = tag.robotFrame.getY() - g.left;
+			// Heading: square to the tag's face when its field pose is known,
+			// otherwise point the robot at the goal point (bearing servo).
+			Rotation2d heading = getStateCopy().Pose.getRotation();
+			double headingErrorDeg = tag.squareHeading
+				.map(square -> square.minus(heading).getDegrees())
+				.orElseGet(() -> new Rotation2d(tag.robotFrame.getX(), tag.robotFrame.getY())
+					.minus(new Rotation2d(g.forward, g.left)).getDegrees());
 
-			// Deadbands prevent hunting around the goal position
-			if (Math.abs(distanceError) < VisionConstants.TrackingGains.POSITION_ERROR_DEADBAND) distanceError = 0;
-			if (Math.abs(lateralError) < VisionConstants.TrackingGains.POSITION_ERROR_DEADBAND) lateralError = 0;
-			if (Math.abs(angleError) < VisionConstants.TrackingGains.ROTATION_ERROR_DEADBAND) angleError = 0;
+			m_alignHasTarget = true;
+			m_alignForwardError = forwardError;
+			m_alignLateralError = lateralError;
+			m_alignHeadingErrorDeg = headingErrorDeg;
 
-			// Proportional control mapped into robot-relative velocities.
-			// Front camera: vy negated (camera X is right-positive, robot Y is
-			// left-positive); rear camera mirrors vx and vy via facingSign.
-			// Omega is never mirrored (see the class comment above).
 			// Gains are live-tunable from the dashboard (Tunables -> Preferences)
 			double distanceKp = Tunables.trackingDistanceKp();
-			double vx = tag.facingSign * distanceError * distanceKp;
-			double vy = tag.facingSign * -lateralError * distanceKp;
-			double omega = -angleError * Tunables.trackingRotationKp();
-
-			// Clamp velocities to safe tracking limits
-			vx = Math.min(Math.max(vx, -VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY), VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
-			vy = Math.min(Math.max(vy, -VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY), VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
-			omega = Math.min(Math.max(omega, -VisionConstants.TrackingGains.MAX_ANGULAR_VELOCITY), VisionConstants.TrackingGains.MAX_ANGULAR_VELOCITY);
+			double vx = servo(forwardError, VisionConstants.TrackingGains.FORWARD_ERROR_DEADBAND, distanceKp,
+				VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY, VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
+			double vy = servo(lateralError, VisionConstants.TrackingGains.LATERAL_ERROR_DEADBAND, distanceKp,
+				VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY, VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
+			double omega = servo(headingErrorDeg, VisionConstants.TrackingGains.ROTATION_ERROR_DEADBAND,
+				Tunables.trackingRotationKp(), 0.0, VisionConstants.TrackingGains.MAX_ANGULAR_VELOCITY);
+			m_aligned = vx == 0.0 && vy == 0.0 && omega == 0.0;
 
 			setControl(m_visionTrackRequest
 				.withVelocityX(vx)
@@ -426,11 +452,33 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			// the tracking state so the toggle always reflects reality.
 			isVisionTrackingEnabled = false;
 			vision.toggleTracking(false);
+			clearAlignmentTelemetry();
 			setControl(m_visionTrackRequest
 				.withVelocityX(0)
 				.withVelocityY(0)
 				.withRotationalRate(0));
 		});
+	}
+
+	/** No target: the error readouts must not freeze at their last values. */
+	private void clearAlignmentTelemetry() {
+		m_alignHasTarget = false;
+		m_aligned = false;
+		m_alignForwardError = 0.0;
+		m_alignLateralError = 0.0;
+		m_alignHeadingErrorDeg = 0.0;
+	}
+
+	/**
+	 * One alignment axis: zero inside the deadband, otherwise a proportional
+	 * command of at least the minimum magnitude, clamped to the maximum.
+	 */
+	private static double servo(double error, double deadband, double kP, double minCommand, double maxCommand) {
+		if (Math.abs(error) < deadband) {
+			return 0.0;
+		}
+		double magnitude = Math.min(Math.max(Math.abs(error) * kP, minCommand), maxCommand);
+		return Math.copySign(magnitude, error);
 	}
 
 	/**
@@ -445,18 +493,24 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 *                         the wrong moment and corrupts the pose estimate.
 	 * @param stdDevs          measurement standard deviations [x, y, theta]
 	 */
+	/**
+	 * True while vision measurements are being rejected: the robot has spun
+	 * faster than the limit within the last kVisionRejectAfterSpinSeconds
+	 * (motion blur and rolling shutter corrupt the solve; the image was
+	 * captured 25-100 ms ago, so the gate covers the last smeared frames
+	 * after a spin ends, not just this instant). Vision checks this so it
+	 * never books a fusion that did not happen.
+	 */
+	public boolean isRejectingVision() {
+		return Timer.getFPGATimestamp() - m_lastFastRotationTime < kVisionRejectAfterSpinSeconds;
+	}
+
 	@Override
 	public void addVisionMeasurement(
 		Pose2d visionPose,
 		double timestampSeconds,
 		Matrix<N3, N1> stdDevs) {
-		// Skip measurements captured while spinning fast (motion blur and
-		// rolling shutter corrupt the solve). The image was captured 25-100 ms
-		// ago, so gate on whether the robot has spun fast RECENTLY, not just
-		// this instant - otherwise the first smeared frames after a spin ends
-		// slip through and yank the pose.
-		if (Timer.getFPGATimestamp() - m_lastFastRotationTime
-				< kVisionRejectAfterSpinSeconds) {
+		if (isRejectingVision()) {
 			return;
 		}
 		super.addVisionMeasurement(visionPose, Utils.fpgaToCurrentTime(timestampSeconds), stdDevs);
@@ -465,6 +519,58 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	/** The Vision subsystem owned by this drivetrain (used by the Dashboard). */
 	public Vision getVision() {
 		return vision;
+	}
+
+	/**
+	 * Pose reset used at the start of every auto (PathPlanner's resetOdom and
+	 * the Choreo autos). The path's ideal starting pose is a nominal
+	 * placement; the heading the pose estimator holds when a strong MegaTag1
+	 * seed is fresh (two or more tags while sitting on the line) is the real
+	 * one, and it is the heading MegaTag2 trusts absolutely for the whole
+	 * period - overwriting it with the nominal value would bias every vision
+	 * pose by the placement error. So: keep the vision heading and reset only
+	 * the translation when the seed is strong and agrees with the nominal
+	 * heading within HEADING_SEED_MAX_DISAGREEMENT_DEGREES; otherwise reset
+	 * the full pose as before.
+	 */
+	public void resetPoseForAuto(Pose2d nominalStart) {
+		Rotation2d current = getStateCopy().Pose.getRotation();
+		double disagreementDeg = Math.abs(current.minus(nominalStart.getRotation()).getDegrees());
+		if (vision.hasStrongHeadingSeed()
+				&& disagreementDeg <= VisionConstants.HEADING_SEED_MAX_DISAGREEMENT_DEGREES) {
+			resetTranslation(nominalStart.getTranslation());
+			m_lastAutoResetKeptHeading = true;
+		} else {
+			resetPose(nominalStart);
+			m_lastAutoResetKeptHeading = false;
+		}
+	}
+
+	/** Whether the last autonomous pose reset kept the vision-seeded heading. */
+	public boolean lastAutoResetKeptHeading() {
+		return m_lastAutoResetKeptHeading;
+	}
+
+	/** Whether the alignment servo currently has a target. */
+	public boolean isAlignmentTargetVisible() {
+		return m_alignHasTarget;
+	}
+
+	/** True while the tracker has a target and every axis is inside its deadband. */
+	public boolean isAligned() {
+		return m_alignHasTarget && m_aligned;
+	}
+
+	public double getAlignmentForwardError() {
+		return m_alignForwardError;
+	}
+
+	public double getAlignmentLateralError() {
+		return m_alignLateralError;
+	}
+
+	public double getAlignmentHeadingErrorDegrees() {
+		return m_alignHeadingErrorDeg;
 	}
 
 	@Override

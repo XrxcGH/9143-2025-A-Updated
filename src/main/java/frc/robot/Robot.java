@@ -3,7 +3,13 @@ package frc.robot;
 import com.pathplanner.lib.commands.FollowPathCommand;
 
 import org.littletonrobotics.junction.LoggedRobot;
+import java.io.File;
+
 import org.littletonrobotics.junction.Logger;
+import org.littletonrobotics.junction.networktables.NT4Publisher;
+import edu.wpi.first.wpilibj.Alert;
+import edu.wpi.first.wpilibj.RobotBase;
+import frc.robot.Constants.LoggingConstants;
 import org.littletonrobotics.junction.rlog.RLOGServer;
 import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 
@@ -42,14 +48,37 @@ public class Robot extends LoggedRobot {
 	/** Container that owns all subsystems and controller bindings. */
 	private final RobotContainer m_robotContainer;
 
+	/** Shown while .wpilog files go to internal storage (no USB stick). */
+	private final Alert internalLogAlert = new Alert(
+		"AdvantageKit is logging to roboRIO internal storage (old logs are pruned) - insert a FAT32 USB stick",
+		Alert.AlertType.kWarning);
+
 	public Robot() {
 		// ---- AdvantageKit logger ----
 		// Metadata shows up in AdvantageScope's metadata tab for every log.
 		Logger.recordMetadata("ProjectName", "9143-2025-A");
 		Logger.recordMetadata("Robot", "A (competition)");
-		// .wpilog files: to a USB stick (/U/logs) when one is plugged into
-		// the roboRIO, otherwise /home/lvuser/logs; in simulation, ./logs.
-		Logger.addDataReceiver(new WPILOGWriter());
+		// .wpilog files: to a USB stick (/U/logs) when one is mounted,
+		// otherwise /home/lvuser/logs; in simulation, ./logs. (The no-arg
+		// WPILOGWriter only ever tries /U/logs and silently logs nothing
+		// without a stick.)
+		String logDir;
+		if (RobotBase.isSimulation()) {
+			logDir = "logs";
+		} else if (new File("/U").isDirectory()) {
+			logDir = "/U/logs";
+		} else {
+			// Internal storage is small and shared with the Preferences file
+			// (every dashboard tunable), so keep it from filling up.
+			logDir = "/home/lvuser/logs";
+			pruneOldLogs(new File(logDir));
+			internalLogAlert.set(true);
+		}
+		Logger.addDataReceiver(new WPILOGWriter(logDir));
+		// Live NetworkTables publication of every recordOutput / @AutoLogOutput
+		// key under /AdvantageKit, so AdvantageScope's NT4 live source (and
+		// the README's ComponentPoses binding) sees RobotState/* in real time
+		Logger.addDataReceiver(new NT4Publisher());
 		// Live stream for AdvantageScope's "Connect to Robot" (RLOG). Port
 		// 5810 because the Elastic layout WebServer already owns 5800; both
 		// are inside the field-legal 5800-5810 range.
@@ -107,6 +136,24 @@ public class Robot extends LoggedRobot {
 	public void disabledExit() {
 		// The code isn't fresh anymore! - flaco
 		RobotContainer.freshCode = false; 
+	}
+
+	/**
+	 * Deletes the oldest .wpilog files in the folder until at least
+	 * LoggingConstants.INTERNAL_LOG_MIN_FREE_BYTES are free, always keeping
+	 * the newest LoggingConstants.INTERNAL_LOG_KEEP_NEWEST.
+	 */
+	private static void pruneOldLogs(File dir) {
+		dir.mkdirs();
+		File[] logs = dir.listFiles((d, name) -> name.endsWith(".wpilog"));
+		if (logs == null) {
+			return;
+		}
+		java.util.Arrays.sort(logs, java.util.Comparator.comparingLong(File::lastModified));
+		int deletable = logs.length - LoggingConstants.INTERNAL_LOG_KEEP_NEWEST;
+		for (int i = 0; i < deletable && dir.getUsableSpace() < LoggingConstants.INTERNAL_LOG_MIN_FREE_BYTES; i++) {
+			logs[i].delete();
+		}
 	}
 
 	/** Schedules the autonomous routine selected in the dashboard's auto chooser. */

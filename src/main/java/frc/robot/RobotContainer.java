@@ -7,6 +7,9 @@ import static edu.wpi.first.units.Units.RotationsPerSecond;
 import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
+import com.pathplanner.lib.auto.NamedCommands;
+import edu.wpi.first.wpilibj.Alert;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import com.pathplanner.lib.path.PathPlannerPath;
 import com.pathplanner.lib.util.FlippingUtil;
 
@@ -55,7 +58,7 @@ import frc.robot.util.Tunables;
  *   Left trigger        - align on the LEFT reef branch (L2-L4 tracking)
  *   Right trigger       - align on the RIGHT reef branch (L2-L4 tracking)
  *   D-pad               - slow robot-centric nudges (up/down/left/right)
- *   Left bumper         - re-zero field-centric heading
+ *   Left bumper         - heading fix: disabled = re-zero field-centric; enabled = re-seed from tags (back+LB forces a re-zero)
  *   Back/Start + X/Y    - SysId characterization routines (test setup only)
  *
  * OPERATOR (port 1):
@@ -79,7 +82,7 @@ import frc.robot.util.Tunables;
  *   Right bumper        - algae score (52.5", 105 deg, then eject)
  *   Left trigger        - stow to base (rollers stopped, arm tucked)
  *   Right trigger       - raise arm to safe travel angle (context-aware)
- *   Left bumper         - reset elevator encoders (DISABLED ONLY, at base)
+ *   Left bumper         - reset elevator encoders (DISABLED only, mechanism at base)
  *   Start               - reset CorAl pivot encoder (DISABLED ONLY, at base)
  * ===========================================================================
  */
@@ -136,6 +139,10 @@ public class RobotContainer {
     /** Dashboard chooser for selecting the autonomous routine (logged through
      *  AdvantageKit so every log records which auto was selected). */
     private final LoggedDashboardChooser<Command> autoChooser;
+    /** Raised when PathPlanner could not be configured (no autos will be offered). */
+    private final Alert autoBuilderAlert = new Alert(
+        "PathPlanner AutoBuilder not configured (deploy/pathplanner/settings.json missing or invalid): no autos available",
+        Alert.AlertType.kError);
 
     /** Central Elastic dashboard publisher; updated from Robot.robotPeriodic(). */
     private final Dashboard dashboard;
@@ -154,7 +161,37 @@ public class RobotContainer {
         // LoggedDashboardChooser publishes it under SmartDashboard/Auto Mode
         // (Elastic's ComboBox Chooser widget) AND records the selection in
         // the AdvantageKit log.
-        autoChooser = new LoggedDashboardChooser<>("Auto Mode", AutoBuilder.buildAutoChooser());
+        // Named commands for the PathPlanner autos (registered BEFORE the
+        // autos are loaded by buildAutoChooser). "score*" = raise, eject,
+        // stow, so the robot drives away with the mechanism tucked;
+        // "intakeCoral" = stow, then run the rollers until the CANrange
+        // confirms a coral, with the timeout on the ROLLER wait only (the
+        // stow's own settle timeout is as long, so a timeout around both
+        // could expire before the rollers start) so an empty station cannot
+        // stall the routine. PathPlanner wraps each use, so one registration
+        // may appear several times in an auto.
+        NamedCommands.registerCommand("scoreL4",
+            superstructure.goToCoralL4().andThen(superstructure.ejectCoral()).andThen(superstructure.stow()));
+        NamedCommands.registerCommand("scoreL3",
+            superstructure.goToCoralL3().andThen(superstructure.ejectCoral()).andThen(superstructure.stow()));
+        NamedCommands.registerCommand("scoreL2",
+            superstructure.goToCoralL2().andThen(superstructure.ejectCoral()).andThen(superstructure.stow()));
+        NamedCommands.registerCommand("intakeCoral",
+            superstructure.stow().andThen(
+                superstructure.intakeRollers().withTimeout(Constants.AutoConstants.AUTO_INTAKE_TIMEOUT_SECONDS)));
+        NamedCommands.registerCommand("stow", superstructure.stow());
+
+        SendableChooser<Command> chooser;
+        if (AutoBuilder.isConfigured()) {
+            chooser = AutoBuilder.buildAutoChooser();
+        } else {
+            // Swerve.configureAutoBuilder already reported why. buildAutoChooser
+            // would throw here and take the whole robot program down with it.
+            chooser = new SendableChooser<>();
+            chooser.setDefaultOption("None (AutoBuilder not configured)", Commands.none());
+            autoBuilderAlert.set(true);
+        }
+        autoChooser = new LoggedDashboardChooser<>("Auto Mode", chooser);
 
         // Second autonomous option: add every Choreo trajectory from
         // deploy/choreo to the same chooser (see addChoreoAutos).
@@ -238,8 +275,27 @@ public class RobotContainer {
         driver_controller.start().and(driver_controller.y()).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
         driver_controller.start().and(driver_controller.x()).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
 
-        // Reset the field-centric heading on left bumper press
-        driver_controller.leftBumper().onTrue(swerve.runOnce(() -> swerve.seedFieldCentric()));
+        // Heading fix on left bumper. While DISABLED it re-zeroes field-centric
+        // to the alliance-forward direction (the classic gyro reset, for a
+        // field without tags in view; MegaTag1 corrects it if a tag is
+        // visible). While ENABLED it must NOT do that: MegaTag2 trusts the
+        // pose heading absolutely and nothing corrects the heading during a
+        // period, so a re-zero mid-match would silently bias every fused
+        // pose for the rest of it. Instead it opens a short MegaTag1
+        // re-seed window that corrects the heading from tag geometry.
+        // Back + left bumper forces the gyro re-zero while enabled
+        // (deliberate, for a no-tag practice field). No swerve requirement,
+        // so the press cannot interrupt an alignment in progress.
+        driver_controller.leftBumper().and(driver_controller.back().negate())
+            .onTrue(Commands.runOnce(() -> {
+                if (DriverStation.isDisabled()) {
+                    swerve.seedFieldCentric();
+                } else {
+                    swerve.getVision().requestHeadingReseed();
+                }
+            }).ignoringDisable(true));
+        driver_controller.back().and(driver_controller.leftBumper())
+            .onTrue(Commands.runOnce(swerve::seedFieldCentric));
 
         // Select which reef branch vision tracking centers on for L2-L4
         // (latched; defaults to LEFT on boot)
@@ -379,7 +435,7 @@ public class RobotContainer {
         return Commands.sequence(
             Commands.runOnce(() -> {
                 Pose2d start = path.getStartingHolonomicPose().orElse(swerve.getState().Pose);
-                swerve.resetPose(AutoBuilder.shouldFlip() ? FlippingUtil.flipFieldPose(start) : start);
+                swerve.resetPoseForAuto(AutoBuilder.shouldFlip() ? FlippingUtil.flipFieldPose(start) : start);
             }),
             AutoBuilder.followPath(path)
         );

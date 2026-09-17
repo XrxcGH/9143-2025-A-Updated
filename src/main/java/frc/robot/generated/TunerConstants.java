@@ -89,18 +89,18 @@ public class TunerConstants {
 	// When not Pro-licensed, FusedCANcoder/SyncCANcoder automatically fall back to RemoteCANcoder
 	private static final SteerFeedbackType kSteerFeedbackType = SteerFeedbackType.RemoteCANcoder;
 
-	// The stator current at which the wheels start to slip;
-	// This needs to be tuned to your individual robot
-	private static final Current kSlipCurrent = Amps.of(120.0);
+	// The stator current at which the wheels start to slip. This is ALSO the
+	// drive stator current limit: Phoenix 6 overwrites the drive motors'
+	// StatorCurrentLimit and peak torque currents with SlipCurrent, so a
+	// separate limit in driveInitialConfigs is dead configuration. 90 A
+	// matches PathPlanner's settings.json driveCurrentLimit and the wheel slip
+	// torque its mass/COF imply; tune the two together.
+	private static final Current kSlipCurrent = Amps.of(90.0);
 
 	// Initial configs for the drive and steer motors and the azimuth encoder; these cannot be null.
 	// Some configs will be overwritten; check the `with*InitialConfigs()` API documentation.
-	private static final TalonFXConfiguration driveInitialConfigs = new TalonFXConfiguration()
-		.withCurrentLimits(
-			new CurrentLimitsConfigs()
-				.withStatorCurrentLimit(Amps.of(90))
-				.withStatorCurrentLimitEnable(true)
-		);
+	// (The drive current limit lives in kSlipCurrent above - see the note there.)
+	private static final TalonFXConfiguration driveInitialConfigs = new TalonFXConfiguration();
 	private static final TalonFXConfiguration steerInitialConfigs = new TalonFXConfiguration()
 		.withCurrentLimits(
 			new CurrentLimitsConfigs()

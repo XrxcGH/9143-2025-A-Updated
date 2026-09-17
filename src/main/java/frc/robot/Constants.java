@@ -470,6 +470,55 @@ public final class Constants {
 			1.0,  // reef   - front-facing
 		};
 
+		// --- Camera Poses in Robot Space ---
+		// Where each lens sits on the robot. MegaTag uses this to convert what
+		// a camera sees into where the ROBOT is, so an error here shifts every
+		// fused pose from that camera. Pushed to the camera at startup (so it
+		// lives in version control and survives a camera reset), but ONLY for
+		// cameras marked measured - unmeasured cameras keep whatever their
+		// web UI holds.
+		//
+		// Limelight robot-space convention (docs "3D Coordinate Systems"):
+		// origin at the frame center projected to the floor; X+ forward,
+		// Y+ toward the robot's RIGHT (note: opposite of WPILib's +Y = left),
+		// Z+ up; meters and degrees. Pitch is entered as positive = lens
+		// tilted UP, yaw as the heading of the lens (180 = rear-facing).
+		// VERIFY the pitch/yaw signs once against the camera's web-UI 3D
+		// preview (it mirrors these values) - if the preview shows the
+		// camera pointing the wrong way, flip the sign here.
+		public static final class CameraPose {
+			public final double forwardMeters, sideMeters, upMeters;
+			public final double rollDegrees, pitchDegrees, yawDegrees;
+			/** False = placeholder; the pose is NOT pushed to the camera. */
+			public final boolean measured;
+
+			public CameraPose(double forwardMeters, double sideMeters, double upMeters,
+					double rollDegrees, double pitchDegrees, double yawDegrees, boolean measured) {
+				this.forwardMeters = forwardMeters;
+				this.sideMeters = sideMeters;
+				this.upMeters = upMeters;
+				this.rollDegrees = rollDegrees;
+				this.pitchDegrees = pitchDegrees;
+				this.yawDegrees = yawDegrees;
+				this.measured = measured;
+			}
+		}
+
+		// Same order as LIMELIGHT_NAMES.
+		public static final CameraPose[] LIMELIGHT_POSES = {
+			// funnel (rear): lens 1.0 in inside the BACK edge of the 30 in
+			// frame -> 14.0 in behind center; centered side-to-side;
+			// 29.625 in above the floor; facing straight back and tilted
+			// 50 deg above horizontal ("50 degrees north of west" in the
+			// side view with west = rearward, north = up) so the coral
+			// station tag stays in frame when the rear bumpers are flush.
+			new CameraPose(-14.0 * 0.0254, 0.0, 29.625 * 0.0254, 0.0, 50.0, 180.0, true),
+			// barge (front): PLACEHOLDER - measure and set measured = true
+			new CameraPose(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false),
+			// reef (front): PLACEHOLDER - measure and set measured = true
+			new CameraPose(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false),
+		};
+
 		// --- Tag Classes (2025 Reefscape field) ---
 		// Only reef and coral station tags are tracked; barge (4, 5, 14, 15)
 		// and processor (3, 16) tags are intentionally left blank for now -

@@ -80,13 +80,23 @@ public class Vision extends SubsystemBase {
             limelightTableNames[i] = "limelight-" + VisionConstants.LIMELIGHT_NAMES[i];
         }
 
-        for (String tableName : limelightTableNames) {
+        for (int i = 0; i < limelightTableNames.length; i++) {
+            String tableName = limelightTableNames[i];
             // Set all Limelights to the AprilTag pipeline
             LimelightHelpers.setPipelineIndex(tableName, VisionConstants.APRILTAG_PIPELINE);
             // LEDs stay OFF permanently: AprilTags are detected in ambient
             // light and gain nothing from illumination, while the LED array
             // is the camera's single largest heat source (fan noise).
             LimelightHelpers.setLEDMode_ForceOff(tableName);
+            // Push the measured lens position/orientation so MegaTag's
+            // robot pose is computed from the right camera offset (unmeasured
+            // cameras keep their web-UI configuration).
+            VisionConstants.CameraPose pose = VisionConstants.LIMELIGHT_POSES[i];
+            if (pose.measured) {
+                LimelightHelpers.setCameraPose_RobotSpace(tableName,
+                    pose.forwardMeters, pose.sideMeters, pose.upMeters,
+                    pose.rollDegrees, pose.pitchDegrees, pose.yawDegrees);
+            }
         }
     }
 

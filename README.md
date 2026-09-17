@@ -93,6 +93,16 @@ Sends the gyro heading to each Limelight and fuses the returned **MegaTag2** pos
 
 All "flush" distances are what the camera *reads* in that condition — tune by physically placing the robot in the goal position and copying the `Vision/Distance` dashboard value into the constant.
 
+**Camera mounting (MegaTag camera poses).** Each Limelight needs its lens position and orientation on the robot so MegaTag can turn "where the tag is in the image" into "where the robot is on the field". These live in `VisionConstants.LIMELIGHT_POSES` and are pushed to the cameras at startup — so they're version-controlled and survive a camera reset — but only for cameras marked *measured*. Limelight's robot-space convention: origin at the frame center on the floor, **X forward, Y toward the robot's right** (opposite of WPILib), Z up; pitch positive = lens tilted up; yaw = lens heading (180° = rear-facing).
+
+| Camera | Forward | Side | Up | Pitch | Yaw | Status |
+|---|---|---|---|---|---|---|
+| funnel (rear) | −14.0" (1.0" inside the back edge of the 30" frame) | 0 (centered) | 29.625" | +50° (tilted up) | 180° (rear-facing) | **measured** |
+| barge | — | — | — | — | — | placeholder — measure, then set `measured = true` |
+| reef | — | — | — | — | — | placeholder — measure, then set `measured = true` |
+
+One-time check after deploying: open `http://limelight-funnel.local:5801`, confirm the 3D preview shows the camera at the back, pointing rearward and tilted up. If it points the wrong way, flip the pitch or yaw sign in the constant. With the camera tilted 50°, the tracker's *Station Flush Distance* is still simply whatever `Vision Distance` reads when the rear bumpers are flush — the tilt is baked into that reading.
+
 **Heat and fan noise.** Two things the code does to keep the Limelights cool without giving up tracking performance: the **LEDs are never turned on** (AprilTags need no illumination, and the LED array is the camera's biggest heat source), and processing is **throttled while the robot is disabled** (one frame processed per 100 skipped — still ~1 solve/s for the pre-match heading seed) with full rate restored the instant it enables. The rest is configured on each camera's web UI (`http://limelight-<name>.local:5801`), where these settings dominate CPU/GPU load and therefore fan speed:
 
 | Setting | Recommendation |

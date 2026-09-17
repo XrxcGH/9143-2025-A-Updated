@@ -103,15 +103,16 @@ public final class Constants {
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.287 = ~27 in/s
 		// theoretical top speed. Cruise stays well below that so the profile
 		// remains achievable under load.
-		// FIRST-POWER-ON VALUES: deliberately gentle (full 53 in of travel in
-		// ~7 s, cruise reached in 0.33 s) so nothing slams while the gains are
-		// being tuned. The profile always decelerates INTO the setpoint, so the
-		// carriage settles rather than hitting the target. Once holding and
-		// tracking are clean, raise toward 16 in/s and 60 in/s^2 on the
-		// Testing tab ("Elevator - Cruise Velocity" / "Max Acceleration");
-		// the Superstructure handoff heights follow the live values.
-		public static final double ELEVATOR_MAX_VELOCITY = 8.0;      // Cruise velocity (in/s)
-		public static final double ELEVATOR_MAX_ACCELERATION = 24.0; // Acceleration (in/s^2)
+		// The first power-on profile (8 in/s, 24 in/s^2) was judged too slow
+		// on the robot; these cover the full 53 in in ~3.6 s (cruise reached
+		// in 0.27 s over 2.1 in) and need ~7.6 V at cruise, leaving headroom
+		// on a sagging battery. The profile always decelerates INTO the
+		// setpoint, so the carriage settles rather than hitting the target.
+		// Adjust on the Testing tab ("Elevator - Cruise Velocity" / "Max
+		// Acceleration"); the Superstructure handoff heights follow the live
+		// values, so re-check the Handoffs readout after a change.
+		public static final double ELEVATOR_MAX_VELOCITY = 16.0;     // Cruise velocity (in/s)
+		public static final double ELEVATOR_MAX_ACCELERATION = 60.0; // Acceleration (in/s^2)
 		// How far the carriage may stray from the MAXMotion profile before
 		// the controller regenerates the profile from the current position
 		// and velocity. NOT a settling tolerance. REV's starting point is
@@ -144,7 +145,11 @@ public final class Constants {
 		// --- On-Controller Feedforward (volts; REVLib FeedForwardConfig) ---
 		// kS: REV's procedure - the largest voltage that does NOT move the
 		// carriage (TUNE: raise until motion just starts, then back off).
-		public static final double ELEVATOR_kS = 0.0;
+		// A modest starting value breaks the stick-slip that a P-only loop
+		// shows at the slow end of a profile (the carriage sticks, error
+		// builds, it lurches free - "stutters and slows down"). Through
+		// 45:1 this is a small torque, so it cannot cause a runaway.
+		public static final double ELEVATOR_kS = 0.2;
 		// kV is NOT a stored constant. It is the NEO back-EMF model,
 		// 12 V / (free speed in in/s), and free speed in inches depends on
 		// the travel ratio - so the Elevator derives it from the live ratio
@@ -407,16 +412,18 @@ public final class Constants {
 		// The one tunable per pose is the RELATIONSHIP between the two
 		// arrivals: how many seconds after the elevator settles the arm
 		// finishes its rotation (negative = the arm finishes early).
-		//   L4: -0.30 s -> with the shipped profiles the rotation starts at
-		//       ~40 in and completes ~0.3 s before the elevator settles at
-		//       52.5 in (arm done near 50 in - check tube clearance THERE).
+		//   L4: 0.0 s -> the arm finishes its 90->45 rotation as the elevator
+		//       settles at 52.5 in (that rotation is only known clear at full
+		//       height, so it may not finish early). With the 16 in/s profile
+		//       the rotation starts at ~34 in. Go negative only after L4 has
+		//       been watched: every -0.1 s finishes the arm ~1.6 in lower.
 		//   L3: +1.15 s -> starts at ~25 in; most of the rotation happens as
 		//       the elevator settles at 29 in, so the mechanism sweeps in
 		//       behind the tube rather than into it. PREDICTED - first test
 		//       at low speed with a hand on the disable switch.
 		// Both are editable live ("Superstructure - L3/L4 Arm Arrival
 		// Offset (s)"); the resolved heights show on the Testing tab.
-		public static final double L4_ARM_ARRIVAL_OFFSET_SECONDS = -0.30;
+		public static final double L4_ARM_ARRIVAL_OFFSET_SECONDS = 0.0;
 		public static final double L3_ARM_ARRIVAL_OFFSET_SECONDS = 1.15;
 
 		// Derived handoffs are clamped to start no lower than this far above

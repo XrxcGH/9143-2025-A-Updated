@@ -339,6 +339,9 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
         // Ratio in effect on the controllers (the tunable may still be pending)
         SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());
+        // Follower encoder, raw sign: expected to track Height in magnitude
+        // (and read NEGATIVE while raised, since the follower spins opposite)
+        SmartDashboard.putNumber("Elevator/Follower Height", elevator.getFollowerPosition());
 
         // --- CorAl ---
         SmartDashboard.putNumber("CorAl/Angle", coral.getPivotAngle());

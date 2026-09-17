@@ -58,13 +58,33 @@ public final class Tunables {
     private static final String TRACKING_ROTATION_KP = "Vision - Tracking Rotation kP (rad/s per deg)";
     private static final String L3_ARM_ARRIVAL_OFFSET = "Superstructure - L3 Arm Arrival Offset (s)";
     private static final String L4_ARM_ARRIVAL_OFFSET = "Superstructure - L4 Arm Arrival Offset (s)";
+    private static final String DEFAULTS_VERSION_KEY = "Tunables - Defaults Version (do not edit)";
+
+    /**
+     * Version stamp of the factory defaults in Constants. Stored values
+     * survive deploys, so changing a default in Constants does NOTHING on a
+     * robot that already has the key stored - unless this number is bumped,
+     * in which case init() overwrites EVERY tunable with the new defaults
+     * once. Bump it when a default changes and must take effect on the
+     * robot; leave it alone to preserve values tuned on the dashboard.
+     *   1: initial tunables (Sept 2026)
+     *   2: elevator calibration/gain tunables; elevator profile raised to
+     *      16 in/s, 60 in/s^2; L4 arm arrival offset 0 s for that profile
+     */
+    private static final int DEFAULTS_VERSION = 2;
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
-     * (never overwrites a value the team has already tuned). Call once at
-     * robot startup, BEFORE the subsystems are constructed.
+     * (never overwrites a value the team has already tuned), or overwrites
+     * all of them when {@link #DEFAULTS_VERSION} has been bumped since the
+     * last boot. Call once at robot startup, BEFORE the subsystems are
+     * constructed.
      */
     public static void init() {
+        if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) != DEFAULTS_VERSION) {
+            resetToDefaults();
+            return;
+        }
         Preferences.initDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.initDouble(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO);
         Preferences.initDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
@@ -84,8 +104,12 @@ public final class Tunables {
         Preferences.initDouble(L4_ARM_ARRIVAL_OFFSET, SuperstructureConstants.L4_ARM_ARRIVAL_OFFSET_SECONDS);
     }
 
-    /** Overwrites every tunable with its Constants default (the "Reset Tunables" dashboard button). */
+    /**
+     * Overwrites every tunable with its Constants default (the "Reset
+     * Tunables" dashboard button, and a defaults-version bump at boot).
+     */
     public static void resetToDefaults() {
+        Preferences.setInt(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION);
         Preferences.setDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.setDouble(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO);
         Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);

@@ -224,9 +224,22 @@ public class Elevator extends SubsystemBase {
             .reverseSoftLimitEnabled(true);
 
         // --- Follower configuration ---
-        // Identical to the leader, except it follows the leader's output.
+        // Same current limit, brake mode, voltage compensation, and encoder
+        // scaling as the leader, but it follows the leader's output and
+        // carries NO soft limits of its own. REV documents only that a
+        // follower mirrors the leader's voltage output; whether it still
+        // enforces its own soft limits is undocumented, and the follower
+        // spins opposite the leader (mirrored mounting) so its encoder
+        // counts NEGATIVE as the carriage rises - leader limits copied onto
+        // it would put its reverse limit at zero in force for the entire
+        // climb, turning the follower into a brake the leader must drag
+        // (slow, stuttering, current-limited climbs). The leader's soft
+        // limits bound the mechanism on their own.
         SparkMaxConfig followerConfig = new SparkMaxConfig();
         followerConfig.apply(leaderConfig);
+        followerConfig.softLimit
+            .forwardSoftLimitEnabled(false)
+            .reverseSoftLimitEnabled(false);
         followerConfig.follow(ElevatorConstants.ELEVATOR_LEFT_ID,
             ElevatorConstants.ELEVATOR_RIGHT_OPPOSES_LEFT);
 
@@ -357,12 +370,19 @@ public class Elevator extends SubsystemBase {
     }
 
     /**
-     * True when both sides report the same position. A persistent mismatch
-     * means slippage or a mechanical problem; the Dashboard raises an alert.
+     * True when both sides report the same amount of travel. Compared by
+     * magnitude because the follower spins opposite the leader and its
+     * encoder counts the other way. A persistent mismatch means slippage
+     * or a mechanical problem; the Dashboard raises an alert.
      */
     public boolean sidesInSync() {
-        return Math.abs(leftEncoder.getPosition() - rightEncoder.getPosition())
+        return Math.abs(Math.abs(leftEncoder.getPosition()) - Math.abs(rightEncoder.getPosition()))
             <= ElevatorConstants.ELEVATOR_ALLOWED_ERROR;
+    }
+
+    /** Follower (right) encoder position in inches, sign as the follower reports it, for diagnostics. */
+    public double getFollowerPosition() {
+        return rightEncoder.getPosition();
     }
 
     /**

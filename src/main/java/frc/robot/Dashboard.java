@@ -140,12 +140,12 @@ public class Dashboard {
         "Battery resting voltage is low - swap the battery before the next match.",
         AlertType.kWarning);
     private final Alert elevatorBelowZeroAlert = new Alert(
-        "Elevator reads below zero - it was zeroed with the carriage raised. Lower it to the hard "
-            + "stop and press Zero Elevator, or every height will land high.",
+        "Elevator reads below its hard-stop height - it was zeroed with the carriage raised. Lower "
+            + "it to the hard stop and press Zero Elevator, or every height will land high.",
         AlertType.kWarning);
     private final Alert elevatorRatioPendingAlert = new Alert(
-        "New elevator travel ratio not applied yet - lower the carriage to its base and disable; "
-            + "it applies and re-zeros there automatically.",
+        "New elevator calibration (travel ratio / hard-stop height) not applied yet - lower the "
+            + "carriage to its hard stop and disable; it applies and re-zeros there automatically.",
         AlertType.kInfo);
 
     /** Tracks the through bore state so a disconnect fires one toast, not a stream. */
@@ -337,8 +337,9 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Right Current", elevator.getRightCurrent());
         SmartDashboard.putNumber("Elevator/Left Output", elevator.getLeftOutput());
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
-        // Ratio in effect on the controllers (the tunable may still be pending)
+        // Calibration in effect on the controllers (the tunables may still be pending)
         SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());
+        SmartDashboard.putNumber("Elevator/Height At Hard Stop", elevator.zeroHeight());
         // Follower encoder, raw sign: expected to track Height in magnitude
         // (and read NEGATIVE while raised, since the follower spins opposite)
         SmartDashboard.putNumber("Elevator/Follower Height", elevator.getFollowerPosition());

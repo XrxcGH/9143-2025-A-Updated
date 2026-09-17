@@ -11,6 +11,7 @@ import edu.wpi.first.hal.HAL;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 
+import frc.robot.Constants.ElevatorConstants;
 import frc.robot.subsystems.Elevator;
 
 /**
@@ -60,7 +61,10 @@ class ElevatorSimTest {
 
     @Test
     void simWiringDrivesAndHoldLatches() {
-        assertEquals(0.0, elevator.getCurrentPosition(), 0.5, "Elevator must start at its base");
+        // The encoder is referenced to the hard-stop height (preset frame),
+        // not to zero, when the carriage rests on its hard stop
+        assertEquals(ElevatorConstants.ELEVATOR_ZERO_HEIGHT, elevator.getCurrentPosition(), 0.5,
+            "Elevator must start at its hard-stop height");
 
         // 2 seconds of full manual up-stick: the simulated carriage must
         // rise against simulated gravity (proves output -> plant -> encoder)

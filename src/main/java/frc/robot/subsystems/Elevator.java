@@ -36,8 +36,12 @@ import frc.robot.util.Tunables;
  *  - The encoder conversion factors scale the NEO's integrated encoder so
  *    every position is in inches and every velocity in inches per second.
  *    The inches-per-rotation figure is the gearing model times the
- *    "Elevator - Travel Ratio" tunable, which is calibrated on the robot
- *    with a tape measure (README: "Calibrating the elevator height").
+ *    "Elevator - Travel Ratio" tunable (confirmed 1.0 on the robot).
+ *  - Heights are in the preset frame: top of the base-stage 2x1 to the
+ *    bottom of the carriage 2x1. On its hard stop the carriage sits ABOVE
+ *    that reference by "Elevator - Height At Hard Stop" (~0.875 in), so
+ *    the encoder is zeroed TO that value, not to 0, and the reverse soft
+ *    limit sits there (README: "Calibrating the elevator height").
  *  - Height moves use MAXMotion (trapezoidal profiling on the controller)
  *    with on-controller kS/kV/kG feedforward, so the carriage tracks
  *    smoothly and holds its height at rest and when the operator releases
@@ -77,6 +81,8 @@ public class Elevator extends SubsystemBase {
     // applied to the controllers. See periodic().
     // ------------------------------------------------------------------
     private double appliedTravelRatio;
+    /** Height (preset frame, inches) of the carriage on its hard stop; the encoder is zeroed TO this. */
+    private double appliedZeroHeight;
     private double appliedKp;
     private double appliedKs;
     private double appliedKvScale;
@@ -84,9 +90,9 @@ public class Elevator extends SubsystemBase {
     private double appliedCruiseVelocity;
     private double appliedMaxAcceleration;
     private double appliedProfileError;
-    /** True while an edited travel ratio is waiting for the carriage to be at its base. */
+    /** True while an edited travel ratio / hard-stop height is waiting for the carriage to be at its base. */
     private boolean travelRatioChangePending = false;
-    /** Paces the tunable poll so eight Preferences reads do not run every loop. */
+    /** Paces the tunable poll so nine Preferences reads do not run every loop. */
     private final Timer tunablePollTimer = new Timer();
     private static final double TUNABLE_POLL_SECONDS = 0.5;
 
@@ -104,6 +110,7 @@ public class Elevator extends SubsystemBase {
         rightMotor = new SparkMax(ElevatorConstants.ELEVATOR_RIGHT_ID, MotorType.kBrushless);
 
         appliedTravelRatio = Tunables.elevatorTravelRatio();
+        appliedZeroHeight = Tunables.elevatorZeroHeight();
         readGainTunables();
         configureMotors(ResetMode.kResetSafeParameters);
 
@@ -112,7 +119,8 @@ public class Elevator extends SubsystemBase {
         // All closed-loop commands go to the leader; the follower mirrors it
         closedLoopController = leftMotor.getClosedLoopController();
 
-        // Reset encoders on initialization (elevator must start at its base position)
+        // Reference the encoders on initialization (the carriage must be on
+        // its hard stop at power-on)
         resetEncoders();
         tunablePollTimer.start();
 
@@ -129,10 +137,10 @@ public class Elevator extends SubsystemBase {
                 ElevatorConstants.ELEVATOR_GEAR_RATIO,
                 SIM_CARRIAGE_MASS_KG,
                 drumRadiusMeters,
-                Units.inchesToMeters(ElevatorConstants.ELEVATOR_MIN_POSITION),
+                Units.inchesToMeters(appliedZeroHeight),
                 Units.inchesToMeters(ElevatorConstants.ELEVATOR_MAX_POSITION),
                 true, // Simulate gravity so kG/holding behavior is visible
-                Units.inchesToMeters(ElevatorConstants.ELEVATOR_MIN_POSITION));
+                Units.inchesToMeters(appliedZeroHeight));
         }
     }
 
@@ -216,11 +224,13 @@ public class Elevator extends SubsystemBase {
             .maxAcceleration(appliedMaxAcceleration)
             .allowedProfileError(appliedProfileError);
 
-        // Soft limits (inches) bound travel in every control mode
+        // Soft limits (inches, preset frame) bound travel in every control
+        // mode. The reverse limit is the hard-stop height, since that is
+        // where the encoder reads with the carriage at the bottom.
         leaderConfig.softLimit
             .forwardSoftLimit(ElevatorConstants.ELEVATOR_MAX_POSITION)
             .forwardSoftLimitEnabled(true)
-            .reverseSoftLimit(ElevatorConstants.ELEVATOR_MIN_POSITION)
+            .reverseSoftLimit(appliedZeroHeight)
             .reverseSoftLimitEnabled(true);
 
         // --- Follower configuration ---
@@ -250,11 +260,11 @@ public class Elevator extends SubsystemBase {
     /**
      * Re-applies edited tunables to the controllers. Only while DISABLED (a
      * reconfigure mid-move would stutter the mechanism), polled twice a
-     * second. Gains, feedforward, and profile limits apply right away. A
-     * travel-ratio change rescales the encoder, so it is applied only with
-     * the carriage at its base, where the encoders are then re-zeroed
-     * against the hard stop; until then it waits and the Dashboard shows
-     * an alert.
+     * second. Gains, feedforward, and profile limits apply right away. The
+     * calibration values (travel ratio, hard-stop height) rescale or
+     * re-reference the encoder, so they are applied only with the carriage
+     * at its base, where the encoders are then re-referenced against the
+     * hard stop; until then they wait and the Dashboard shows an alert.
      */
     @Override
     public void periodic() {
@@ -263,14 +273,16 @@ public class Elevator extends SubsystemBase {
         }
 
         boolean reconfigure = false;
-        boolean ratioApplied = false;
+        boolean calibrationApplied = false;
 
         double ratio = Tunables.elevatorTravelRatio();
-        if (ratio != appliedTravelRatio) {
-            if (Math.abs(getCurrentPosition()) <= ElevatorConstants.ELEVATOR_AT_BASE_TOLERANCE) {
+        double zeroHeight = Tunables.elevatorZeroHeight();
+        if (ratio != appliedTravelRatio || zeroHeight != appliedZeroHeight) {
+            if (isAtBase()) {
                 appliedTravelRatio = ratio;
+                appliedZeroHeight = zeroHeight;
                 travelRatioChangePending = false;
-                ratioApplied = true;
+                calibrationApplied = true;
                 reconfigure = true;
             } else {
                 travelRatioChangePending = true;
@@ -286,9 +298,9 @@ public class Elevator extends SubsystemBase {
 
         if (reconfigure) {
             configureMotors(ResetMode.kNoResetSafeParameters);
-            if (ratioApplied) {
-                // The carriage is on its hard stop: make the new scale's
-                // zero exactly there.
+            if (calibrationApplied) {
+                // The carriage is on its hard stop: reference the new
+                // scale / hard-stop height exactly there.
                 resetEncoders();
             }
         }
@@ -300,8 +312,9 @@ public class Elevator extends SubsystemBase {
      * gravity/friction compensation comes from the configured kS/kV/kG.
      */
     public void setPosition(double targetPosition) {
-        // Clamp target position within safe limits
-        targetPosition = Math.min(Math.max(targetPosition, ElevatorConstants.ELEVATOR_MIN_POSITION),
+        // Clamp target position within safe limits (a preset of 0 means "as
+        // low as it goes", which is the hard-stop height)
+        targetPosition = Math.min(Math.max(targetPosition, appliedZeroHeight),
             ElevatorConstants.ELEVATOR_MAX_POSITION);
 
         currentTargetPosition = targetPosition;
@@ -320,10 +333,15 @@ public class Elevator extends SubsystemBase {
         setPosition(getCurrentPosition());
     }
 
-    /** Zeros both encoders; only do this with the carriage at its base. */
+    /**
+     * References both encoders to the hard-stop height; only do this with
+     * the carriage resting on its hard stop. (Named "reset" on the
+     * dashboard / controller because that is what the operator does; the
+     * value written is the calibrated hard-stop height, not zero.)
+     */
     public void resetEncoders() {
-        leftEncoder.setPosition(0);
-        rightEncoder.setPosition(0);
+        leftEncoder.setPosition(appliedZeroHeight);
+        rightEncoder.setPosition(appliedZeroHeight);
     }
 
     /**
@@ -376,8 +394,14 @@ public class Elevator extends SubsystemBase {
      * or a mechanical problem; the Dashboard raises an alert.
      */
     public boolean sidesInSync() {
-        return Math.abs(Math.abs(leftEncoder.getPosition()) - Math.abs(rightEncoder.getPosition()))
-            <= ElevatorConstants.ELEVATOR_ALLOWED_ERROR;
+        double leftTravel = Math.abs(leftEncoder.getPosition() - appliedZeroHeight);
+        double rightTravel = Math.abs(rightEncoder.getPosition() - appliedZeroHeight);
+        return Math.abs(leftTravel - rightTravel) <= ElevatorConstants.ELEVATOR_ALLOWED_ERROR;
+    }
+
+    /** True when the carriage is (by the encoder) resting on its hard stop. */
+    public boolean isAtBase() {
+        return Math.abs(getCurrentPosition() - appliedZeroHeight) <= ElevatorConstants.ELEVATOR_AT_BASE_TOLERANCE;
     }
 
     /** Follower (right) encoder position in inches, sign as the follower reports it, for diagnostics. */
@@ -386,13 +410,14 @@ public class Elevator extends SubsystemBase {
     }
 
     /**
-     * True when the encoder reads meaningfully below zero: it was zeroed
-     * with the carriage raised and the carriage has since dropped to the
-     * hard stop, so every commanded height would land that much high. The
-     * Dashboard raises an alert; fix by re-zeroing at the hard stop.
+     * True when the encoder reads meaningfully below the hard-stop height:
+     * it was referenced with the carriage raised and the carriage has since
+     * dropped to the hard stop, so every commanded height would land that
+     * much high. The Dashboard raises an alert; fix by re-zeroing at the
+     * hard stop.
      */
     public boolean readsBelowZero() {
-        return getCurrentPosition() < ElevatorConstants.ELEVATOR_BELOW_ZERO_ALERT;
+        return getCurrentPosition() < appliedZeroHeight + ElevatorConstants.ELEVATOR_BELOW_ZERO_ALERT;
     }
 
     public boolean isInManualMode() {
@@ -406,6 +431,11 @@ public class Elevator extends SubsystemBase {
     /** Travel ratio (measured / modeled) currently applied to the encoder scaling. */
     public double travelRatio() {
         return appliedTravelRatio;
+    }
+
+    /** Height (preset frame, inches) the encoder reads with the carriage on its hard stop. */
+    public double zeroHeight() {
+        return appliedZeroHeight;
     }
 
     /** Carriage travel (inches) per motor rotation currently applied to the controllers. */

@@ -43,6 +43,7 @@ public final class Tunables {
     // ------------------------------------------------------------------
     private static final String TELEOP_SPEED_SCALE = "Drive - Teleop Speed Scale (0-1)";
     private static final String ELEVATOR_TRAVEL_RATIO = "Elevator - Travel Ratio (measured / modeled)";
+    private static final String ELEVATOR_ZERO_HEIGHT = "Elevator - Height At Hard Stop (in)";
     private static final String ELEVATOR_KP = "Elevator - kP (duty per in)";
     private static final String ELEVATOR_KS = "Elevator - kS (V)";
     private static final String ELEVATOR_KV_SCALE = "Elevator - kV Scale (x free-speed model)";
@@ -70,8 +71,10 @@ public final class Tunables {
      *   1: initial tunables (Sept 2026)
      *   2: elevator calibration/gain tunables; elevator profile raised to
      *      16 in/s, 60 in/s^2; L4 arm arrival offset 0 s for that profile
+     *   3: travel ratio back to 1.0 (gearing confirmed by 20/40 in tests);
+     *      new "Height At Hard Stop" 0.875 in
      */
-    private static final int DEFAULTS_VERSION = 2;
+    private static final int DEFAULTS_VERSION = 3;
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -87,6 +90,7 @@ public final class Tunables {
         }
         Preferences.initDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.initDouble(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO);
+        Preferences.initDouble(ELEVATOR_ZERO_HEIGHT, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
         Preferences.initDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
         Preferences.initDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
         Preferences.initDouble(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE);
@@ -112,6 +116,7 @@ public final class Tunables {
         Preferences.setInt(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION);
         Preferences.setDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.setDouble(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO);
+        Preferences.setDouble(ELEVATOR_ZERO_HEIGHT, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
         Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
         Preferences.setDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
         Preferences.setDouble(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE);
@@ -161,6 +166,16 @@ public final class Tunables {
      */
     public static double elevatorTravelRatio() {
         return clamped(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO, 0.33, 3.0);
+    }
+
+    /**
+     * Height (preset frame: base-2x1 top to carriage-2x1 bottom) the
+     * carriage sits at on its hard stop. The encoder is referenced to this
+     * value at the hard stop and the reverse soft limit sits here. Clamped
+     * to a few inches: anything larger is a measurement error.
+     */
+    public static double elevatorZeroHeight() {
+        return clamped(ELEVATOR_ZERO_HEIGHT, ElevatorConstants.ELEVATOR_ZERO_HEIGHT, 0.0, 6.0);
     }
 
     /** Position loop proportional gain, duty cycle per inch of error. */

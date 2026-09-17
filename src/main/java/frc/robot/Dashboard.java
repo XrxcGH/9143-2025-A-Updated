@@ -363,6 +363,13 @@ public class Dashboard {
         SmartDashboard.putBoolean("CorAl/Game Piece", coral.isGamePieceDetected());
         SmartDashboard.putBoolean("CorAl/Through Bore OK", coral.isThroughBoreConnected());
         SmartDashboard.putNumber("CorAl/CANrange Distance", coral.getCANRangeDistance());
+        // Detection tuning readouts: set "CorAl - Coral Detect Distance"
+        // halfway between the empty-claw and coral distances; Raw Detect
+        // is the sensor's verdict before the debounce.
+        SmartDashboard.putNumber("CorAl/CANrange Signal Strength", coral.getCANRangeSignalStrength());
+        SmartDashboard.putString("CorAl/CANrange Health", coral.getCANRangeHealth());
+        SmartDashboard.putBoolean("CorAl/CANrange Raw Detect", coral.isCANRangeRawDetected());
+        SmartDashboard.putNumber("CorAl/CANrange Threshold", coral.getDetectThreshold());
         SmartDashboard.putNumber("CorAl/Pivot Current", coral.getPivotCurrent());
         SmartDashboard.putNumber("CorAl/Intake Current", coral.getIntakeCurrent());
         SmartDashboard.putNumber("CorAl/Pivot Output", coral.getPivotOutput());

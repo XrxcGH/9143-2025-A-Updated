@@ -340,9 +340,24 @@ public final class Constants {
 		public static final double CORAL_MANUAL_CONTROL_DEADBAND = 0.2; // Stick deadband
 		public static final double CORAL_MANUAL_SPEED_LIMIT = 0.1;      // Max duty cycle in manual mode
 
-		// --- Game Piece Detection ---
-		public static final double GAME_PIECE_DETECTION_CONFIRMATION_TIME = 0.3; // Seconds of continuous detection to confirm
-		public static final double GAME_PIECE_DETECTION_THRESHOLD = 0.1;         // CANrange proximity threshold (meters)
+		// --- Game Piece Detection (CANrange) ---
+		// The CANrange's own proximity bit is "distance < threshold", with a
+		// hysteresis band around it, and only when the return is strong
+		// enough to count as a valid measurement. With the original 0.1 m
+		// threshold and the 0.01 m default hysteresis the empty claw's own
+		// structure sat right at the threshold, so the bit chattered and the
+		// rising-only debounce latched it as a coral. The fixes: a hysteresis
+		// band wide enough to sit clear of that background, a narrower
+		// field of view so oblique structure is not in the beam, a health
+		// check, and a debounce on BOTH edges. The threshold and hysteresis
+		// are live tunables ("CorAl - Coral Detect ..."): read
+		// CorAl/CANrange Distance on the Testing tab with the claw empty and
+		// with a coral, and put the threshold halfway between.
+		public static final double GAME_PIECE_DETECTION_CONFIRMATION_TIME = 0.3; // Seconds each edge must persist (both edges)
+		public static final double GAME_PIECE_DETECTION_THRESHOLD = 0.08;        // Tunable default: detect below this (meters)
+		public static final double GAME_PIECE_DETECTION_HYSTERESIS = 0.015;      // Tunable default: detect below threshold - this, release above threshold + this (meters)
+		public static final double GAME_PIECE_MIN_SIGNAL_STRENGTH = 2500;        // Below this the measurement is invalid and cannot detect (CTRE default)
+		public static final double GAME_PIECE_FOV_DEGREES = 13.5;                // Field of view, both axes (6.75 min, 27 max); narrow keeps claw structure out of the beam
 
 		// --- Roller Speeds (duty cycle, -1 to 1; positive = coral intake direction) ---
 		public static final double CORAL_INTAKE_SPEED = 0.1;   // Intaking coral (auto-stops on detection)
@@ -479,10 +494,10 @@ public final class Constants {
 			{105.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
 			{110.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
 			{115.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
-			{120.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
-			{125.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
-			{130.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
-			{135.0,  0.0,  53.5,   Double.NaN,   Double.NaN},
+			{120.0,  4.0,  53.5,   Double.NaN,   Double.NaN},
+			{125.0,  4.0,  53.5,   Double.NaN,   Double.NaN},
+			{130.0,  4.5,  53.5,   Double.NaN,   Double.NaN},
+			{135.0,  4.5,  53.5,   Double.NaN,   Double.NaN},
 			{140.0,  5.0,  53.5,   Double.NaN,   Double.NaN},
 			{145.0,  5.5,  53.5,   Double.NaN,   Double.NaN},
 			{150.0,  6.0,  53.5,   Double.NaN,   Double.NaN},
@@ -498,7 +513,7 @@ public final class Constants {
 		public static final double ARM_CLEAR_MIN_ANGLE = 8.0;       // Degrees
 		// Highest carriage height with the arm ANYWHERE from 8 to 75 deg
 		// (the low box roof: 17.5 in at 60-70 deg is the tightest).
-		public static final double LOW_BOX_ROOF = 17.0;             // Inches
+		public static final double LOW_BOX_ROOF = 16.5;             // Inches
 		// Arm angle that clears band A, so the carriage may climb past the
 		// low box roof (67.5 deg is the first continuous row).
 		public static final double BAND_PASS_MIN_ANGLE = 75.0;      // Degrees
@@ -509,9 +524,12 @@ public final class Constants {
 		// itself; the gate accepts SAFE_ANGLE_TOLERANCE below it, i.e. a
 		// measured 97 deg, and the 97.5 deg row is clear 4-53.5 in.
 		public static final double SAFE_TRAVEL_MIN_ANGLE = 100.0;   // Degrees
-		// Angles beyond this need height (bumper / brainpan): the arm is
-		// held at the stage angle until the carriage is above the minimum.
-		public static final double HIGH_ANGLE_STAGE = 120.0;        // Degrees
+		// Angles beyond this need height (bumper / Limelight bracket): from
+		// ~113 deg up the corridor starts at 4 in, from 135 deg at 5 in and
+		// at 160 deg at 7.5 in. The arm is held at this stage angle (which
+		// is clear right down to the base) until the carriage is above the
+		// minimum height, and brought back to it before dropping below.
+		public static final double HIGH_ANGLE_STAGE = 110.0;        // Degrees
 		public static final double HIGH_ANGLE_MIN_HEIGHT = 8.0;     // Inches
 
 		// --- Mid-height scoring poses (L3): 17 < height < L4_ZONE_MIN_HEIGHT ---

@@ -315,7 +315,21 @@ public class Superstructure {
 
         // ---- General path: get the arm to RAISE (with every head start the
         //      corridors allow), then approach the target ----
-        return escapeToSafe(target).andThen(approach(target, targetAngle));
+        // An arm beyond the high-angle stage (the algae poses, 160 deg) may
+        // not be that far over below HIGH_ANGLE_MIN_HEIGHT (bumper /
+        // Limelight bracket), so before any target that is not itself a
+        // free-zone pose at height, bring the arm back to RAISE (or the
+        // free-zone target angle) while the carriage holds at or above the
+        // minimum height - then plan as usual from there.
+        Command lowerFirst = Commands.none();
+        if (a0 > SuperstructureConstants.HIGH_ANGLE_STAGE
+                && (targetAngle < SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE
+                    || target < SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT)) {
+            double holdAngle = targetAngle >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE ? targetAngle : SAFE_ANGLE;
+            lowerFirst = both(Math.max(target, SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT), holdAngle)
+                .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.HIGH_ANGLE_STAGE)));
+        }
+        return lowerFirst.andThen(escapeToSafe(target)).andThen(approach(target, targetAngle));
     }
 
     /**
@@ -333,10 +347,10 @@ public class Superstructure {
             return Commands.none(); // already free to travel
         }
         if (h0 >= SuperstructureConstants.L4_ZONE_MIN_HEIGHT && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
-            return leaveHighPose();
+            return leaveHighPose(targetHeight < SuperstructureConstants.L4_STATION_HEIGHT);
         }
         if (h0 > SuperstructureConstants.LOW_BOX_ROOF && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
-            return leaveMidPose(h0);
+            return leaveMidPose(h0, targetHeight < SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
         }
         if (h0 > SuperstructureConstants.LOW_BOX_ROOF) {
             // Arm between the band-pass and safe-travel angles above the low
@@ -368,10 +382,15 @@ public class Superstructure {
      * arm is free to travel. Descending any earlier sweeps the claw into
      * the middle-stage top tube.
      */
-    private Command leaveMidPose(double currentHeight) {
+    private Command leaveMidPose(double currentHeight, boolean descendingNext) {
         double lift = Math.max(currentHeight, SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
+        // A descent may start as soon as the arm clears band A (the mid
+        // corridor is clear all the way down from 75 deg up); a climb has
+        // to wait for RAISE because 75-95 deg is blocked above ~36 in.
+        double release = descendingNext ? SuperstructureConstants.BAND_PASS_MIN_ANGLE
+            : SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE;
         return both(lift, SAFE_ANGLE)
-            .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
+            .andThen(Commands.waitUntil(() -> armAtLeast(release)));
     }
 
     /**
@@ -379,7 +398,9 @@ public class Superstructure {
      * the arm to 45 deg while low enough, drop to the station, swing to
      * RAISE below the safe-rotate height, then the carriage is free.
      */
-    private Command leaveHighPose() {
+    private Command leaveHighPose(boolean descendingNext) {
+        double release = descendingNext ? SuperstructureConstants.BAND_PASS_MIN_ANGLE
+            : SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE;
         return elevatorTo(SuperstructureConstants.L4_RETURN_DROP_HEIGHT)
             .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT)))
             .andThen(armTo(SuperstructureConstants.L4_RETURN_STAGE_ANGLE))
@@ -387,7 +408,7 @@ public class Superstructure {
             .andThen(elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT))
             .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_SAFE_ROTATE_MAX_HEIGHT)))
             .andThen(armTo(SAFE_ANGLE))
-            .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
+            .andThen(Commands.waitUntil(() -> armAtLeast(release)));
     }
 
     /**
@@ -408,8 +429,13 @@ public class Superstructure {
             return both(targetHeight, targetAngle).andThen(settle());
         }
         // High-angle target (algae intake): hold the arm at the stage angle
-        // until the carriage is above the bumper zone, then finish
+        // until the carriage is above the bumper zone, then finish. Already
+        // above it (and staying there): go straight to the pose.
         if (targetAngle > SuperstructureConstants.HIGH_ANGLE_STAGE) {
+            if (elevator.getCurrentPosition() >= SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT
+                    && targetHeight >= SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT) {
+                return both(targetHeight, targetAngle).andThen(settle());
+            }
             return both(targetHeight, SuperstructureConstants.HIGH_ANGLE_STAGE)
                 .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT)))
                 .andThen(armTo(targetAngle))
@@ -423,18 +449,24 @@ public class Superstructure {
                 .andThen(armTo(targetAngle))
                 .andThen(settle());
         }
-        // Mid scoring pose (L3): climb at RAISE, final rotation just below the target
+        // Mid scoring pose (L3): travel at RAISE, final rotation only within
+        // MID_POSE_ROTATE_BELOW_TARGET of the target (coming from above as
+        // well as below - the pose's band is narrow)
         if (targetHeight < SuperstructureConstants.L4_ZONE_MIN_HEIGHT) {
-            double rotateAt = targetHeight - SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET;
+            double lo = targetHeight - SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET;
+            double hi = targetHeight + SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET;
             return elevatorTo(targetHeight)
-                .andThen(Commands.waitUntil(() -> heightAtLeast(rotateAt)))
+                .andThen(Commands.waitUntil(() -> heightAtLeast(lo) && heightAtMost(hi)))
                 .andThen(armTo(targetAngle))
                 .andThen(settle());
         }
-        // High scoring pose (L4): staged through the station
+        // High scoring pose (L4): staged through the station. The rotation
+        // waits for the carriage to be IN the station window, not merely
+        // above its floor, so arriving from above (an algae pose) is safe.
         double stageAngle = Math.min(targetAngle, SuperstructureConstants.L4_STAGE_ANGLE);
         return elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT)
-            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)))
+            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)
+                && heightAtMost(SuperstructureConstants.L4_STATION_HEIGHT + 2.0)))
             .andThen(armTo(stageAngle))
             .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.L4_STAGE_DONE_ANGLE)))
             .andThen(elevatorTo(SuperstructureConstants.L4_PRE_TOP_HEIGHT))

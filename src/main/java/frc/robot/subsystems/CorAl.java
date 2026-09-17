@@ -2,6 +2,7 @@ package frc.robot.subsystems;
 
 import com.ctre.phoenix6.configs.CANrangeConfiguration;
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
+import com.ctre.phoenix6.configs.ProximityParamsConfigs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
@@ -9,7 +10,9 @@ import com.ctre.phoenix6.hardware.CANrange;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.GravityTypeValue;
 import com.ctre.phoenix6.signals.InvertedValue;
+import com.ctre.phoenix6.signals.MeasurementHealthValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.ctre.phoenix6.signals.UpdateModeValue;
 
 import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.system.plant.DCMotor;
@@ -61,9 +64,17 @@ public class CorAl extends SubsystemBase {
     private final DutyCycleOut percentRequest = new DutyCycleOut(0);
 
     // Game Piece Detection
+    // Both edges are debounced: a detection must persist to count as a
+    // coral, and a loss must persist to count as gone, so a chattering
+    // proximity bit cannot latch either way.
     private final Debouncer detectionDebouncer = new Debouncer(
-        CorAlConstants.GAME_PIECE_DETECTION_CONFIRMATION_TIME, Debouncer.DebounceType.kRising);
+        CorAlConstants.GAME_PIECE_DETECTION_CONFIRMATION_TIME, Debouncer.DebounceType.kBoth);
     private boolean gamePieceDetected = false;
+    private boolean rawDetected = false; // Last raw (undebounced) sensor verdict, for the dashboard
+
+    // Applied CANrange detection tunables (re-applied while disabled; see periodic())
+    private double appliedDetectThreshold;
+    private double appliedDetectHysteresis;
     private double commandedIntakeSpeed = 0; // Last commanded roller speed (+ = coral intake direction)
 
     // Position Tracking
@@ -109,6 +120,7 @@ public class CorAl extends SubsystemBase {
         canRangeSensor = new CANrange(CorAlConstants.CANRANGE_SENSOR_ID);
 
         readProfileTunables();
+        readDetectTunables();
         configurePivotMotor(pivotMotor);
         configureIntakeMotor(intakeMotor);
         configureCanRange(canRangeSensor);
@@ -226,10 +238,42 @@ public class CorAl extends SubsystemBase {
 
     private void configureCanRange(CANrange sensor) {
         CANrangeConfiguration config = new CANrangeConfiguration();
-        // On-device proximity detection: "detected" when something is closer
-        // than the threshold
-        config.ProximityParams.ProximityThreshold = CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD;
+        config.ProximityParams = proximityConfig();
+        // Narrow the beam: the full 27 deg cone picks up the claw's own
+        // plates and rollers at oblique angles, and a coral fills a much
+        // smaller cone at a few centimeters anyway.
+        config.FovParams.FOVRangeX = CorAlConstants.GAME_PIECE_FOV_DEGREES;
+        config.FovParams.FOVRangeY = CorAlConstants.GAME_PIECE_FOV_DEGREES;
+        // Short-range mode at 100 Hz: the coral sits centimeters away, and
+        // short range is the more robust mode at that distance.
+        config.ToFParams.UpdateMode = UpdateModeValue.ShortRange100Hz;
         sensor.getConfigurator().apply(config);
+    }
+
+    /** Snapshots the detection tunables into the applied fields. */
+    private void readDetectTunables() {
+        appliedDetectThreshold = Tunables.coralDetectDistance();
+        appliedDetectHysteresis = Tunables.coralDetectHysteresis();
+    }
+
+    /** True if a detection tunable differs from what is applied to the sensor. */
+    private boolean detectTunablesChanged() {
+        return Tunables.coralDetectDistance() != appliedDetectThreshold
+            || Tunables.coralDetectHysteresis() != appliedDetectHysteresis;
+    }
+
+    /**
+     * On-device proximity detection from the applied tunables: "detected"
+     * below (threshold - hysteresis), "undetected" again only above
+     * (threshold + hysteresis), and only while the return is strong enough
+     * to be a valid measurement. The band is what stops the bit chattering
+     * when the empty claw's own structure sits near the threshold.
+     */
+    private ProximityParamsConfigs proximityConfig() {
+        return new ProximityParamsConfigs()
+            .withProximityThreshold(appliedDetectThreshold)
+            .withProximityHysteresis(appliedDetectHysteresis)
+            .withMinSignalStrengthForValidMeasurement(CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH);
     }
 
     /**
@@ -400,6 +444,26 @@ public class CorAl extends SubsystemBase {
         return canRangeSensor.getDistance().getValueAsDouble();
     }
 
+    /** CANrange return signal strength (unitless); below the configured minimum nothing can be detected. */
+    public double getCANRangeSignalStrength() {
+        return canRangeSensor.getSignalStrength().getValueAsDouble();
+    }
+
+    /** CANrange measurement health as reported by the sensor: Good, Limited, or Bad. */
+    public String getCANRangeHealth() {
+        return canRangeSensor.getMeasurementHealth().getValue().name();
+    }
+
+    /** The sensor's raw, undebounced proximity verdict (after the health check). */
+    public boolean isCANRangeRawDetected() {
+        return rawDetected;
+    }
+
+    /** Proximity threshold (meters) currently applied to the CANrange. */
+    public double getDetectThreshold() {
+        return appliedDetectThreshold;
+    }
+
     /**
      * Whether a game piece has been detected (debounced). Updated in periodic().
      */
@@ -458,12 +522,17 @@ public class CorAl extends SubsystemBase {
 
     @Override
     public void periodic() {
-        // Debounced game piece detection using the CANrange's on-device
-        // proximity bit. On the rising edge (a coral just arrived), stop the
-        // rollers - but only if they are running in the coral-intake
-        // (positive) direction, so algae holding/ejecting is never
-        // interrupted by the sensor.
-        boolean confirmed = detectionDebouncer.calculate(canRangeSensor.getIsDetected().getValue());
+        // Game piece detection: the CANrange's on-device proximity bit
+        // (threshold + hysteresis + minimum signal strength, configured
+        // above), additionally rejected while the sensor reports a
+        // compromised measurement, then debounced on both edges. On the
+        // confirmed rising edge (a coral just arrived), stop the rollers -
+        // but only if they are running in the coral-intake (positive)
+        // direction, so algae holding/ejecting is never interrupted by the
+        // sensor.
+        rawDetected = canRangeSensor.getIsDetected().getValue()
+            && canRangeSensor.getMeasurementHealth().getValue() != MeasurementHealthValue.Bad;
+        boolean confirmed = detectionDebouncer.calculate(rawDetected);
         if (confirmed && !gamePieceDetected && commandedIntakeSpeed > 0) {
             stopIntake();
         }
@@ -480,11 +549,17 @@ public class CorAl extends SubsystemBase {
         // only while DISABLED - a config apply mid-move would stutter the
         // arm - polled twice a second. Only the MotionMagic group is sent,
         // so gains, limits, and the sensor ratio are untouched.
-        if (DriverStation.isDisabled()
-            && tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)
-            && profileTunablesChanged()) {
-            readProfileTunables();
-            pivotMotor.getConfigurator().apply(motionMagicConfig());
+        if (DriverStation.isDisabled() && tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)) {
+            if (profileTunablesChanged()) {
+                readProfileTunables();
+                pivotMotor.getConfigurator().apply(motionMagicConfig());
+            }
+            // Coral detection threshold / hysteresis: only the proximity
+            // group is sent to the CANrange.
+            if (detectTunablesChanged()) {
+                readDetectTunables();
+                canRangeSensor.getConfigurator().apply(proximityConfig());
+            }
         }
     }
 

@@ -55,6 +55,8 @@ public final class Tunables {
     private static final String PIVOT_CRUISE_VELOCITY = "Pivot - Cruise Velocity (deg/s)";
     private static final String PIVOT_MAX_ACCELERATION = "Pivot - Acceleration (deg/s^2)";
     private static final String PIVOT_MAX_JERK = "Pivot - Jerk (deg/s^3)";
+    private static final String CORAL_DETECT_DISTANCE = "CorAl - Coral Detect Distance (m)";
+    private static final String CORAL_DETECT_HYSTERESIS = "CorAl - Coral Detect Hysteresis (m)";
     private static final String REEF_FLUSH_DISTANCE = "Vision - Reef Flush Distance (m)";
     private static final String STATION_FLUSH_DISTANCE = "Vision - Station Flush Distance (m)";
     private static final String L1_SCORE_DISTANCE = "Vision - L1 Score Distance (m)";
@@ -111,6 +113,8 @@ public final class Tunables {
         Preferences.initDouble(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY);
         Preferences.initDouble(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION);
         Preferences.initDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
+        Preferences.initDouble(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD);
+        Preferences.initDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
         Preferences.initDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.initDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.initDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -138,6 +142,8 @@ public final class Tunables {
         Preferences.setDouble(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY);
         Preferences.setDouble(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION);
         Preferences.setDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
+        Preferences.setDouble(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD);
+        Preferences.setDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
         Preferences.setDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.setDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.setDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -244,6 +250,21 @@ public final class Tunables {
     /** Motion Magic jerk limit, deg/s^3 (0 disables the limit - a plain trapezoid). */
     public static double pivotMaxJerk() {
         return clamped(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK, 0.0, 50000.0);
+    }
+
+    // ------------------------------------------------------------------
+    // CorAl coral detection (CANrange proximity). Re-applied to the sensor
+    // by the CorAl the next time the robot is disabled.
+    // ------------------------------------------------------------------
+
+    /** CANrange proximity threshold, meters: a coral is "present" below it (minus the hysteresis). */
+    public static double coralDetectDistance() {
+        return clamped(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD, 0.02, 0.5);
+    }
+
+    /** CANrange proximity hysteresis, meters, applied on both sides of the threshold. */
+    public static double coralDetectHysteresis() {
+        return clamped(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS, 0.0, 0.1);
     }
 
     // ------------------------------------------------------------------

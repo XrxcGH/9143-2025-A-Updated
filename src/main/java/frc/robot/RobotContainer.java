@@ -35,6 +35,7 @@ import frc.robot.subsystems.Elevator;
 import frc.robot.subsystems.CorAl;
 import frc.robot.subsystems.LEDs;
 import frc.robot.subsystems.Vision;
+import frc.robot.util.Tunables;
 
 /**
  * RobotContainer owns every subsystem and maps controller inputs to commands.
@@ -158,8 +159,13 @@ public class RobotContainer {
         // (L1 standoff vs. flush scoring vs. algae) - wire that in.
         swerve.getVision().setGoalSupplier(superstructure::getGoal);
 
+        // Seed the dashboard-editable tunables (vision distances, handoff
+        // heights, ...) with their Constants defaults if not already stored
+        // on the roboRIO.
+        Tunables.init();
+
         // All Elastic/NetworkTables publishing is centralized here.
-        dashboard = new Dashboard(swerve, elevator, coral, leds);
+        dashboard = new Dashboard(swerve, elevator, coral, leds, superstructure);
 
         configureBindings();
     }

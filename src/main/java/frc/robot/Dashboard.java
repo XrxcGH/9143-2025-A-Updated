@@ -34,6 +34,7 @@ import frc.robot.subsystems.Elevator;
 import frc.robot.subsystems.LEDs;
 import frc.robot.subsystems.Swerve;
 import frc.robot.util.Elastic;
+import frc.robot.util.Tunables;
 
 /**
  * Central dashboard manager - the ONLY place in the robot code that publishes
@@ -53,6 +54,11 @@ import frc.robot.util.Elastic;
  *  4. Persistent problems surface through WPILib Alerts (Elastic's Alerts
  *     widget); sudden mid-match failures additionally fire an Elastic toast
  *     notification so they are impossible to miss.
+ *  5. The Testing tab drives each mechanism INDEPENDENTLY: setpoint sliders
+ *     (values flow dashboard -> robot, so update() never overwrites them)
+ *     plus Go/Run/Stop command buttons that move one mechanism and leave
+ *     the other alone (see Superstructure.test*). Tunable "magic numbers"
+ *     are edited there too, through WPILib Preferences (see Tunables).
  *
  * Subsystems expose plain getters and know nothing about the dashboard;
  * update() polls them once per loop from Robot.robotPeriodic().
@@ -62,6 +68,13 @@ public class Dashboard {
     private final Elevator elevator;
     private final CorAl coral;
     private final LEDs leds;
+
+    // Dashboard-editable test setpoints (Testing tab). These are READ by the
+    // robot, never written in update() - a periodic put would clobber the
+    // operator's slider the instant they moved it.
+    private final NetworkTableEntry testElevatorSetpoint;
+    private final NetworkTableEntry testPivotSetpoint;
+    private final NetworkTableEntry testIntakeSpeed;
 
     /** Field widget data: robot pose (and any objects added later, e.g. trajectories). */
     private final Field2d field = new Field2d();
@@ -129,11 +142,44 @@ public class Dashboard {
      * RobotContainer after the subsystems exist. (The auto chooser is a
      * LoggedDashboardChooser that publishes itself - see RobotContainer.)
      */
-    public Dashboard(Swerve swerve, Elevator elevator, CorAl coral, LEDs leds) {
+    public Dashboard(Swerve swerve, Elevator elevator, CorAl coral, LEDs leds,
+            Superstructure superstructure) {
         this.swerve = swerve;
         this.elevator = elevator;
         this.coral = coral;
         this.leds = leds;
+
+        // --- Independent mechanism test controls (Testing tab) ---
+        // Setpoints are plain NT doubles the dashboard sliders write to;
+        // setDefaultDouble only seeds a value if none exists yet.
+        NetworkTable smartDashboard = NetworkTableInstance.getDefault().getTable("SmartDashboard");
+        testElevatorSetpoint = smartDashboard.getEntry("Testing/Elevator Setpoint (in)");
+        testElevatorSetpoint.setDefaultDouble(0.0);
+        testPivotSetpoint = smartDashboard.getEntry("Testing/Pivot Setpoint (deg)");
+        testPivotSetpoint.setDefaultDouble(0.0);
+        testIntakeSpeed = smartDashboard.getEntry("Testing/Intake Speed");
+        testIntakeSpeed.setDefaultDouble(0.1);
+
+        // Go/Run/Stop buttons: each moves exactly one mechanism (the
+        // Superstructure refuses - with a toast - any single-mechanism move
+        // the collision model says is unsafe from the CURRENT pose).
+        SmartDashboard.putData("Testing/Elevator Go",
+            superstructure.testElevatorTo(() -> testElevatorSetpoint.getDouble(0.0))
+                .withName("Elevator Go"));
+        SmartDashboard.putData("Testing/Pivot Go",
+            superstructure.testPivotTo(() -> testPivotSetpoint.getDouble(0.0))
+                .withName("Pivot Go"));
+        SmartDashboard.putData("Testing/Intake Run",
+            superstructure.testIntakeRun(() -> testIntakeSpeed.getDouble(0.0))
+                .withName("Intake Run"));
+        SmartDashboard.putData("Testing/Intake Stop",
+            superstructure.testIntakeStop().withName("Intake Stop"));
+
+        // Restores every dashboard-tunable value (Robot Preferences widget)
+        // to its Constants default; usable while disabled.
+        SmartDashboard.putData("Testing/Reset Tunables",
+            Commands.runOnce(Tunables::resetToDefaults)
+                .ignoringDisable(true).withName("Reset Tunables"));
 
         // --- Superstructure Mechanism2d (Glass / AdvantageScope) ---
         elevatorLigament = superstructureMech.getRoot("Superstructure", 0.75, 0.05)

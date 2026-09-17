@@ -1,6 +1,7 @@
 package frc.robot;
 
 import java.util.Set;
+import java.util.function.DoubleSupplier;
 
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -11,6 +12,8 @@ import frc.robot.Constants.ElevatorConstants.PresetHeights;
 import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.subsystems.CorAl;
 import frc.robot.subsystems.Elevator;
+import frc.robot.util.Elastic;
+import frc.robot.util.Tunables;
 
 /**
  * Coordinated elevator + CorAl motion ("superstructure") command factory.
@@ -223,9 +226,11 @@ public class Superstructure {
         // mirror the approach overlap - descend toward the pose's handoff
         // height while the arm swings up. Never commands upward.
         if (currentHeight > SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            double handoff = currentHeight > SuperstructureConstants.HIGH_HANDOFF_HEIGHT
-                ? SuperstructureConstants.HIGH_HANDOFF_HEIGHT
-                : SuperstructureConstants.MID_HANDOFF_HEIGHT;
+            // Handoff heights are live-tunable (Tunables -> Preferences) and
+            // read here at plan time, so a dashboard edit applies to the very
+            // next button press.
+            double highHandoff = Tunables.highHandoffHeight();
+            double handoff = currentHeight > highHandoff ? highHandoff : Tunables.midHandoffHeight();
             double escapeFloor = Math.min(handoff, currentHeight);
             return Commands.runOnce(() -> {
                     elevator.setPosition(escapeFloor);
@@ -297,9 +302,8 @@ public class Superstructure {
         // the pose's handoff height, so the mechanism sweeps in behind the
         // second-stage tube instead of into it
         if (targetHeight > SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
-            double handoff = targetHeight > SuperstructureConstants.HIGH_HANDOFF_HEIGHT
-                ? SuperstructureConstants.HIGH_HANDOFF_HEIGHT
-                : SuperstructureConstants.MID_HANDOFF_HEIGHT;
+            double highHandoff = Tunables.highHandoffHeight();
+            double handoff = targetHeight > highHandoff ? highHandoff : Tunables.midHandoffHeight();
             return Commands.sequence(
                 Commands.runOnce(() -> elevator.setPosition(targetHeight), elevator),
                 Commands.waitUntil(() -> elevator.getCurrentPosition() >= handoff),
@@ -444,5 +448,106 @@ public class Superstructure {
             .andThen(Commands.waitSeconds(0.5))
             .andThen(Commands.runOnce(coral::stopIntake, coral))
             .handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
+    }
+
+    // ==================================================================
+    // Independent mechanism testing (Elastic Testing tab)
+    // ==================================================================
+    // These commands move ONE mechanism and leave the other exactly where
+    // it is, so each can be tuned and exercised on its own from the
+    // dashboard. They still consult the same safe-region model as the
+    // planner - but instead of moving the other mechanism out of the way,
+    // an unsafe request is simply REFUSED with a dashboard notification
+    // explaining why. Every command requires only the mechanism it moves,
+    // so the operator's manual control of the other one keeps working.
+
+    /**
+     * True if the elevator can move from its current height to the target
+     * with the arm held exactly where it is now.
+     */
+    public boolean isElevatorOnlyMoveSafe(double targetHeight) {
+        double height = elevator.getCurrentPosition();
+        if (armAtOrAboveSafe()) {
+            return true; // Free zone: clear at every height
+        }
+        if (armClearOfStaticPart()) {
+            // Low box: any height up to its roof is clear at this angle
+            return height <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT
+                && targetHeight <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT;
+        }
+        // Fully tucked: only the region below the tuck limit is clear
+        return height <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT
+            && targetHeight <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT;
+    }
+
+    /**
+     * True if the arm can rotate from its current angle to the target with
+     * the elevator held exactly where it is now.
+     */
+    public boolean isPivotOnlyMoveSafe(double targetAngle) {
+        double height = elevator.getCurrentPosition();
+        if (height <= SuperstructureConstants.ARM_TUCK_MAX_HEIGHT) {
+            return true; // Near the base every angle is clear
+        }
+        if (height <= SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT) {
+            // Inside the low box: anything except a full tuck
+            return targetAngle >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE;
+        }
+        // Above the low box: rotating below the safe angle in place sweeps
+        // into the second-stage tube, so both ends must be in the free zone
+        return armAtOrAboveSafe()
+            && targetAngle >= SAFE_ANGLE - SuperstructureConstants.SAFE_ANGLE_TOLERANCE;
+    }
+
+    /**
+     * Elevator-only move to a dashboard-supplied height (inches). Refuses,
+     * with a notification, if the arm's current angle makes the move unsafe.
+     */
+    public Command testElevatorTo(DoubleSupplier heightInches) {
+        return Commands.defer(() -> {
+            double target = heightInches.getAsDouble();
+            if (!isElevatorOnlyMoveSafe(target)) {
+                Elastic.sendNotification(new Elastic.Notification(
+                    Elastic.NotificationLevel.WARNING,
+                    "Elevator test move refused",
+                    String.format("%.1f in is not reachable with the arm at %.0f deg - raise the arm "
+                        + "(Pivot Setpoint 90 + Pivot Go, or the Raise button) first.",
+                        target, coral.getPivotAngle())));
+                return Commands.none();
+            }
+            return Commands.runOnce(() -> elevator.setPosition(target), elevator);
+        }, Set.of(elevator));
+    }
+
+    /**
+     * Pivot-only move to a dashboard-supplied angle (degrees). Refuses, with
+     * a notification, if the elevator's current height makes the move unsafe.
+     */
+    public Command testPivotTo(DoubleSupplier angleDegrees) {
+        return Commands.defer(() -> {
+            double target = angleDegrees.getAsDouble();
+            if (!isPivotOnlyMoveSafe(target)) {
+                Elastic.sendNotification(new Elastic.Notification(
+                    Elastic.NotificationLevel.WARNING,
+                    "Pivot test move refused",
+                    String.format("%.0f deg is not reachable with the elevator at %.1f in - lower the "
+                        + "elevator into the low box (below %.0f in) first, or use a preset button.",
+                        target, elevator.getCurrentPosition(),
+                        SuperstructureConstants.LOW_TRAVEL_MAX_HEIGHT)));
+                return Commands.none();
+            }
+            return Commands.runOnce(() -> coral.setPivotAngle(target), coral);
+        }, Set.of(coral));
+    }
+
+    /** Runs the intake rollers at a dashboard-supplied duty cycle (-1 to 1). */
+    public Command testIntakeRun(DoubleSupplier dutyCycle) {
+        return Commands.runOnce(() ->
+            coral.setIntakeSpeed(Math.max(-1.0, Math.min(1.0, dutyCycle.getAsDouble()))), coral);
+    }
+
+    /** Stops the intake rollers. */
+    public Command testIntakeStop() {
+        return Commands.runOnce(coral::stopIntake, coral);
     }
 }

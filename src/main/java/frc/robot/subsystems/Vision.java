@@ -10,6 +10,7 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import frc.robot.LimelightHelpers;
 import frc.robot.Superstructure;
 import frc.robot.Constants.VisionConstants;
+import frc.robot.util.Tunables;
 
 /**
  * Vision subsystem: multi-Limelight AprilTag targeting and pose estimation.
@@ -165,23 +166,25 @@ public class Vision extends SubsystemBase {
      * (approached backward via the rear-facing camera).
      */
     public Optional<TrackingGoal> getTrackingGoal(int tagId) {
+        // Distances/offsets are live-tunable from the dashboard (Tunables ->
+        // WPILib Preferences), so a measured flush distance can be dialed in
+        // on the practice field without a redeploy.
         if (isReefTag(tagId)) {
             switch (goalSupplier.get()) {
                 case CORAL_L1:
-                    return Optional.of(new TrackingGoal(0.0, VisionConstants.L1_SCORE_DISTANCE));
+                    return Optional.of(new TrackingGoal(0.0, Tunables.l1ScoreDistance()));
                 case CORAL_L2:
                 case CORAL_L3:
                 case CORAL_L4:
-                    double lateral = branchSide == BranchSide.LEFT
-                        ? VisionConstants.REEF_BRANCH_OFFSET
-                        : -VisionConstants.REEF_BRANCH_OFFSET;
-                    return Optional.of(new TrackingGoal(lateral, VisionConstants.REEF_FLUSH_DISTANCE));
+                    double branchOffset = Tunables.reefBranchOffset();
+                    double lateral = branchSide == BranchSide.LEFT ? branchOffset : -branchOffset;
+                    return Optional.of(new TrackingGoal(lateral, Tunables.reefFlushDistance()));
                 default:
-                    return Optional.of(new TrackingGoal(0.0, VisionConstants.REEF_FLUSH_DISTANCE));
+                    return Optional.of(new TrackingGoal(0.0, Tunables.reefFlushDistance()));
             }
         }
         if (isCoralStationTag(tagId)) {
-            return Optional.of(new TrackingGoal(0.0, VisionConstants.STATION_FLUSH_DISTANCE));
+            return Optional.of(new TrackingGoal(0.0, Tunables.stationFlushDistance()));
         }
         // Barge (4, 5, 14, 15) and processor (3, 16): intentionally blank
         return Optional.empty();

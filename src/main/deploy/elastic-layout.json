@@ -9,246 +9,193 @@
         "containers": [
           {
             "title": "FMSInfo",
-            "x": 0.0,
-            "y": 0.0,
-            "width": 384.0,
-            "height": 128.0,
+            "x": 0.0, "y": 0.0, "width": 384.0, "height": 128.0,
             "type": "FMSInfo",
-            "properties": {
-              "topic": "/FMSInfo",
-              "period": 0.033
-            }
+            "properties": { "topic": "/FMSInfo", "period": 0.033 }
           },
           {
             "title": "Battery Voltage",
-            "x": 384.0,
-            "y": 0.0,
-            "width": 256.0,
-            "height": 128.0,
+            "x": 384.0, "y": 0.0, "width": 256.0, "height": 128.0,
             "type": "Voltage View",
             "properties": {
-              "topic": "/SmartDashboard/Battery Voltage",
-              "period": 0.033,
-              "min_value": 4.0,
-              "max_value": 13.0,
-              "divisions": 5,
-              "inverted": false,
-              "orientation": "horizontal"
+              "topic": "/SmartDashboard/Battery Voltage", "period": 0.033,
+              "min_value": 4.0, "max_value": 13.0, "divisions": 5,
+              "inverted": false, "orientation": "horizontal"
             }
           },
           {
-            "title": "CAN Utilization",
-            "x": 640.0,
-            "y": 0.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "CAN Utilization %",
+            "x": 640.0, "y": 0.0, "width": 256.0, "height": 128.0,
             "type": "Number Bar",
             "properties": {
-              "topic": "/SmartDashboard/CAN Utilization",
-              "period": 0.033,
-              "min_value": 0.0,
-              "max_value": 100.0,
-              "divisions": 5,
-              "inverted": false,
-              "orientation": "horizontal"
+              "topic": "/SmartDashboard/CAN Utilization", "period": 0.033,
+              "min_value": 0.0, "max_value": 100.0, "divisions": 5,
+              "inverted": false, "orientation": "horizontal"
             }
           },
           {
             "title": "Alerts",
-            "x": 896.0,
-            "y": 0.0,
-            "width": 512.0,
-            "height": 384.0,
+            "x": 896.0, "y": 0.0, "width": 512.0, "height": 256.0,
             "type": "Alerts",
+            "properties": { "topic": "/SmartDashboard/Alerts", "period": 0.033 }
+          },
+          {
+            "title": "Zero Elevator (disabled, at base)",
+            "x": 1408.0, "y": 0.0, "width": 384.0, "height": 128.0,
+            "type": "Command",
             "properties": {
-              "topic": "/SmartDashboard/Alerts",
-              "period": 0.033
+              "topic": "/SmartDashboard/Zero Elevator", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
             }
           },
           {
-            "title": "Zero Elevator",
-            "x": 0.0,
-            "y": 128.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "Zero CorAl Pivot (disabled, at base)",
+            "x": 1408.0, "y": 128.0, "width": 384.0, "height": 128.0,
             "type": "Command",
             "properties": {
-              "topic": "/SmartDashboard/Zero Elevator",
-              "period": 0.033,
-              "show_type": false,
-              "maximize_button_space": true
-            }
-          },
-          {
-            "title": "Zero CorAl Pivot",
-            "x": 256.0,
-            "y": 128.0,
-            "width": 256.0,
-            "height": 128.0,
-            "type": "Command",
-            "properties": {
-              "topic": "/SmartDashboard/Zero CorAl Pivot",
-              "period": 0.033,
-              "show_type": false,
-              "maximize_button_space": true
+              "topic": "/SmartDashboard/Zero CorAl Pivot", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
             }
           },
           {
             "title": "Through Bore OK",
-            "x": 512.0,
-            "y": 128.0,
-            "width": 128.0,
-            "height": 128.0,
+            "x": 0.0, "y": 128.0, "width": 256.0, "height": 128.0,
             "type": "Boolean Box",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Through Bore OK",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
+              "topic": "/SmartDashboard/CorAl/Through Bore OK", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
             }
           },
           {
             "title": "Game Piece",
-            "x": 640.0,
-            "y": 128.0,
-            "width": 128.0,
-            "height": 128.0,
+            "x": 256.0, "y": 128.0, "width": 256.0, "height": 128.0,
             "type": "Boolean Box",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Game Piece",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
-            }
-          },
-          {
-            "title": "LL funnel Target",
-            "x": 0.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Boolean Box",
-            "properties": {
-              "topic": "/SmartDashboard/Vision/funnel Has Target",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
-            }
-          },
-          {
-            "title": "LL barge Target",
-            "x": 128.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Boolean Box",
-            "properties": {
-              "topic": "/SmartDashboard/Vision/barge Has Target",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
-            }
-          },
-          {
-            "title": "LL reef Target",
-            "x": 256.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Boolean Box",
-            "properties": {
-              "topic": "/SmartDashboard/Vision/reef Has Target",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
-            }
-          },
-          {
-            "title": "Elevator Height",
-            "x": 384.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Text Display",
-            "properties": {
-              "topic": "/SmartDashboard/Elevator/Height",
-              "period": 0.033,
-              "show_submit_button": false
-            }
-          },
-          {
-            "title": "CorAl Angle",
-            "x": 512.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Text Display",
-            "properties": {
-              "topic": "/SmartDashboard/CorAl/Angle",
-              "period": 0.033,
-              "show_submit_button": false
+              "topic": "/SmartDashboard/CorAl/Game Piece", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
             }
           },
           {
             "title": "Heading (deg)",
-            "x": 640.0,
-            "y": 256.0,
-            "width": 128.0,
-            "height": 128.0,
+            "x": 512.0, "y": 128.0, "width": 384.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Swerve/Heading",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Swerve/Heading", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "Reef Camera",
-            "x": 0.0,
-            "y": 384.0,
-            "width": 384.0,
-            "height": 256.0,
+            "title": "Funnel Camera (rear)",
+            "x": 0.0, "y": 256.0, "width": 512.0, "height": 384.0,
             "type": "Camera Stream",
             "properties": {
-              "topic": "/CameraPublisher/limelight-reef",
-              "period": 0.033,
+              "topic": "/CameraPublisher/limelight-funnel", "period": 0.033,
               "rotation_turns": 0
             }
           },
           {
-            "title": "LED State",
-            "x": 384.0,
-            "y": 384.0,
-            "width": 256.0,
-            "height": 128.0,
-            "type": "Text Display",
+            "title": "Barge Camera",
+            "x": 512.0, "y": 256.0, "width": 512.0, "height": 384.0,
+            "type": "Camera Stream",
             "properties": {
-              "topic": "/SmartDashboard/LEDs/State",
-              "period": 0.033,
-              "show_submit_button": false
+              "topic": "/CameraPublisher/limelight-barge", "period": 0.033,
+              "rotation_turns": 0
+            }
+          },
+          {
+            "title": "Reef Camera",
+            "x": 1024.0, "y": 256.0, "width": 512.0, "height": 384.0,
+            "type": "Camera Stream",
+            "properties": {
+              "topic": "/CameraPublisher/limelight-reef", "period": 0.033,
+              "rotation_turns": 0
+            }
+          },
+          {
+            "title": "Funnel Sees Tag",
+            "x": 1536.0, "y": 256.0, "width": 256.0, "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/Vision/funnel Has Target", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
+            }
+          },
+          {
+            "title": "Barge Sees Tag",
+            "x": 1536.0, "y": 384.0, "width": 256.0, "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/Vision/barge Has Target", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
+            }
+          },
+          {
+            "title": "Reef Sees Tag",
+            "x": 1536.0, "y": 512.0, "width": 256.0, "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/Vision/reef Has Target", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
             }
           },
           {
             "title": "Auto Mode",
-            "x": 384.0,
-            "y": 512.0,
-            "width": 384.0,
-            "height": 128.0,
+            "x": 0.0, "y": 640.0, "width": 384.0, "height": 128.0,
             "type": "ComboBox Chooser",
             "properties": {
-              "topic": "/SmartDashboard/Auto Mode",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Auto Mode", "period": 0.033,
               "sort_options": false
+            }
+          },
+          {
+            "title": "Elevator Height (in)",
+            "x": 384.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/Elevator/Height", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "CorAl Angle (deg)",
+            "x": 640.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/Angle", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "LED State",
+            "x": 896.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/LEDs/State", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "Match Time",
+            "x": 1152.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Match Time",
+            "properties": {
+              "topic": "/SmartDashboard/Match Time", "period": 0.033,
+              "time_display_mode": "Minutes and Seconds",
+              "red_start_time": 15, "yellow_start_time": 30
+            }
+          },
+          {
+            "title": "Branch Side",
+            "x": 1408.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/Vision/Branch Side", "period": 0.033,
+              "show_submit_button": false
             }
           }
         ]
@@ -261,106 +208,117 @@
         "containers": [
           {
             "title": "Auto Mode",
-            "x": 0.0,
-            "y": 0.0,
-            "width": 384.0,
-            "height": 128.0,
+            "x": 0.0, "y": 0.0, "width": 512.0, "height": 128.0,
             "type": "ComboBox Chooser",
             "properties": {
-              "topic": "/SmartDashboard/Auto Mode",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Auto Mode", "period": 0.033,
               "sort_options": false
             }
           },
           {
             "title": "Match Time",
-            "x": 0.0,
-            "y": 128.0,
-            "width": 384.0,
-            "height": 256.0,
+            "x": 0.0, "y": 128.0, "width": 512.0, "height": 256.0,
             "type": "Match Time",
             "properties": {
-              "topic": "/SmartDashboard/Match Time",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Match Time", "period": 0.033,
               "time_display_mode": "Minutes and Seconds",
-              "red_start_time": 15,
-              "yellow_start_time": 30
+              "red_start_time": 15, "yellow_start_time": 30
             }
           },
           {
             "title": "Game Piece",
-            "x": 0.0,
-            "y": 384.0,
-            "width": 384.0,
-            "height": 256.0,
+            "x": 0.0, "y": 384.0, "width": 512.0, "height": 256.0,
             "type": "Boolean Box",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Game Piece",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
+              "topic": "/SmartDashboard/CorAl/Game Piece", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
+            }
+          },
+          {
+            "title": "LED State",
+            "x": 0.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/LEDs/State", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "Vision Tracking",
+            "x": 256.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/Swerve/Vision Tracking", "period": 0.033,
+              "true_color": 4278238420, "false_color": 4288585374,
+              "true_icon": "None", "false_icon": "None"
             }
           },
           {
             "title": "Field",
-            "x": 384.0,
-            "y": 0.0,
-            "width": 768.0,
-            "height": 512.0,
+            "x": 512.0, "y": 0.0, "width": 1024.0, "height": 512.0,
             "type": "Field",
             "properties": {
-              "topic": "/SmartDashboard/Field",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Field", "period": 0.033,
               "field_game": "Reefscape",
-              "robot_width": 0.927,
-              "robot_length": 0.927,
-              "show_other_objects": true,
-              "show_trajectories": true,
+              "robot_width": 0.927, "robot_length": 0.927,
+              "show_other_objects": true, "show_trajectories": true,
               "field_rotation": 0.0,
-              "robot_color": 4294198070,
-              "trajectory_color": 4294967295,
+              "robot_color": 4294198070, "trajectory_color": 4294967295,
               "show_robot_outside_widget": true
             }
           },
           {
             "title": "Heading (deg)",
-            "x": 384.0,
-            "y": 512.0,
-            "width": 256.0,
-            "height": 128.0,
+            "x": 512.0, "y": 512.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Swerve/Heading",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Swerve/Heading", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "Speed (m-s)",
-            "x": 640.0,
-            "y": 512.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "Speed (m/s)",
+            "x": 768.0, "y": 512.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Swerve/Speed",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Swerve/Speed", "period": 0.033,
               "show_submit_button": false
+            }
+          },
+          {
+            "title": "Elevator Height (in)",
+            "x": 1024.0, "y": 512.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/Elevator/Height", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "CorAl Angle (deg)",
+            "x": 1280.0, "y": 512.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/Angle", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "Battery Voltage",
+            "x": 512.0, "y": 640.0, "width": 384.0, "height": 128.0,
+            "type": "Voltage View",
+            "properties": {
+              "topic": "/SmartDashboard/Battery Voltage", "period": 0.033,
+              "min_value": 4.0, "max_value": 13.0, "divisions": 5,
+              "inverted": false, "orientation": "horizontal"
             }
           },
           {
             "title": "Alerts",
-            "x": 1152.0,
-            "y": 0.0,
-            "width": 256.0,
-            "height": 512.0,
+            "x": 1536.0, "y": 0.0, "width": 256.0, "height": 768.0,
             "type": "Alerts",
-            "properties": {
-              "topic": "/SmartDashboard/Alerts",
-              "period": 0.033
-            }
+            "properties": { "topic": "/SmartDashboard/Alerts", "period": 0.033 }
           }
         ]
       }
@@ -372,180 +330,141 @@
         "containers": [
           {
             "title": "Field",
-            "x": 0.0,
-            "y": 0.0,
-            "width": 768.0,
-            "height": 512.0,
+            "x": 0.0, "y": 0.0, "width": 896.0, "height": 512.0,
             "type": "Field",
             "properties": {
-              "topic": "/SmartDashboard/Field",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Field", "period": 0.033,
               "field_game": "Reefscape",
-              "robot_width": 0.927,
-              "robot_length": 0.927,
-              "show_other_objects": true,
-              "show_trajectories": true,
+              "robot_width": 0.927, "robot_length": 0.927,
+              "show_other_objects": true, "show_trajectories": true,
               "field_rotation": 0.0,
-              "robot_color": 4294198070,
-              "trajectory_color": 4294967295,
+              "robot_color": 4294198070, "trajectory_color": 4294967295,
               "show_robot_outside_widget": true
             }
           },
           {
             "title": "Match Time",
-            "x": 768.0,
-            "y": 0.0,
-            "width": 256.0,
-            "height": 256.0,
+            "x": 896.0, "y": 0.0, "width": 384.0, "height": 256.0,
             "type": "Match Time",
             "properties": {
-              "topic": "/SmartDashboard/Match Time",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Match Time", "period": 0.033,
               "time_display_mode": "Minutes and Seconds",
-              "red_start_time": 15,
-              "yellow_start_time": 30
+              "red_start_time": 15, "yellow_start_time": 30
             }
           },
           {
             "title": "Game Piece",
-            "x": 1024.0,
-            "y": 0.0,
-            "width": 256.0,
-            "height": 256.0,
+            "x": 1280.0, "y": 0.0, "width": 512.0, "height": 256.0,
             "type": "Boolean Box",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Game Piece",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
+              "topic": "/SmartDashboard/CorAl/Game Piece", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
             }
           },
           {
             "title": "Swerve Drive",
-            "x": 768.0,
-            "y": 256.0,
-            "width": 256.0,
-            "height": 256.0,
+            "x": 896.0, "y": 256.0, "width": 384.0, "height": 256.0,
             "type": "SwerveDrive",
             "properties": {
-              "topic": "/SmartDashboard/Swerve Drive",
-              "period": 0.033,
-              "show_robot_rotation": true,
-              "rotation_unit": "Degrees"
+              "topic": "/SmartDashboard/Swerve Drive", "period": 0.033,
+              "show_robot_rotation": true, "rotation_unit": "Degrees"
             }
           },
           {
             "title": "Vision Tracking",
-            "x": 1024.0,
-            "y": 256.0,
-            "width": 256.0,
-            "height": 128.0,
+            "x": 1280.0, "y": 256.0, "width": 256.0, "height": 128.0,
             "type": "Boolean Box",
             "properties": {
-              "topic": "/SmartDashboard/Swerve/Vision Tracking",
-              "period": 0.033,
-              "true_color": 4278238420,
-              "false_color": 4288585374,
-              "true_icon": "None",
-              "false_icon": "None"
+              "topic": "/SmartDashboard/Swerve/Vision Tracking", "period": 0.033,
+              "true_color": 4278238420, "false_color": 4288585374,
+              "true_icon": "None", "false_icon": "None"
             }
           },
           {
-            "title": "LED State",
-            "x": 1024.0,
-            "y": 384.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "Branch Side",
+            "x": 1536.0, "y": 256.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/LEDs/State",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Vision/Branch Side", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "Elevator Height",
-            "x": 0.0,
-            "y": 512.0,
-            "width": 384.0,
-            "height": 128.0,
-            "type": "Number Bar",
+            "title": "LED State",
+            "x": 1280.0, "y": 384.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Elevator/Height",
-              "period": 0.033,
-              "min_value": 0.0,
-              "max_value": 53.0,
-              "divisions": 5,
-              "inverted": false,
-              "orientation": "horizontal"
+              "topic": "/SmartDashboard/LEDs/State", "period": 0.033,
+              "show_submit_button": false
             }
           },
           {
-            "title": "CorAl Angle",
-            "x": 384.0,
-            "y": 512.0,
-            "width": 384.0,
-            "height": 128.0,
+            "title": "Elev At Target",
+            "x": 1536.0, "y": 384.0, "width": 128.0, "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/Elevator/At Target", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
+            }
+          },
+          {
+            "title": "Arm At Target",
+            "x": 1664.0, "y": 384.0, "width": 128.0, "height": 128.0,
+            "type": "Boolean Box",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/At Target", "period": 0.033,
+              "true_color": 4283215696, "false_color": 4294198070,
+              "true_icon": "None", "false_icon": "None"
+            }
+          },
+          {
+            "title": "Elevator Height (in)",
+            "x": 0.0, "y": 512.0, "width": 512.0, "height": 128.0,
             "type": "Number Bar",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Angle",
-              "period": 0.033,
-              "min_value": 0.0,
-              "max_value": 160.0,
-              "divisions": 5,
-              "inverted": false,
-              "orientation": "horizontal"
+              "topic": "/SmartDashboard/Elevator/Height", "period": 0.033,
+              "min_value": 0.0, "max_value": 53.0, "divisions": 5,
+              "inverted": false, "orientation": "horizontal"
+            }
+          },
+          {
+            "title": "CorAl Angle (deg)",
+            "x": 512.0, "y": 512.0, "width": 384.0, "height": 128.0,
+            "type": "Number Bar",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/Angle", "period": 0.033,
+              "min_value": 0.0, "max_value": 160.0, "divisions": 5,
+              "inverted": false, "orientation": "horizontal"
             }
           },
           {
             "title": "Battery Voltage",
-            "x": 768.0,
-            "y": 512.0,
-            "width": 256.0,
-            "height": 128.0,
+            "x": 896.0, "y": 512.0, "width": 384.0, "height": 128.0,
             "type": "Voltage View",
             "properties": {
-              "topic": "/SmartDashboard/Battery Voltage",
-              "period": 0.033,
-              "min_value": 4.0,
-              "max_value": 13.0,
-              "divisions": 5,
-              "inverted": false,
-              "orientation": "horizontal"
+              "topic": "/SmartDashboard/Battery Voltage", "period": 0.033,
+              "min_value": 4.0, "max_value": 13.0, "divisions": 5,
+              "inverted": false, "orientation": "horizontal"
             }
           },
           {
-            "title": "Elevator At Target",
-            "x": 1024.0,
-            "y": 512.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Boolean Box",
+            "title": "Heading (deg)",
+            "x": 1280.0, "y": 512.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Elevator/At Target",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
+              "topic": "/SmartDashboard/Swerve/Heading", "period": 0.033,
+              "show_submit_button": false
             }
           },
           {
-            "title": "CorAl At Target",
-            "x": 1152.0,
-            "y": 512.0,
-            "width": 128.0,
-            "height": 128.0,
-            "type": "Boolean Box",
+            "title": "Speed (m/s)",
+            "x": 1536.0, "y": 512.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/At Target",
-              "period": 0.033,
-              "true_color": 4283215696,
-              "false_color": 4294198070,
-              "true_icon": "None",
-              "false_icon": "None"
+              "topic": "/SmartDashboard/Swerve/Speed", "period": 0.033,
+              "show_submit_button": false
             }
           }
         ]
@@ -558,192 +477,190 @@
         "containers": [
           {
             "title": "Command Scheduler",
-            "x": 0.0,
-            "y": 0.0,
-            "width": 384.0,
-            "height": 384.0,
+            "x": 0.0, "y": 0.0, "width": 384.0, "height": 384.0,
             "type": "Scheduler",
-            "properties": {
-              "topic": "/SmartDashboard/Command Scheduler",
-              "period": 0.033
-            }
+            "properties": { "topic": "/SmartDashboard/Command Scheduler", "period": 0.033 }
           },
           {
             "title": "Elevator Subsystem",
-            "x": 0.0,
-            "y": 384.0,
-            "width": 384.0,
-            "height": 128.0,
+            "x": 0.0, "y": 384.0, "width": 384.0, "height": 128.0,
             "type": "Subsystem",
-            "properties": {
-              "topic": "/SmartDashboard/Elevator Subsystem",
-              "period": 0.033
-            }
+            "properties": { "topic": "/SmartDashboard/Elevator Subsystem", "period": 0.033 }
           },
           {
             "title": "CorAl Subsystem",
-            "x": 0.0,
-            "y": 512.0,
-            "width": 384.0,
-            "height": 128.0,
+            "x": 0.0, "y": 512.0, "width": 384.0, "height": 128.0,
             "type": "Subsystem",
+            "properties": { "topic": "/SmartDashboard/CorAl Subsystem", "period": 0.033 }
+          },
+          {
+            "title": "Reset Tunables to Defaults",
+            "x": 0.0, "y": 640.0, "width": 384.0, "height": 128.0,
+            "type": "Command",
             "properties": {
-              "topic": "/SmartDashboard/CorAl Subsystem",
-              "period": 0.033
+              "topic": "/SmartDashboard/Testing/Reset Tunables", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
             }
           },
           {
-            "title": "Elevator Left Current",
-            "x": 384.0,
-            "y": 0.0,
-            "width": 384.0,
-            "height": 256.0,
-            "type": "Graph",
+            "title": "Elevator Setpoint (in)",
+            "x": 384.0, "y": 0.0, "width": 384.0, "height": 128.0,
+            "type": "Number Slider",
             "properties": {
-              "topic": "/SmartDashboard/Elevator/Left Current",
-              "period": 0.033,
-              "time_displayed": 5.0,
-              "color": 4278238420,
-              "line_width": 2.0
+              "topic": "/SmartDashboard/Testing/Elevator Setpoint (in)", "period": 0.033,
+              "min_value": 0.0, "max_value": 53.0, "divisions": 5,
+              "update_continuously": false
             }
           },
           {
-            "title": "Elevator Right Current",
-            "x": 768.0,
-            "y": 0.0,
-            "width": 384.0,
-            "height": 256.0,
-            "type": "Graph",
+            "title": "Elevator Go (elevator only)",
+            "x": 768.0, "y": 0.0, "width": 256.0, "height": 128.0,
+            "type": "Command",
             "properties": {
-              "topic": "/SmartDashboard/Elevator/Right Current",
-              "period": 0.033,
-              "time_displayed": 5.0,
-              "color": 4278238420,
-              "line_width": 2.0
+              "topic": "/SmartDashboard/Testing/Elevator Go", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
             }
           },
           {
-            "title": "CorAl Pivot Current",
-            "x": 384.0,
-            "y": 256.0,
-            "width": 384.0,
-            "height": 256.0,
-            "type": "Graph",
+            "title": "Pivot Setpoint (deg)",
+            "x": 384.0, "y": 128.0, "width": 384.0, "height": 128.0,
+            "type": "Number Slider",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Pivot Current",
-              "period": 0.033,
-              "time_displayed": 5.0,
-              "color": 4294198070,
-              "line_width": 2.0
+              "topic": "/SmartDashboard/Testing/Pivot Setpoint (deg)", "period": 0.033,
+              "min_value": 0.0, "max_value": 160.0, "divisions": 8,
+              "update_continuously": false
             }
           },
           {
-            "title": "CorAl Intake Current",
-            "x": 768.0,
-            "y": 256.0,
-            "width": 384.0,
-            "height": 256.0,
-            "type": "Graph",
+            "title": "Pivot Go (arm only)",
+            "x": 768.0, "y": 128.0, "width": 256.0, "height": 128.0,
+            "type": "Command",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Intake Current",
-              "period": 0.033,
-              "time_displayed": 5.0,
-              "color": 4294198070,
-              "line_width": 2.0
+              "topic": "/SmartDashboard/Testing/Pivot Go", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
             }
           },
           {
-            "title": "Elevator Velocity",
-            "x": 384.0,
-            "y": 512.0,
-            "width": 384.0,
-            "height": 128.0,
-            "type": "Graph",
+            "title": "Intake Speed (-1..1)",
+            "x": 384.0, "y": 256.0, "width": 384.0, "height": 128.0,
+            "type": "Number Slider",
             "properties": {
-              "topic": "/SmartDashboard/Elevator/Velocity",
-              "period": 0.033,
-              "time_displayed": 5.0,
-              "color": 4283215696,
-              "line_width": 2.0
+              "topic": "/SmartDashboard/Testing/Intake Speed", "period": 0.033,
+              "min_value": -1.0, "max_value": 1.0, "divisions": 8,
+              "update_continuously": false
             }
           },
           {
-            "title": "CorAl Angle",
-            "x": 768.0,
-            "y": 512.0,
-            "width": 384.0,
-            "height": 128.0,
+            "title": "Intake Run",
+            "x": 768.0, "y": 256.0, "width": 128.0, "height": 128.0,
+            "type": "Command",
+            "properties": {
+              "topic": "/SmartDashboard/Testing/Intake Run", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
+            }
+          },
+          {
+            "title": "Intake Stop",
+            "x": 896.0, "y": 256.0, "width": 128.0, "height": 128.0,
+            "type": "Command",
+            "properties": {
+              "topic": "/SmartDashboard/Testing/Intake Stop", "period": 0.033,
+              "show_type": false, "maximize_button_space": true
+            }
+          },
+          {
+            "title": "Tunables (edit + saved on robot)",
+            "x": 384.0, "y": 384.0, "width": 640.0, "height": 384.0,
+            "type": "RobotPreferences",
+            "properties": { "topic": "/Preferences", "period": 0.033 }
+          },
+          {
+            "title": "Elevator Left Current (A)",
+            "x": 1024.0, "y": 0.0, "width": 384.0, "height": 256.0,
             "type": "Graph",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/Angle",
-              "period": 0.033,
-              "time_displayed": 5.0,
-              "color": 4283215696,
-              "line_width": 2.0
+              "topic": "/SmartDashboard/Elevator/Left Current", "period": 0.033,
+              "time_displayed": 5.0, "color": 4278238420, "line_width": 2.0
+            }
+          },
+          {
+            "title": "Elevator Right Current (A)",
+            "x": 1408.0, "y": 0.0, "width": 384.0, "height": 256.0,
+            "type": "Graph",
+            "properties": {
+              "topic": "/SmartDashboard/Elevator/Right Current", "period": 0.033,
+              "time_displayed": 5.0, "color": 4278238420, "line_width": 2.0
+            }
+          },
+          {
+            "title": "CorAl Pivot Current (A)",
+            "x": 1024.0, "y": 256.0, "width": 384.0, "height": 256.0,
+            "type": "Graph",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/Pivot Current", "period": 0.033,
+              "time_displayed": 5.0, "color": 4294198070, "line_width": 2.0
+            }
+          },
+          {
+            "title": "CorAl Intake Current (A)",
+            "x": 1408.0, "y": 256.0, "width": 384.0, "height": 256.0,
+            "type": "Graph",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/Intake Current", "period": 0.033,
+              "time_displayed": 5.0, "color": 4294198070, "line_width": 2.0
             }
           },
           {
             "title": "Best Tag",
-            "x": 1152.0,
-            "y": 0.0,
-            "width": 256.0,
-            "height": 128.0,
+            "x": 1024.0, "y": 512.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Vision/Best Tag",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Vision/Best Tag", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "Vision TX",
-            "x": 1152.0,
-            "y": 128.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "Vision Distance (m)",
+            "x": 1280.0, "y": 512.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Vision/TX",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Vision/Distance", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "Vision Distance",
-            "x": 1152.0,
-            "y": 256.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "CANrange Distance (m)",
+            "x": 1536.0, "y": 512.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Vision/Distance",
-              "period": 0.033,
+              "topic": "/SmartDashboard/CorAl/CANrange Distance", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "CANrange Distance",
-            "x": 1152.0,
-            "y": 384.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "Vision TX (deg)",
+            "x": 1024.0, "y": 640.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/CorAl/CANrange Distance",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Vision/TX", "period": 0.033,
               "show_submit_button": false
             }
           },
           {
-            "title": "Swerve Speed",
-            "x": 1152.0,
-            "y": 512.0,
-            "width": 256.0,
-            "height": 128.0,
+            "title": "Elevator Height (in)",
+            "x": 1280.0, "y": 640.0, "width": 256.0, "height": 128.0,
             "type": "Text Display",
             "properties": {
-              "topic": "/SmartDashboard/Swerve/Speed",
-              "period": 0.033,
+              "topic": "/SmartDashboard/Elevator/Height", "period": 0.033,
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "CorAl Angle (deg)",
+            "x": 1536.0, "y": 640.0, "width": 256.0, "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "topic": "/SmartDashboard/CorAl/Angle", "period": 0.033,
               "show_submit_button": false
             }
           }

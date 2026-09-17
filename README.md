@@ -119,12 +119,31 @@ All dashboard integration goes through **[Elastic](https://frc-elastic.gitbook.i
 ### Tabs
 | Tab | Purpose | Highlights |
 |---|---|---|
-| **Setup** | Pre/post-match checks | FMS info, battery + CAN health, Alerts, Zero Elevator / Zero CorAl Pivot buttons, sensor and Limelight status, reef camera |
+| **Setup** | Pre/post-match checks | FMS info, battery + CAN health, Alerts, Zero Elevator / Zero CorAl Pivot buttons, sensor status, **all three Limelight camera feeds** with per-camera "sees tag" lights, auto chooser, branch side |
 | **Autonomous** | Auto selection & monitoring | Auto chooser, big match timer, **Field widget with live robot pose**, game piece indicator, Alerts |
-| **Teleop** | Driving | **Field widget**, match timer, big game-piece box, swerve module widget, elevator/pivot position bars, vision tracking state |
-| **Testing** | Diagnostics | Command scheduler, subsystem widgets, motor current/velocity graphs, vision + CANrange readouts |
+| **Teleop** | Driving | **Field widget**, match timer, big game-piece box, swerve module widget, vision tracking + **branch side**, elevator/pivot position bars |
+| **Testing** | Independent mechanism testing + diagnostics | **Elevator / Pivot / Intake setpoint sliders with Go/Run/Stop buttons**, **Tunables (Robot Preferences) editor**, command scheduler, subsystem widgets, current graphs, vision + CANrange readouts |
 
-The robot **switches Elastic to the right tab automatically** on mode changes (disabled → Setup, auto → Autonomous, teleop → Teleop, test → Testing) via ElasticLib ([util/Elastic.java](src/main/java/frc/robot/util/Elastic.java)).
+Every tab fits 14 × 6 grid cells (1792 × 768 px) so nothing hides behind the Driver Station window docked at the bottom of the screen. The robot **switches Elastic to the right tab automatically** on mode changes (disabled → Setup, auto → Autonomous, teleop → Teleop, test → Testing) via ElasticLib ([util/Elastic.java](src/main/java/frc/robot/util/Elastic.java)).
+
+### Testing one mechanism at a time
+The Testing tab drives each mechanism **independently** — set the *Elevator Setpoint* slider and press *Elevator Go*, and only the elevator moves; the arm stays exactly where it is (and the operator's manual stick for the other mechanism keeps working). The same goes for *Pivot Setpoint / Pivot Go* and *Intake Speed / Intake Run / Intake Stop*.
+
+These single-mechanism moves still consult the collision model in [Superstructure.java](src/main/java/frc/robot/Superstructure.java), but instead of moving the *other* mechanism out of the way (as the preset buttons do), an unsafe request is simply **refused with a toast notification** that says why — e.g. "Elevator test move refused: 30.0 in is not reachable with the arm at 0 deg — raise the arm first". Put the arm at 90° (Pivot Setpoint 90 → Pivot Go) and the elevator can be run through its full travel on its own.
+
+### Live tuning without redeploying (Tunables)
+Empirically measured numbers live in [util/Tunables.java](src/main/java/frc/robot/util/Tunables.java), backed by **WPILib Preferences**: they appear in the Testing tab's *Tunables* widget, edits apply on the next loop (or next button press), and the roboRIO **persists them to disk** — they survive reboots, power cycles, *and* code deploys. The values in `Constants.java` are only the factory defaults; *Reset Tunables to Defaults* restores them.
+
+| Tunable | Default | Used by |
+|---|---|---|
+| Vision – Reef Flush Distance (m) | 0.45 | L2–L4 + algae reef alignment (camera-read Z with bumpers flush — measure it: push the robot flush, copy `Vision Distance`) |
+| Vision – Station Flush Distance (m) | 0.45 | Coral station alignment (rear camera) |
+| Vision – L1 Score Distance (m) | 1.0 | L1 standoff |
+| Vision – Reef Branch Offset (m) | 0.165 | Left/right branch centering |
+| Vision – Tracking Distance / Rotation kP | 1.5 / 0.06 | Tracking aggressiveness |
+| Superstructure – L3 Mid / L4 High Handoff Height (in) | 25 / 40 | Where the arm starts its final rotation during the L3 / L4 climb |
+
+Mechanism contact geometry (tuck / low-box limits) and motor-controller gains are deliberately **not** tunables: the former are measured physical facts, the latter are applied at boot and tuned live in the REV Hardware Client / Phoenix Tuner X.
 
 ### One-time setup on each drive station laptop
 1. Install Elastic (2025.2 or newer) and connect to the robot.

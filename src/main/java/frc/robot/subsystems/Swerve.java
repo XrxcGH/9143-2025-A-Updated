@@ -32,6 +32,7 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 
 import frc.robot.Constants.AutoConstants;
 import frc.robot.Constants.VisionConstants;
+import frc.robot.util.Tunables;
 import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
 
 /**
@@ -404,9 +405,11 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			// Front camera: vy negated (camera X is right-positive, robot Y is
 			// left-positive); rear camera mirrors vx and vy via facingSign.
 			// Omega is never mirrored (see the class comment above).
-			double vx = tag.facingSign * distanceError * VisionConstants.TrackingGains.DISTANCE_kP;
-			double vy = tag.facingSign * -lateralError * VisionConstants.TrackingGains.DISTANCE_kP;
-			double omega = -angleError * VisionConstants.TrackingGains.ROTATION_kP;
+			// Gains are live-tunable from the dashboard (Tunables -> Preferences)
+			double distanceKp = Tunables.trackingDistanceKp();
+			double vx = tag.facingSign * distanceError * distanceKp;
+			double vy = tag.facingSign * -lateralError * distanceKp;
+			double omega = -angleError * Tunables.trackingRotationKp();
 
 			// Clamp velocities to safe tracking limits
 			vx = Math.min(Math.max(vx, -VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY), VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);

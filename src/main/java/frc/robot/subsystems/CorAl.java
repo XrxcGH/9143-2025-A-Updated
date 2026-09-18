@@ -96,6 +96,10 @@ public class CorAl extends SubsystemBase {
     // Through bore calibration: raw reading at the zero position
     private double throughBoreOffset = 0;
 
+    // Landing correction (see PIVOT_LANDING_* in CorAlConstants)
+    private final Timer landingStillTimer = new Timer();
+    private int landingCorrections = 0;
+
     // ------------------------------------------------------------------
     // The through bore is an ABSOLUTE encoder, but it used to be treated as
     // a relative one: every code start took "wherever the arm is now" as
@@ -401,6 +405,8 @@ public class CorAl extends SubsystemBase {
         currentTargetAngle = targetAngle;
         positionControlActive = true;
         manualControlActive = false;
+        landingCorrections = 0;
+        landingStillTimer.restart();
 
         // Seed the motor sensor from the absolute encoder before starting the
         // move, so the profile targets the true mechanism angle with no
@@ -418,6 +424,41 @@ public class CorAl extends SubsystemBase {
         }
 
         pivotMotor.setControl(positionRequest.withPosition(targetAngle / 360.0));
+    }
+
+    /**
+     * Landing correction: see PIVOT_LANDING_* in CorAlConstants. The rotor is
+     * where it was told to be and the real arm, through the chain's slack, is
+     * not - re-seed the rotor from the through bore and re-issue the same
+     * target, so the closed loop drives the REAL arm onto it.
+     */
+    private void correctLanding() {
+        if (!positionControlActive || !DriverStation.isEnabled() || !isThroughBoreConnected()) {
+            landingStillTimer.restart();
+            return;
+        }
+        if (Math.abs(getPivotVelocity()) > CorAlConstants.PIVOT_LANDING_STILL_DEG_S) {
+            landingStillTimer.restart();
+            return;
+        }
+        if (!landingStillTimer.hasElapsed(CorAlConstants.PIVOT_LANDING_STILL_SECONDS)
+                || landingCorrections >= CorAlConstants.PIVOT_LANDING_MAX_CORRECTIONS) {
+            return;
+        }
+        double actual = getThroughBoreAngle();
+        double error = Math.abs(currentTargetAngle - actual);
+        if (error <= CorAlConstants.PIVOT_LANDING_TOLERANCE_DEG || error > CorAlConstants.PIVOT_LANDING_MAX_DEG) {
+            return;
+        }
+        landingCorrections++;
+        landingStillTimer.restart();
+        pivotMotor.setPosition(actual / 360.0, 0);
+        pivotMotor.setControl(positionRequest.withPosition(currentTargetAngle / 360.0));
+    }
+
+    /** How many landing corrections the current target has had (0-PIVOT_LANDING_MAX_CORRECTIONS). */
+    public int getLandingCorrections() {
+        return landingCorrections;
     }
 
     /**
@@ -744,6 +785,8 @@ public class CorAl extends SubsystemBase {
         if (!bootReferenceResolved && DriverStation.isDisabled() && isThroughBoreConnected()) {
             resolveBootReference();
         }
+
+        correctLanding();
 
         // Keep the motor sensor honest against the absolute encoder, but only
         // while no closed-loop move is holding a target - re-seeding mid-move

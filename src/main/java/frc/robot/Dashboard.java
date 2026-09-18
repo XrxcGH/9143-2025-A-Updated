@@ -379,6 +379,12 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Hold Volts",
             elevator.getLeftOutput() * ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE - elevator.staticFeedforward());
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
+        // kG the way that does not depend on friction: the mean of the
+        // applied volts at cruise going up and going down (NaN until both
+        // directions have been seen - run one long move each way).
+        SmartDashboard.putNumber("Elevator/Cruise Volts Up", elevator.getCruiseVoltsUp());
+        SmartDashboard.putNumber("Elevator/Cruise Volts Down", elevator.getCruiseVoltsDown());
+        SmartDashboard.putNumber("Elevator/kG From Cruise", elevator.getKgFromCruise());
         // Calibration in effect on the controllers (the tunables may still be pending)
         SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());
         SmartDashboard.putNumber("Elevator/Height At Hard Stop", elevator.zeroHeight());

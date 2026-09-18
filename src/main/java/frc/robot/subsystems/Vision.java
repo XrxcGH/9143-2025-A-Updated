@@ -299,6 +299,16 @@ public class Vision extends SubsystemBase {
                 return TagClass.CORAL_STATION;
             }
         }
+        for (int tag : VisionConstants.BARGE_TAGS) {
+            if (tag == tagId) {
+                return TagClass.BARGE;
+            }
+        }
+        for (int tag : VisionConstants.PROCESSOR_TAGS) {
+            if (tag == tagId) {
+                return TagClass.PROCESSOR;
+            }
+        }
         return TagClass.NONE;
     }
 
@@ -414,6 +424,12 @@ public class Vision extends SubsystemBase {
                 }
             case CORAL_STATION:
                 return Optional.of(new TrackingGoal(-Tunables.stationFlushDistance(), 0.0));
+            // Barge and processor: centered on the tag and square to it,
+            // whichever branch trigger the driver is holding.
+            case BARGE:
+                return Optional.of(new TrackingGoal(Tunables.bargeScoreDistance(), 0.0));
+            case PROCESSOR:
+                return Optional.of(new TrackingGoal(Tunables.processorDistance(), 0.0));
             default:
                 return Optional.empty();
         }
@@ -442,10 +458,26 @@ public class Vision extends SubsystemBase {
      * reef tag at 4 m and hijack a scoring alignment.
      */
     private boolean tagMatchesCurrentGoal(TagClass tagClass) {
-        if (goalSupplier.get() == Superstructure.Goal.STOW) {
-            return tagClass == TagClass.CORAL_STATION;
+        switch (goalSupplier.get()) {
+            case STOW:
+                return tagClass == TagClass.CORAL_STATION;
+            // Carrying an algae, or at the barge pose: the next stop is the
+            // barge or the processor - whichever of the two is in view.
+            case ALGAE_CARRY:
+            case ALGAE_SCORE:
+                return tagClass == TagClass.BARGE || tagClass == TagClass.PROCESSOR;
+            default:
+                return tagClass == TagClass.REEF;
         }
-        return tagClass == TagClass.REEF;
+    }
+
+    private static boolean cameraSupplies(int cameraIndex, TagClass tagClass) {
+        for (TagClass allowed : VisionConstants.LIMELIGHT_TRACKING_CLASSES[cameraIndex]) {
+            if (allowed == tagClass) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void latch(AprilTagTarget target, long sampleStamp, double captureTime, double fieldTrueYawDegrees,
@@ -588,9 +620,8 @@ public class Vision extends SubsystemBase {
         boolean latchedSeen = false;
 
         for (int i = 0; i < limelightTableNames.length; i++) {
-            TagClass allowedClass = VisionConstants.LIMELIGHT_TRACKING_CLASSES[i];
-            if (allowedClass == TagClass.NONE) {
-                continue; // camera not used for alignment
+            if (!VisionConstants.LIMELIGHT_POSES[i].measured) {
+                continue; // alignment needs the lens pose: an unmeasured camera supplies nothing
             }
             String limelightName = limelightTableNames[i];
             if (!LimelightHelpers.getTV(limelightName)) {
@@ -598,8 +629,8 @@ public class Vision extends SubsystemBase {
             }
             int tagId = (int) LimelightHelpers.getFiducialID(limelightName);
             TagClass tagClass = classOf(tagId);
-            if (tagClass != allowedClass) {
-                continue; // wrong class for this camera (or barge/processor)
+            if (tagClass == TagClass.NONE || !cameraSupplies(i, tagClass)) {
+                continue; // not a class this camera is mounted for
             }
             // Raw camera-space array: an empty array (no 3D solve / topic
             // absent) or an all-zero one (3D solve disabled) must not become

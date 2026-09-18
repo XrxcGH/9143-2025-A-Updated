@@ -94,6 +94,8 @@ public class Elevator extends SubsystemBase {
     private double appliedProfileError;
     /** True while an edited travel ratio / hard-stop height is waiting for the carriage to be at its base. */
     private boolean travelRatioChangePending = false;
+    private double cruiseVoltsUp = Double.NaN;
+    private double cruiseVoltsDown = Double.NaN;
     /** Paces the tunable poll so nine Preferences reads do not run every loop. */
     private final Timer tunablePollTimer = new Timer();
     private static final double TUNABLE_POLL_SECONDS = 0.5;
@@ -207,13 +209,6 @@ public class Elevator extends SubsystemBase {
             .uvwMeasurementPeriod(ElevatorConstants.ELEVATOR_VELOCITY_PERIOD_MS)
             .uvwAverageDepth(ElevatorConstants.ELEVATOR_VELOCITY_AVG_DEPTH);
 
-        // Height and velocity frames at 10 ms instead of the 20 ms default:
-        // every Superstructure gate and clamp reads these on the roboRIO, and
-        // at 40 in/s a 20 ms-old height is 0.8 in out of date.
-        leaderConfig.signals
-            .primaryEncoderPositionPeriodMs(ElevatorConstants.ELEVATOR_STATUS_PERIOD_MS)
-            .primaryEncoderVelocityPeriodMs(ElevatorConstants.ELEVATOR_STATUS_PERIOD_MS);
-
         // Closed-loop PID gains (slot 0). Error units are inches after the
         // conversion factors above; output is duty cycle.
         leaderConfig.closedLoop
@@ -275,6 +270,15 @@ public class Elevator extends SubsystemBase {
         followerConfig.follow(ElevatorConstants.ELEVATOR_LEFT_ID,
             ElevatorConstants.ELEVATOR_RIGHT_OPPOSES_LEFT);
 
+        // LEADER ONLY, and therefore after the follower copy above (a config
+        // keeps the shortest period ever set on it, and apply() copies it).
+        // Height and velocity frames at 10 ms instead of the 20 ms default:
+        // every Superstructure gate and clamp reads these on the roboRIO, and
+        // at 40 in/s a 20 ms-old height is 0.8 in out of date.
+        leaderConfig.signals
+            .primaryEncoderPositionPeriodMs(ElevatorConstants.ELEVATOR_STATUS_PERIOD_MS)
+            .primaryEncoderVelocityPeriodMs(ElevatorConstants.ELEVATOR_STATUS_PERIOD_MS);
+
         leftMotor.configure(leaderConfig, resetMode, PersistMode.kPersistParameters);
         rightMotor.configure(followerConfig, resetMode, PersistMode.kPersistParameters);
     }
@@ -288,8 +292,47 @@ public class Elevator extends SubsystemBase {
      * at its base, where the encoders are then re-referenced against the
      * hard stop; until then they wait and the Dashboard shows an alert.
      */
+    /**
+     * kG measured the way that does not depend on friction or on the
+     * configured gains: the applied voltage at steady cruise going UP is
+     * kG + kV x v + friction, going DOWN it is kG - kV x v - friction, so
+     * their mean is kG. (The hold voltage cannot tell you: inside the static
+     * friction band it only echoes the gains already configured.) Run a long
+     * move each way - Testing tab, arm at RAISE - and read
+     * Elevator/kG From Cruise.
+     */
+    private void sampleCruiseVolts() {
+        if (!positionControlEnabled || appliedCruiseVelocity <= 0) {
+            return;
+        }
+        double velocity = getVelocity();
+        if (Math.abs(Math.abs(velocity) - appliedCruiseVelocity) > 0.05 * appliedCruiseVelocity) {
+            return;
+        }
+        double volts = leftMotor.getAppliedOutput() * leftMotor.getBusVoltage();
+        if (velocity > 0) {
+            cruiseVoltsUp = Double.isNaN(cruiseVoltsUp) ? volts : cruiseVoltsUp + 0.1 * (volts - cruiseVoltsUp);
+        } else {
+            cruiseVoltsDown = Double.isNaN(cruiseVoltsDown) ? volts : cruiseVoltsDown + 0.1 * (volts - cruiseVoltsDown);
+        }
+    }
+
+    /** Mean applied volts at cruise going up / down (NaN until seen), and the kG they imply. */
+    public double getCruiseVoltsUp() {
+        return cruiseVoltsUp;
+    }
+
+    public double getCruiseVoltsDown() {
+        return cruiseVoltsDown;
+    }
+
+    public double getKgFromCruise() {
+        return (cruiseVoltsUp + cruiseVoltsDown) / 2.0;
+    }
+
     @Override
     public void periodic() {
+        sampleCruiseVolts();
         if (!DriverStation.isDisabled() || !tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)) {
             return;
         }

@@ -148,7 +148,11 @@ public final class Constants {
 		// in only fires on a real disturbance (a stall or a collision) instead
 		// of firing on every acceleration ramp, which is what turned a normal
 		// move into a series of regenerated profiles.
-		public static final double ELEVATOR_ALLOWED_PROFILE_ERROR = 0.5;
+		// 1.0, not 0.5: under a sagging bus the output saturates near cruise,
+		// the error passes half an inch, and the regenerated profile (built on
+		// a lagged velocity) is what then hunts. Every safety gate reads the
+		// MEASURED height, so a wider window costs nothing.
+		public static final double ELEVATOR_ALLOWED_PROFILE_ERROR = 1.0;
 
 		// --- Closed-Loop Gains (Spark MAX slot 0; error in inches) - tunable defaults ---
 		// kP, kS, the kV scale, kA, kG, and the profile above are all editable
@@ -173,7 +177,13 @@ public final class Constants {
 		// Symptoms: rests short of target -> raise kP, or fix kG (step 2);
 		// buzzes or hunts at rest -> lower kP; overshoots on the way INTO a
 		// target -> lower kA; lags behind on the ramps -> raise kA.
-		public static final double ELEVATOR_kP = 0.5; // Duty cycle per inch of position error
+		// 0.4 (was 0.5): with kD 0 the loop's only damping is the NEO's
+		// back-EMF, and at 0.5 the damping ratio is ~0.56 - every disturbance at
+		// a setpoint rang for two or three visible cycles at ~6 Hz. 0.4 is
+		// ~0.63 for 0.02 in more rest error. (kD is not an option: the hall
+		// encoder resolves 0.0175 in, and a derivative of that at 1 kHz is
+		// noise.) If it still wobbles, 0.3 is ~0.72.
+		public static final double ELEVATOR_kP = 0.4; // Duty cycle per inch of position error
 		public static final double ELEVATOR_kI = 0.0; // Leave 0 - kG handles gravity sag
 		public static final double ELEVATOR_kD = 0.0; // Duty cycle per in/s of error derivative
 
@@ -184,7 +194,15 @@ public final class Constants {
 		// shows at the slow end of a profile (the carriage sticks, error
 		// builds, it lurches free - "stutters and slows down"). Through
 		// 15:1 this is a small torque, so it cannot cause a runaway.
-		public static final double ELEVATOR_kS = 0.2;
+		// ZERO, on purpose. The Spark MAX applies kS as +kS whenever the
+		// profile velocity is zero (measured in REV's own simulator: it does
+		// not follow the sign of the error), so a non-zero kS (a) biases the
+		// hold voltage to kG + kS, and (b) steps the feedforward by +2 x kS
+		// at the instant a DESCENT ends (kG - kS while moving down, kG + kS at
+		// rest). That step, into a lightly damped loop, was the wobble around
+		// the setpoints that are reached from above. Moving friction is ~0.2 V,
+		// which the position loop covers with ~0.04 in of lag.
+		public static final double ELEVATOR_kS = 0.0;
 		// kA: volts per in/s^2 of PROFILE acceleration (REVLib applies it in
 		// MAXMotion modes only). Without it the position loop has to supply
 		// the whole acceleration force out of tracking error: at 15:1 the
@@ -247,7 +265,11 @@ public final class Constants {
 		// about three counts and still reachable. If a pose ever sits waiting,
 		// the loop is resting outside this window - fix kG (Elevator/Hold
 		// Volts) or raise kP rather than loosening this.
-		public static final double ELEVATOR_ALLOWED_ERROR = 0.05;
+		// 0.25 (was 0.05): the rest band is (friction volts + kG error) /
+		// (12 x kP), about 0.03-0.11 in, so 0.05 was inside it and the light
+		// flickered. This is a "pose reached" flag only - no safety gate reads
+		// it. Judge kG from Elevator/Height against Elevator/Target.
+		public static final double ELEVATOR_ALLOWED_ERROR = 0.25;
 		// Left-vs-right travel disagreement that raises the out-of-sync alert.
 		// Both sides drive the same hex shaft, so this is a slip detector, not
 		// a precision figure: one skipped #25 tooth is 0.25 in of chain = 0.5
@@ -509,6 +531,21 @@ public final class Constants {
 		// only if the arm is slower than this: a seed taken at speed is stale
 		// by the sensor + CAN latency and steps the closed loop's feedback.
 		public static final double PIVOT_RESEED_MAX_VELOCITY = 10.0; // deg/s
+		// LANDING CORRECTION. The loop closes on the rotor, the chain has
+		// slack, and at the end of a sweep the arm's inertia (and gravity)
+		// carry it through that slack: the rotor is on target and the real
+		// arm rests a few degrees past it, for good. Once the arm has been
+		// still for a moment, if the through bore is off the target by more
+		// than the tolerance, the rotor is re-seeded from the through bore and
+		// the SAME target re-issued, so the loop drives out the difference -
+		// at most this many times per target, so it cannot hunt inside the
+		// slack. An error beyond the maximum is not backlash; it is left for
+		// the feedback alert.
+		public static final double PIVOT_LANDING_STILL_DEG_S = 3.0;
+		public static final double PIVOT_LANDING_STILL_SECONDS = 0.2;
+		public static final double PIVOT_LANDING_TOLERANCE_DEG = 0.75;
+		public static final double PIVOT_LANDING_MAX_DEG = 12.0;
+		public static final int PIVOT_LANDING_MAX_CORRECTIONS = 3;
 
 		// --- Preset Angles (degrees) ---
 		// 0 deg is the CAD's intake pose: the claw points up and ~33 deg past
@@ -750,7 +787,10 @@ public final class Constants {
 		// waiting longer cannot improve the pose - it only burns match time
 		// when something (chain backlash, a mis-set kG) leaves a mechanism
 		// resting just outside its at-target window.
-		public static final double SETTLE_STOPPED_ELEVATOR_IN_S = 0.5;  // in/s
+		// One velocity LSB is 0.55 in/s (16 ms x 2 filter), so 0.5 was an
+		// equals-zero test; the stopped branch is debounced as well.
+		public static final double SETTLE_STOPPED_ELEVATOR_IN_S = 1.0;  // in/s
+		public static final double SETTLE_STOPPED_DEBOUNCE_SECONDS = 0.08;
 		public static final double SETTLE_STOPPED_PIVOT_DEG_S = 3.0;    // deg/s
 		// Minimum settle dwell, so "stopped" cannot fire before the mechanisms
 		// have started moving.
@@ -854,13 +894,19 @@ public final class Constants {
 		// estimation with whatever tags it sees). The rear funnel camera is
 		// the only one that should ever align on a coral station, and the
 		// barge camera's pose is a placeholder, so it aligns on nothing.
-		public enum TagClass { REEF, CORAL_STATION, NONE }
-		public static final TagClass[] LIMELIGHT_TRACKING_CLASSES = {
-			TagClass.CORAL_STATION, // funnel - rear-facing, watches the coral station behind the robot
-			TagClass.NONE,          // barge  - placeholder pose; set to REEF once it is measured
-			TagClass.REEF,          // reef   - front-left, yawed toward the centerline
+		public enum TagClass { REEF, CORAL_STATION, BARGE, PROCESSOR, NONE }
+		public static final TagClass[][] LIMELIGHT_TRACKING_CLASSES = {
+			{TagClass.CORAL_STATION},              // funnel - rear-facing, watches the coral station behind the robot
+			// barge - front, high: the only camera that can see the barge and
+			// processor tags with the robot facing them (the reef camera is
+			// pitched 20 deg DOWN at 16 in - a 51 in-high tag only enters its
+			// view beyond 6 m). It supplies NOTHING until its pose is measured:
+			// alignment converts the tag into the robot frame with the lens
+			// pose, and a placeholder pose would centre the robot on the wrong
+			// spot. Fill in LIMELIGHT_POSES[1] and set measured = true.
+			{TagClass.BARGE, TagClass.PROCESSOR},
+			{TagClass.REEF},                       // reef   - front-left, yawed toward the centerline
 		};
-
 		// --- Camera Poses in Robot Space ---
 		// Where each lens sits on the robot. MegaTag uses this to convert what
 		// a camera sees into where the ROBOT is, so an error here shifts every
@@ -974,6 +1020,8 @@ public final class Constants {
 		// the tracker ignores them entirely. (All tags still feed MegaTag.)
 		public static final int[] REEF_TAGS = {6, 7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 22};
 		public static final int[] CORAL_STATION_TAGS = {1, 2, 12, 13};
+		public static final int[] BARGE_TAGS = {4, 5, 14, 15};
+		public static final int[] PROCESSOR_TAGS = {3, 16};
 
 		// --- Tracking Goal Distances (meters, ROBOT frame) ---
 		// Where the tag should sit relative to the robot CENTER when in
@@ -985,6 +1033,9 @@ public final class Constants {
 		public static final double REEF_FLUSH_DISTANCE = 0.47;    // Front bumpers flush with the reef base (L2-L4 + algae)
 		public static final double L1_SCORE_DISTANCE = 1.0;       // Standoff for L1 so the CorAl can swing to 100 deg without hitting
 		public static final double STATION_FLUSH_DISTANCE = 0.47; // Rear bumpers flush with the coral station wall (tag BEHIND the robot)
+		// TUNE both on the field (push the robot into position, copy Vision/Distance):
+		public static final double BARGE_SCORE_DISTANCE = 1.2;    // Centered on the barge tag, this far back, square - the net shot
+		public static final double PROCESSOR_DISTANCE = 0.55;     // Centered on the processor tag, front bumper just off the wall
 
 		// --- Reef Branch Alignment (meters, robot-frame Y) ---
 		// Each reef face has two scoring branches, one either side of the tag,

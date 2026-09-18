@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
+import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -269,8 +270,11 @@ public class Superstructure {
      * not get this treatment.
      */
     private Command settle() {
+        // One debouncer per settle (plans are built fresh by Commands.defer):
+        // a velocity reading passing through zero must not count as "stopped".
+        Debouncer stopped = new Debouncer(SuperstructureConstants.SETTLE_STOPPED_DEBOUNCE_SECONDS);
         return Commands.waitSeconds(SuperstructureConstants.SETTLE_MIN_SECONDS)
-            .andThen(Commands.waitUntil(() -> atTargets() || bothStopped()))
+            .andThen(Commands.waitUntil(() -> atTargets() || stopped.calculate(bothStopped())))
             .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS);
     }
 
@@ -1330,7 +1334,20 @@ public class Superstructure {
 
     /** How close to the preset the MEASURED pose must be before a score is released. */
     private static final double SCORE_READY_HEIGHT_TOL = 0.75;   // in
-    private static final double SCORE_READY_ANGLE_TOL = 2.5;     // deg
+    private static final double SCORE_READY_ANGLE_TOL = 3.0;     // deg
+    /**
+     * "Landed": once both mechanisms have been still this long the pose is as
+     * good as it is going to get, and a wider angle window counts. The loop
+     * closes on the rotor and the chain has slack, so the through bore can
+     * come to rest a few degrees past the target; CorAl's landing correction
+     * normally pulls it back in, but the score button must NEVER be locked
+     * out by it - it used to be, and the only way to score was by hand.
+     * The height gate is NOT relaxed: above the 48 in pre-top height the
+     * carriage only gets there with the arm inside 22.5 deg.
+     */
+    private static final double SCORE_READY_LANDED_ANGLE_TOL = 8.0; // deg
+    private static final double SCORE_READY_LANDED_SECONDS = 0.6;
+    private double landedSince = Double.NaN;
     private static final double SCORE_READY_MAX_ELEVATOR_SPEED = 2.0;  // in/s
     private static final double SCORE_READY_MAX_PIVOT_SPEED = 15.0;    // deg/s
     /**
@@ -1381,11 +1398,22 @@ public class Superstructure {
             return false;
         }
         double height = Math.max(preset[0], ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
-        return Math.abs(elevator.getCurrentPosition() - height) <= SCORE_READY_HEIGHT_TOL
-            && Math.abs(coral.getPivotAngle() - preset[1]) <= SCORE_READY_ANGLE_TOL
+        boolean atHeightAndStill = Math.abs(elevator.getCurrentPosition() - height) <= SCORE_READY_HEIGHT_TOL
             && Math.abs(elevator.getVelocity()) <= SCORE_READY_MAX_ELEVATOR_SPEED
             && Math.abs(coral.getPivotVelocity()) <= SCORE_READY_MAX_PIVOT_SPEED;
+        double now = Timer.getFPGATimestamp();
+        if (!atHeightAndStill) {
+            landedSince = Double.NaN;
+            return false;
+        }
+        if (Double.isNaN(landedSince)) {
+            landedSince = now;
+        }
+        double angleError = Math.abs(coral.getPivotAngle() - preset[1]);
+        return angleError <= SCORE_READY_ANGLE_TOL
+            || (angleError <= SCORE_READY_LANDED_ANGLE_TOL && now - landedSince >= SCORE_READY_LANDED_SECONDS);
     }
+
 
     /**
      * Releases the game piece at the current scoring pose, then goes home by

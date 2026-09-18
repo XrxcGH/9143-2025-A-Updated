@@ -66,6 +66,8 @@ public final class Tunables {
     private static final String REEF_FLUSH_DISTANCE = "Vision - Reef Flush Distance (m)";
     private static final String STATION_FLUSH_DISTANCE = "Vision - Station Flush Distance (m)";
     private static final String L1_SCORE_DISTANCE = "Vision - L1 Score Distance (m)";
+    private static final String BARGE_SCORE_DISTANCE = "Vision - Barge Score Distance (m)";
+    private static final String PROCESSOR_DISTANCE = "Vision - Processor Distance (m)";
     private static final String REEF_BRANCH_OFFSET = "Vision - Reef Branch Offset (m)";
     private static final String TRACKING_DISTANCE_KP = "Vision - Tracking Distance kP (m/s per m)";
     private static final String TRACKING_ROTATION_KP = "Vision - Tracking Rotation kP (rad/s per deg)";
@@ -92,7 +94,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 14; // 14: pivot profile 300 deg/s / 800 deg/s^2 / jerk 6000 with kA (Sept 17 2026)
+    private static final int DEFAULTS_VERSION = 15; // 14: pivot profile 300 deg/s / 800 deg/s^2 / jerk 6000 with kA (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -102,6 +104,18 @@ public final class Tunables {
      * constructed.
      */
     public static void init() {
+        // 14 -> 15 is a TARGETED migration: only the keys whose defaults
+        // changed are overwritten (elevator kP 0.4, kS 0, profile error 1.0 -
+        // the wobble around setpoints), so everything else the team has tuned
+        // on the dashboard (vision distances, speed scale, ...) survives. A
+        // bump normally resets EVERY tunable; add a block like this one
+        // instead whenever only a few defaults move.
+        if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) == 14) {
+            Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
+            Preferences.setDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
+            Preferences.setDouble(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR);
+            Preferences.setInt(DEFAULTS_VERSION_KEY, 15);
+        }
         if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) != DEFAULTS_VERSION) {
             resetToDefaults();
             return;
@@ -132,6 +146,8 @@ public final class Tunables {
         Preferences.initDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.initDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.initDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
+        Preferences.initDouble(BARGE_SCORE_DISTANCE, VisionConstants.BARGE_SCORE_DISTANCE);
+        Preferences.initDouble(PROCESSOR_DISTANCE, VisionConstants.PROCESSOR_DISTANCE);
         Preferences.initDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.initDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.initDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
@@ -169,6 +185,8 @@ public final class Tunables {
         Preferences.setDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.setDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.setDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
+        Preferences.setDouble(BARGE_SCORE_DISTANCE, VisionConstants.BARGE_SCORE_DISTANCE);
+        Preferences.setDouble(PROCESSOR_DISTANCE, VisionConstants.PROCESSOR_DISTANCE);
         Preferences.setDouble(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET);
         Preferences.setDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
         Preferences.setDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
@@ -372,6 +390,16 @@ public final class Tunables {
     /** Standoff distance from a reef tag for L1 scoring. */
     public static double l1ScoreDistance() {
         return clampedMagnitude(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE, 0.3, 3.0);
+    }
+
+    /** Distance from the robot center to a barge tag at the net-shot position (centered, square). */
+    public static double bargeScoreDistance() {
+        return clampedMagnitude(BARGE_SCORE_DISTANCE, VisionConstants.BARGE_SCORE_DISTANCE, 0.3, 3.0);
+    }
+
+    /** Distance from the robot center to a processor tag with the front bumper just off the wall. */
+    public static double processorDistance() {
+        return clampedMagnitude(PROCESSOR_DISTANCE, VisionConstants.PROCESSOR_DISTANCE, 0.3, 2.0);
     }
 
     /** Lateral offset from a reef tag center to a branch center. */

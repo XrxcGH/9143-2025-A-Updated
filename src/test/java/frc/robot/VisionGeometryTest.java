@@ -103,7 +103,8 @@ class VisionGeometryTest {
     void tagClassesFollowTheManual() {
         assertEquals(TagClass.REEF, Vision.classOf(21));
         assertEquals(TagClass.CORAL_STATION, Vision.classOf(1));
-        assertEquals(TagClass.NONE, Vision.classOf(3), "processor");
-        assertEquals(TagClass.NONE, Vision.classOf(14), "barge");
+        assertEquals(TagClass.PROCESSOR, Vision.classOf(3), "processor");
+        assertEquals(TagClass.BARGE, Vision.classOf(14), "barge");
+        assertEquals(TagClass.NONE, Vision.classOf(99), "not a 2025 tag");
     }
 }

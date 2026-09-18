@@ -550,6 +550,11 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         return appliedMaxAcceleration * currentPace.scale;
     }
 
+    @Override
+    public double maxAcceleration(Pace pace) {
+        return appliedMaxAcceleration * pace.scale;
+    }
+
     /** True while an edited travel ratio is waiting for the carriage to be at its base. */
     public boolean isTravelRatioChangePending() {
         return travelRatioChangePending;

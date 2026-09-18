@@ -96,6 +96,7 @@ class SuperstructureSequenceSimTest {
             return Math.abs(axis.setpoint - axis.position) <= ElevatorConstants.ELEVATOR_ALLOWED_ERROR;
         }
         @Override public double maxAcceleration() { return axis.maxAcceleration; }
+        @Override public double maxAcceleration(Pace p) { return ElevatorConstants.ELEVATOR_MAX_ACCELERATION * p.scale; }
         @Override public boolean isInManualMode() { return false; }
         @Override public void manualControl(double stick) { }
         @Override public void holdCurrentPosition() { setPosition(axis.position); }

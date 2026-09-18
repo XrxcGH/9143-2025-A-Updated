@@ -634,18 +634,24 @@ public class Superstructure {
 
     /** Where the carriage comes to rest if told to stop now (no overshoot-and-return, unlike "hold the measured height"). */
     private double stoppingPoint() {
+        return stoppingPoint(Pace.FULL);
+    }
+
+    /** ...at the acceleration of the pace the stopping setpoint will be SENT with (not the one in force now). */
+    private double stoppingPoint(Pace pace) {
         double v = elevator.getVelocity();
-        return elevator.getCurrentPosition() + Math.copySign(v * v / (2.0 * Math.max(elevator.maxAcceleration(), 1.0)), v);
+        return elevator.getCurrentPosition()
+            + Math.copySign(v * v / (2.0 * Math.max(elevator.maxAcceleration(pace), 1.0)), v);
     }
 
     /** The clamp, or - when the carriage is already past it - the clamp if it is close, else where the carriage can stop. */
-    private double withinReach(double desired, boolean up) {
+    private double withinReach(double desired, boolean up, Pace pace) {
         double height = elevator.getCurrentPosition();
         double past = up ? height - desired : desired - height;
         if (past <= 0 || past <= LATCH_RETREAT_MAX) {
             return desired;
         }
-        double stop = stoppingPoint();
+        double stop = stoppingPoint(pace);
         return up ? Math.max(desired, stop) : Math.min(desired, stop);
     }
 
@@ -664,7 +670,7 @@ public class Superstructure {
     private void commandCarriage(double[] latch, double desired, double finalTarget, boolean up, Pace pace) {
         if (Double.isNaN(desired)) {
             if (Double.isNaN(latch[0])) {
-                latch[0] = stoppingPoint();
+                latch[0] = stoppingPoint(pace);
                 elevator.setPosition(latch[0], pace);
             }
             return;
@@ -682,7 +688,7 @@ public class Superstructure {
             if (clamped && run >= 0 && run < LATCH_MIN_RUN && Math.abs(elevator.getVelocity()) <= LATCH_CRAWL_SPEED) {
                 return;
             }
-            latch[0] = withinReach(desired, up);
+            latch[0] = withinReach(desired, up, pace);
             lastCarriagePace = pace;
             elevator.setPosition(latch[0], pace);
             return;
@@ -699,7 +705,7 @@ public class Superstructure {
         } else if (advance < -LATCH_RETREAT_MIN) {
             // The clamp moved back (a gate re-closed, or the carriage arrived
             // past it). One new setpoint, not a chase of the measured height.
-            double backTo = withinReach(desired, up);
+            double backTo = withinReach(desired, up, pace);
             if (Math.abs(backTo - latch[0]) > LATCH_RETREAT_MIN) {
                 latch[0] = backTo;
                 elevator.setPosition(backTo, pace);
@@ -1167,7 +1173,10 @@ public class Superstructure {
             // still coasting upward is about to be somewhere else, and the
             // arm must be legal there too. The tighter of the two.
             double here = armLimitForHeight(angle, targetAngle, elevator.getCurrentPosition());
-            double there = armLimitForHeight(angle, targetAngle, stoppingPoint());
+            double v = elevator.getVelocity();
+            double stopsAt = elevator.getCurrentPosition()
+                + Math.copySign(v * v / (2.0 * Math.max(elevator.maxAcceleration(), 1.0)), v);
+            double there = armLimitForHeight(angle, targetAngle, stopsAt);
             double limit = targetAngle < angle ? Math.max(here, there) : Math.min(here, there);
             double extra = extraLimit.getAsDouble();
             if (!Double.isNaN(extra)) {
@@ -1835,12 +1844,10 @@ public class Superstructure {
      * current position" does at speed.
      */
     private void freezeNow() {
-        double v = elevator.getVelocity();
-        elevator.setPosition(elevator.getCurrentPosition()
-            + Math.copySign(v * v / (2.0 * elevator.maxAcceleration()), v));
+        elevator.setPosition(stoppingPoint(Pace.FULL), Pace.FULL);
         double w = coral.getPivotVelocity();
         coral.setPivotAngle(coral.getPivotAngle()
-            + Math.copySign(w * w / (2.0 * coral.maxAcceleration()), w));
+            + Math.copySign(w * w / (2.0 * Math.max(coral.maxAcceleration(), 1.0)), w));
     }
 
     /**
@@ -1857,13 +1864,17 @@ public class Superstructure {
                 if (Math.abs(speed) > ElevatorConstants.ELEVATOR_MANUAL_CONTROL_DEADBAND) {
                     elevator.manualControl(speed);
                 } else if (elevator.isInManualMode()) {
-                    elevator.holdCurrentPosition();
+                    // Stick released: hold where the carriage can actually STOP.
+                    // "Hold the measured height" hands the profile a target that
+                    // is already behind a moving carriage - it overshoots and
+                    // drives back, a bounce at the end of every jog.
+                    elevator.setPosition(stoppingPoint(Pace.FULL), Pace.FULL);
                 }
                 coral.manualPivotControl(pivotStick.getAsDouble());
             }, elevator, coral)
             .finallyDo(() -> {
                 if (elevator.isInManualMode()) {
-                    elevator.holdCurrentPosition();
+                    elevator.setPosition(stoppingPoint(Pace.FULL), Pace.FULL);
                 }
                 coral.manualPivotControl(0.0); // captures and holds if the stick was deflected
             });

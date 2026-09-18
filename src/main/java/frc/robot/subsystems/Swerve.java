@@ -65,7 +65,8 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	// thing vision corrections and pose resets never touch). See periodic().
 	private Rotation2d m_driverForwardRaw = null;
 	private Alliance m_driverForwardAlliance = null;
-	private boolean m_rederiveDriverForward = false;
+	/** True once the DRIVER has zeroed their heading: from then on vision never moves it. */
+	private boolean m_driverZeroed = false;
 
 	// Swerve request to apply during robot-centric path following.
 	// Closed-loop velocity is required for accurate path tracking: each
@@ -93,6 +94,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	private double m_trackOmega = 0.0;
 	private double m_trackLastTime = 0.0;
 	private boolean m_trackTranslationHeld = false;
+	private boolean m_trackContactHeld = false; // held because the bumper is ON the reef, not because the error is small
 	private boolean m_trackHeadingHeld = false;
 	private double m_trackStalledSince = -1.0;
 	// Whether the last autonomous pose reset kept the vision-seeded heading
@@ -420,6 +422,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			m_trackVy = speeds.vyMetersPerSecond;
 			m_trackOmega = speeds.omegaRadiansPerSecond;
 			m_trackTranslationHeld = false;
+			m_trackContactHeld = false;
 			m_trackHeadingHeld = false;
 			m_trackStalledSince = -1.0;
 		}, () -> {
@@ -432,6 +435,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 				// come to a stop - ramped, not stepped.
 				clearAlignmentTelemetry();
 				m_trackTranslationHeld = false;
+				m_trackContactHeld = false;
 				m_trackHeadingHeld = false;
 				m_trackStalledSince = -1.0;
 				applyTrackingCommand(0.0, 0.0, 0.0);
@@ -475,10 +479,17 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			double exitRatio = VisionConstants.TrackingGains.DEADBAND_EXIT_RATIO;
 			boolean inside = Math.abs(forwardError) < forwardDeadband
 				&& Math.abs(lateralError) < lateralDeadband;
-			boolean outside = Math.abs(forwardError) > forwardDeadband * exitRatio
+			// Held by CONTACT the forward error is, by definition, outside the
+			// ordinary exit band (that is why contact was needed), so it gets
+			// its own: without it the latch set below was undone on the very
+			// next loop, and the robot shoved the reef every 0.35 s.
+			double forwardExit = m_trackContactHeld
+				? VisionConstants.TrackingGains.CONTACT_FORWARD_ERROR * exitRatio : forwardDeadband * exitRatio;
+			boolean outside = Math.abs(forwardError) > forwardExit
 				|| Math.abs(lateralError) > lateralDeadband * exitRatio;
 			if (m_trackTranslationHeld ? outside : inside) {
 				m_trackTranslationHeld = !m_trackTranslationHeld;
+				m_trackContactHeld = false;
 			}
 
 			// Arrived by CONTACT: told to move, not moving, laterally in
@@ -498,6 +509,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 				m_trackStalledSince = now;
 			} else if (now - m_trackStalledSince > VisionConstants.TrackingGains.CONTACT_SECONDS) {
 				m_trackTranslationHeld = true;
+				m_trackContactHeld = true;
 			}
 
 			double vx = 0.0;
@@ -635,18 +647,26 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	public void resetPoseForAuto(Pose2d nominalStart) {
 		Rotation2d current = getStateCopy().Pose.getRotation();
 		double disagreementDeg = Math.abs(current.minus(nominalStart.getRotation()).getDegrees());
-		// Either way the pose heading is now the field's: the driver's forward
-		// is re-derived from it (alliance forward), next loop, once the reset
-		// shows in the state.
-		m_rederiveDriverForward = true;
+		// Either way the pose heading is now the field's, so the driver's
+		// forward becomes the alliance's forward in it - computed HERE from
+		// the rotation the pose is being given, not next loop from the cached
+		// state (which may not show the reset yet).
+		Alliance alliance = DriverStation.getAlliance().orElse(
+			m_driverForwardAlliance != null ? m_driverForwardAlliance : Alliance.Blue);
+		Rotation2d rawHeading = getStateCopy().RawHeading;
 		if (vision.hasStrongHeadingSeed()
 				&& disagreementDeg <= VisionConstants.HEADING_SEED_MAX_DISAGREEMENT_DEGREES) {
 			resetTranslation(nominalStart.getTranslation());
 			m_lastAutoResetKeptHeading = true;
+			m_driverForwardRaw = allianceForward(alliance).minus(current.minus(rawHeading));
 		} else {
 			resetPose(nominalStart);
 			m_lastAutoResetKeptHeading = false;
+			m_driverForwardRaw = allianceForward(alliance).minus(nominalStart.getRotation().minus(rawHeading));
 		}
+		m_driverForwardAlliance = alliance;
+		m_driverZeroed = false;
+		setOperatorPerspectiveForward(allianceForward(alliance));
 	}
 
 	/** Whether the last autonomous pose reset kept the vision-seeded heading. */
@@ -692,9 +712,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 */
 	public void zeroDriverHeading(boolean resetPoseHeading) {
 		m_driverForwardRaw = getStateCopy().RawHeading;
-		m_rederiveDriverForward = false;
+		m_driverZeroed = true;
 		if (resetPoseHeading) {
-			resetRotation(allianceForward(DriverStation.getAlliance().orElse(Alliance.Blue)));
+			Rotation2d forward = allianceForward(DriverStation.getAlliance().orElse(Alliance.Blue));
+			resetRotation(forward);
+			// The pose now faces "forward" where the robot faces, so that IS the
+			// perspective - set at once, not a loop late against the new heading.
+			setOperatorPerspectiveForward(forward);
 		}
 	}
 
@@ -719,15 +743,21 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		// perspective is recomputed every loop to cancel whatever vision or a
 		// pose reset did to the pose heading. It changes only when the driver
 		// zeroes it (zeroDriverHeading), when an auto resets the pose to the
-		// field's frame, or when the alliance changes; until the first of
-		// those it is the alliance's forward direction, as before.
+		// field's frame, when the alliance changes, or - until the driver has
+		// zeroed it - while disabled with a converged multi-tag heading seed.
 		Rotation2d poseMinusRaw = state.Pose.getRotation().minus(state.RawHeading);
 		Optional<Alliance> alliance = DriverStation.getAlliance();
 		if (alliance.isPresent()) {
 			boolean changed = m_driverForwardAlliance != null && alliance.get() != m_driverForwardAlliance;
-			if (m_driverForwardRaw == null || changed || m_rederiveDriverForward) {
+			// Until the driver has zeroed it themselves, a CONVERGED two-or-more
+			// tag heading seed while disabled still sets the driver's frame, as
+			// it always did on a real field (robot booted facing any which way,
+			// placed on the field, never zeroed). One reef tag in front of the
+			// bumper - the case that used to move the driver's frame - is not a
+			// strong seed, and after a driver zero nothing from vision counts.
+			boolean seeded = DriverStation.isDisabled() && !m_driverZeroed && vision.hasStrongHeadingSeed();
+			if (m_driverForwardRaw == null || changed || seeded) {
 				m_driverForwardRaw = allianceForward(alliance.get()).minus(poseMinusRaw);
-				m_rederiveDriverForward = false;
 			}
 			m_driverForwardAlliance = alliance.get();
 		}

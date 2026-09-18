@@ -193,8 +193,10 @@ public class CorAl extends SubsystemBase implements ArmAxis {
             Preferences.setDouble(THROUGH_BORE_ZERO_KEY, throughBoreOffset);
             bootZeroRejected = false;
             bootRestoredAngle = 0.0;
+            // (Only with the encoder reporting: a zero pressed with it unplugged
+            // stores nothing and must not block the restore when it comes back.)
+            bootReferenceResolved = true;
         }
-        bootReferenceResolved = true;
     }
 
     private void applyZeroHere() {
@@ -209,11 +211,15 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      * start's).
      */
     private void resolveBootReference() {
-        bootReferenceResolved = true;
         if (!Preferences.containsKey(THROUGH_BORE_ZERO_KEY)) {
-            zeroEncoders(); // first start with this code: the arm is at its base, as it always had to be
+            // First start with this code: the arm is at its base, as it always
+            // had to be - but only ever decided while disabled.
+            if (DriverStation.isDisabled()) {
+                zeroEncoders();
+            }
             return;
         }
+        bootReferenceResolved = true;
         double range = CorAlConstants.THROUGH_BORE_DEGREES_PER_ROTATION;
         double stored = Preferences.getDouble(THROUGH_BORE_ZERO_KEY, 0.0);
         double angle = getRawThroughBoreAngle() - stored;
@@ -553,9 +559,19 @@ public class CorAl extends SubsystemBase implements ArmAxis {
             double speed = stickInput * CorAlConstants.CORAL_MANUAL_SPEED_LIMIT;
             pivotMotor.setControl(percentRequest.withOutput(speed));
         } else if (manualControlActive) {
-            // Stick just released - hold the current angle
+            // Stick just released - hold where the arm can actually STOP, in
+            // the ROTOR's frame (the one the loop closes in; the two sensors
+            // differ by the chain slack and are not re-synced during manual
+            // control). "Hold the measured through-bore angle" handed Motion
+            // Magic a target already behind a moving arm: it overshot and came
+            // back, a 3-6 deg bob on every release. The landing correction
+            // trims the slack once the arm is still.
             manualControlActive = false;
-            setPivotAngle(getPivotAngle());
+            double v = getPivotVelocity();
+            double a = Math.max(maxAcceleration(), 1.0);
+            double j = maxJerk();
+            double stop = v * v / (2.0 * a) + (j > 0 ? Math.abs(v) * a / (2.0 * j) : 0.0);
+            setPivotAngle(getMotorAngle() + Math.copySign(stop, v));
         }
         // Otherwise: position control (if active) keeps holding on the motor
         // controller; nothing to do.
@@ -585,7 +601,11 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      * stateful unwrap tracking (safe to call from multiple readers).
      */
     public double getThroughBoreAngle() {
-        if (!isThroughBoreConnected()) {
+        // Until the boot reference is resolved the through bore's offset is
+        // only the provisional one taken in the constructor (possibly before
+        // the DutyCycle had a reading at all): run on the rotor frame, as the
+        // robot always did, rather than trust it.
+        if (!isThroughBoreConnected() || !bootReferenceResolved) {
             // Fall back to the motor sensor if the through bore is disconnected
             return getMotorAngle();
         }
@@ -784,7 +804,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
 
     /** Cruise velocity (deg/s) currently applied to the pivot. */
     public double cruiseVelocity() {
-        return appliedCruiseVelocity;
+        return appliedCruiseVelocity * profileScale;
     }
 
     /** Acceleration (deg/s^2) currently applied to the pivot. */
@@ -794,7 +814,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
 
     /** Jerk limit (deg/s^3) currently applied to the pivot. */
     public double maxJerk() {
-        return appliedMaxJerk;
+        return appliedMaxJerk * profileScale * profileScale * profileScale;
     }
 
     @Override
@@ -818,7 +838,11 @@ public class CorAl extends SubsystemBase implements ArmAxis {
 
         // Absolute zero: once per start, only while disabled (never move the
         // frame under a live setpoint), as soon as the encoder is reporting.
-        if (!bootReferenceResolved && DriverStation.isDisabled() && isThroughBoreConnected()) {
+        // ...or, when the code comes up ALREADY ENABLED (a restart mid-match -
+        // the very case the stored zero exists for), as long as nothing is
+        // closed-loop on the frame yet.
+        if (!bootReferenceResolved && isThroughBoreConnected()
+                && (DriverStation.isDisabled() || (!positionControlActive && !manualControlActive))) {
             resolveBootReference();
         }
 

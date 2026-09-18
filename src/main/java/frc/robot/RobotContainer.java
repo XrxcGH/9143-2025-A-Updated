@@ -83,7 +83,7 @@ import frc.robot.util.Tunables;
  *   Right bumper        - barge pose (RT then fires the algae)
  *   D-pad up / down     - algae HIGH / LOW intake (diagonals count)
  *   D-pad left          - algae hold in place (hold rollers, arm to 100 deg)
- *   Back (enabled)      - raise the arm to the safe travel angle, in place
+ *   D-pad right         - raise the arm to the safe travel angle, in place
  *   Back / Start, held 1 s, DISABLED only - zero the elevator / the pivot
  *                         (mechanism at its base)
  *
@@ -234,8 +234,8 @@ public class RobotContainer {
                 && t.robotFrame.getX() < Constants.VisionConstants.NEAR_REEF_DISTANCE
                 && Math.abs(t.robotFrame.getY()) < Constants.VisionConstants.NEAR_REEF_LATERAL)
             .orElse(false));
-        swerve.getVision().setReefStandoffSupplier(
-            () -> !superstructure.readyToScore() || superstructure.isWaitingForBackOff());
+        swerve.getVision().setReefStandoffSuppliers(
+            superstructure::readyToScore, superstructure::isWaitingForBackOff);
 
         // ...and with a coral in the claw but no level pressed yet (goal still
         // STOW) the next stop is the reef, not a station: without this the
@@ -376,7 +376,7 @@ public class RobotContainer {
         Command score = superstructure.score(() -> swerve.getStateCopy().Pose);
         operator_controller.rightTrigger().and(auto).and(ready).onTrue(score);
         // Driver's copy: also waits for the aligner when the aligner is in use.
-        driver_controller.rightBumper().and(ready)
+        driver_controller.rightBumper().and(auto).and(ready) // not while the operator holds the manual take-over
             .and(() -> !swerve.isVisionTrackingEnabled() || swerve.isAligned())
             .onTrue(score);
 
@@ -391,8 +391,10 @@ public class RobotContainer {
         operator_controller.povLeft().and(auto).onTrue(superstructure.holdAlgae());
         operator_controller.rightBumper().and(auto).onTrue(superstructure.goToBarge()); // RT then fires it
 
-        // Back (enabled): swing the arm to the safe travel angle, in place.
-        operator_controller.back().and(auto).and(disabled.negate()).onTrue(superstructure.raiseArm());
+        // D-pad right: swing the arm to the safe travel angle, in place. (It was
+        // on Back, which is also the disabled-only elevator zero: Back still
+        // held from zeroing when the robot enabled fired it without a press.)
+        operator_controller.povRight().and(auto).onTrue(superstructure.raiseArm());
 
         // ---- Encoder zeroing: DISABLED only, and only after a 1 s hold ----
         operator_controller.back().and(disabled).debounce(1.0)
@@ -403,7 +405,10 @@ public class RobotContainer {
         // ---- Manual take-over (replaces the always-live default commands) ----
         // Pressing LB cancels the running sequence and freezes both
         // mechanisms; sticks jog while it is held; releasing holds position.
-        manual.whileTrue(superstructure.manualOverride(
+        // (AND enabled, so LB already held when the robot enables still starts
+        // it - whileTrue alone waits for an edge that was dropped while
+        // disabled, and with LB held every other operator input is locked out.)
+        manual.and(new Trigger(DriverStation::isEnabled)).whileTrue(superstructure.manualOverride(
             () -> -operator_controller.getLeftY(),      // up = carriage up
             () -> -operator_controller.getRightY()));   // forward = claw forward (+ angle)
         // Raw rollers inside manual: no pose check, no subsystem requirement.
@@ -484,6 +489,18 @@ public class RobotContainer {
             }),
             AutoBuilder.followPath(path)
         );
+    }
+
+    /**
+     * Called from Robot.disabledExit(): HOLD both mechanisms where they are.
+     * Disabling cuts their outputs, and nothing commanded them again until
+     * the operator pressed something - a carriage that was up (the scoring
+     * autos end at L4) sank under gravity with the arm un-held through
+     * heights its angle is not clear at, with no interlock running.
+     */
+    public void enabledInit() {
+        elevator.holdCurrentPosition();
+        coral.setPivotAngle(coral.getPivotAngle());
     }
 
     /** Called from Robot.disabledInit(): stop every mechanism output. */

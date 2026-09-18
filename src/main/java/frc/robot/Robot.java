@@ -135,7 +135,9 @@ public class Robot extends LoggedRobot {
 	@Override
 	public void disabledExit() {
 		// The code isn't fresh anymore! - flaco
-		RobotContainer.freshCode = false; 
+		RobotContainer.freshCode = false;
+		// Hold both mechanisms where they are (see RobotContainer.enabledInit)
+		m_robotContainer.enabledInit();
 	}
 
 	/**

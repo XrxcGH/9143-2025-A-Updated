@@ -163,7 +163,8 @@ public class Vision extends SubsystemBase {
      * pose is not reached yet, or a finished score is waiting for room
      * (wired in RobotContainer). See getTrackingGoal.
      */
-    private BooleanSupplier reefStandoff = () -> false;
+    private BooleanSupplier poseReady = () -> true;
+    private BooleanSupplier waitingForBackOff = () -> false;
 
     /** Where the superstructure goal comes from (wired in RobotContainer). */
     private Supplier<Superstructure.Goal> goalSupplier = () -> Superstructure.Goal.STOW;
@@ -187,6 +188,11 @@ public class Vision extends SubsystemBase {
     /** Filtered (field-true heading - pose estimator heading) while latched; null until the first MegaTag1 sample. */
     private Rotation2d latchedHeadingOffset = null;
     private int latchedHeadingOutlierCount = 0;
+    /** True once this tracking session's latch was dropped because the goal left its tag family (cleared when tracking is switched off). */
+    private boolean latchSpent = false;
+    /** L3 / L4 two-stage approach: true once the scoring pose has been seen ready, until the score backs off (see getTrackingGoal). */
+    private boolean closeInLatched = false;
+    private Superstructure.Goal closeInGoal = null;
 
     // Precomputed "limelight-<name>" NT table names (avoids per-loop string
     // concatenation in the hot paths)
@@ -378,8 +384,9 @@ public class Vision extends SubsystemBase {
     }
 
     /** Wires in "hold the L3 / L4 alignment off the reef" (see getTrackingGoal). */
-    public void setReefStandoffSupplier(BooleanSupplier standoff) {
-        this.reefStandoff = standoff;
+    public void setReefStandoffSuppliers(BooleanSupplier poseReady, BooleanSupplier waitingForBackOff) {
+        this.poseReady = poseReady;
+        this.waitingForBackOff = waitingForBackOff;
     }
 
     /** Wires in the superstructure goal used to resolve tracking goals. */
@@ -438,7 +445,22 @@ public class Vision extends SubsystemBase {
                         // then closes to flush; after the score it backs out
                         // to the standoff again, which is also what releases
                         // the automatic stow. L2 never pokes out: flush at once.
-                        boolean holdOff = goalSupplier.get() != Superstructure.Goal.CORAL_L2 && reefStandoff.getAsBoolean();
+                        //
+                        // The decision to close in is LATCHED per approach.
+                        // "Pose ready" read raw goes false for a loop whenever
+                        // the arm or the carriage twitches - the bumper
+                        // touching the reef, the rollers ejecting - and each
+                        // time the goal jumped 0.40 m back out: the robot
+                        // backed off, came back in, bumped, and again.
+                        Superstructure.Goal level = goalSupplier.get();
+                        if (level != closeInGoal || waitingForBackOff.getAsBoolean()) {
+                            closeInLatched = false;
+                            closeInGoal = level;
+                        }
+                        if (!waitingForBackOff.getAsBoolean() && poseReady.getAsBoolean()) {
+                            closeInLatched = true;
+                        }
+                        boolean holdOff = level != Superstructure.Goal.CORAL_L2 && !closeInLatched;
                         double forward = Tunables.reefFlushDistance()
                             + (holdOff ? VisionConstants.REEF_STANDOFF_EXTRA : 0.0);
                         return Optional.of(new TrackingGoal(forward, left));
@@ -596,6 +618,7 @@ public class Vision extends SubsystemBase {
     }
 
     private void releaseLatch() {
+        closeInLatched = false;
         if (latchedTagId < 0) {
             return;
         }
@@ -714,6 +737,24 @@ public class Vision extends SubsystemBase {
         // current odometry pose - seen this loop or not.
         if (!trackingEnabled) {
             releaseLatch();
+            latchSpent = false;
+            return;
+        }
+        // The goal has left the latched tag's family (the score finished and
+        // the Superstructure went home: STOW is a station goal, the latched
+        // tag is a reef tag). Drop it NOW. It used to live on in memory for
+        // 1.5 s, and a remembered reef tag with a non-reef goal resolved to
+        // "flush and centered" - so with the align trigger still held the
+        // robot drove back INTO the reef at the moment the L3 / L4 exit was
+        // swinging the claw out past the bumper. Nothing new is latched
+        // until the trigger is pressed again: holding it through a score must
+        // not send the robot off to a coral station by itself.
+        if (latchedTagId >= 0 && !tagMatchesCurrentGoal(latchedTagClass)) {
+            releaseLatch();
+            latchSpent = true;
+        }
+        if (latchSpent) {
+            cachedBestTarget = Optional.empty();
             return;
         }
         if (latchedTagId < 0) {

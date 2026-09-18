@@ -27,6 +27,9 @@ public interface CarriageAxis extends Subsystem {
     /** Profile acceleration in effect AT THE CURRENT PACE, in/s^2 (the planner sizes braking distances from it). */
     double maxAcceleration();
 
+    /** Profile acceleration the given pace runs at, in/s^2. */
+    double maxAcceleration(Pace pace);
+
     boolean isInManualMode();
 
     void manualControl(double stick);

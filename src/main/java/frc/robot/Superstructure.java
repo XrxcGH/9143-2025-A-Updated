@@ -203,6 +203,18 @@ public class Superstructure {
         return coral.getPivotAngle() <= angle + TOL;
     }
 
+    /**
+     * Strict form of {@link #armAtMost}, for a gate that is a CLEARANCE
+     * limit rather than a "close enough to carry on" check. The tolerant
+     * form accepts SAFE_ANGLE_TOLERANCE past the gate, which for the L4
+     * pre-top gate (22.5 deg) means it opens at 25.5 - the very angle that
+     * put the claw into the top bar. The arm's L4 destination is 20 deg, so
+     * it passes 22.5 on the way and this cannot stall.
+     */
+    private boolean armStrictlyAtMost(double angle) {
+        return coral.getPivotAngle() <= angle;
+    }
+
     private boolean heightAtLeast(double height) {
         return elevator.getCurrentPosition() >= height;
     }
@@ -608,7 +620,7 @@ public class Superstructure {
             : Commands.waitUntil(() -> heightAtMost(rotateAt));
         DoubleSupplier carriageTarget = () ->
             target > SuperstructureConstants.L4_PRE_TOP_HEIGHT
-                && !armAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
+                && !armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
                     ? SuperstructureConstants.L4_PRE_TOP_HEIGHT : target;
         Command armWork = armTo(targetAngle)
             .andThen(Commands.waitUntil(coral::isAtTargetAngle)
@@ -813,7 +825,7 @@ public class Superstructure {
             .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)
                 && heightAtMost(SuperstructureConstants.L4_STATION_HEIGHT + 2.0)))
             .andThen(Commands.deadline(armWork,
-                climbWithArm(() -> armAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
+                climbWithArm(() -> armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
                         ? targetHeight : SuperstructureConstants.L4_PRE_TOP_HEIGHT,
                     () -> targetAngle)))
             .andThen(settle());

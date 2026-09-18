@@ -107,4 +107,41 @@ class VisionGeometryTest {
         assertEquals(TagClass.BARGE, Vision.classOf(14), "barge");
         assertEquals(TagClass.NONE, Vision.classOf(99), "not a 2025 tag");
     }
+
+    /** One "rawfiducials" entry: id, txnc, tync, ta, distToCamera, distToRobot, ambiguity. */
+    private static double[] rawTag(int id, double area, double distance) {
+        return new double[] {id, 0.0, 0.0, area, distance, distance, 0.1};
+    }
+
+    private static double[] concat(double[] a, double[] b) {
+        double[] joined = new double[a.length + b.length];
+        System.arraycopy(a, 0, joined, 0, a.length);
+        System.arraycopy(b, 0, joined, a.length, b.length);
+        return joined;
+    }
+
+    /**
+     * The dashboard's "Best Tag" is the closest tag ANY camera reports - whatever its class, whichever
+     * camera, measured pose or not - so it agrees with the camera streams. (It used to come from the
+     * alignment cache, which drops all of those: the stream showed a tag and the widget did not move.)
+     */
+    @Test
+    void bestTagIsTheClosestTagAnyCameraSees() {
+        // funnel sees a REEF tag (not a class it aligns on), the unmeasured barge camera a barge tag
+        double[][] seen = {rawTag(18, 1.0, 3.0), rawTag(14, 4.0, 1.5), concat(rawTag(7, 2.0, 2.0), rawTag(8, 0.5, 4.0))};
+        Vision.SeenTag best = Vision.closestSeenTag(seen).orElseThrow();
+        assertEquals(14, best.id);
+        assertEquals(1, best.cameraIndex);
+        assertEquals("funnel: 18 | barge: 14 | reef: 7 8", Vision.seenTagsSummary(VisionConstants.LIMELIGHT_NAMES, seen));
+
+        // No 3D solve anywhere: the largest tag in the image stands in for the closest
+        double[][] flat = {rawTag(12, 0.8, 0.0), null, rawTag(19, 2.5, 0.0)};
+        assertEquals(19, Vision.closestSeenTag(flat).orElseThrow().id);
+        assertEquals("funnel: 12 | reef: 19", Vision.seenTagsSummary(VisionConstants.LIMELIGHT_NAMES, flat));
+
+        // Nothing in view, a camera that is not reporting, and a malformed array
+        double[][] none = {new double[0], null, new double[] {1.0, 2.0}};
+        assertTrue(Vision.closestSeenTag(none).isEmpty());
+        assertEquals("", Vision.seenTagsSummary(VisionConstants.LIMELIGHT_NAMES, none));
+    }
 }

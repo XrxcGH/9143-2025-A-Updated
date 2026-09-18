@@ -171,7 +171,9 @@ public class Vision extends SubsystemBase {
 
     // Target caches, refreshed once per periodic()
     private Optional<AprilTagTarget> cachedBestTarget = Optional.empty();   // matches the current goal (drives the tracker)
-    private Optional<AprilTagTarget> cachedBestVisible = Optional.empty();  // any trackable tag (dashboard / tuning)
+    private Optional<AprilTagTarget> cachedBestVisible = Optional.empty();  // closest tag a camera may ALIGN on (robot frame)
+    private Optional<SeenTag> cachedClosestSeen = Optional.empty();         // closest tag ANY camera reports (dashboard)
+    private String cachedSeenTagsSummary = "";
 
     // Tag latch while tracking: -1 = none. The latched tag's last sighting is
     // remembered as a field position so odometry can carry it while unseen.
@@ -340,9 +342,13 @@ public class Vision extends SubsystemBase {
      * Throttles AprilTag processing while the robot is disabled and restores
      * full rate when enabled - the cameras spend most of their powered-on
      * life disabled in the pit, where full-rate processing only makes heat.
+     * Selecting TEST mode on the Driver Station lifts the throttle without
+     * enabling: throttled, every vision readout on the dashboard is up to a
+     * few seconds behind the camera's own stream, which is no way to check
+     * a camera on the bench.
      */
     private void updateThrottle() {
-        int throttle = DriverStation.isDisabled()
+        int throttle = DriverStation.isDisabled() && !DriverStation.isTest()
             ? VisionConstants.DISABLED_THROTTLE
             : VisionConstants.ENABLED_THROTTLE;
         if (throttle != appliedThrottle) {
@@ -486,12 +492,122 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * The closest trackable tag of ANY class seen this loop, regardless of
-     * the superstructure goal or the latch - for the dashboard and for
-     * measuring the flush distances with the robot pushed into position.
+     * The closest tag a camera may ALIGN on this loop (its class is one the
+     * camera is mounted for, and the camera's lens pose is measured),
+     * regardless of the superstructure goal or the latch. It carries a
+     * robot-frame position, so it feeds the distance / lateral readouts used
+     * to measure the flush distances with the robot pushed into position,
+     * and the near-reef guard. For "which tag do the cameras see" use
+     * {@link #getClosestSeenTag()}, which filters nothing.
      */
     public Optional<AprilTagTarget> getBestVisibleTarget() {
         return cachedBestVisible;
+    }
+
+    // ------------------------------------------------------------------
+    // What the cameras see (dashboard)
+    // ------------------------------------------------------------------
+
+    /**
+     * One tag exactly as a camera reports it, with nothing filtered: no tag
+     * class, no camera role, no mounting pose, no latch. This is what the
+     * camera's own stream draws, which is what a "which tag do you see"
+     * readout has to agree with. The alignment caches above are a strict
+     * subset of it - a camera only ALIGNS on the classes it is mounted for,
+     * and only once its lens pose is measured.
+     */
+    public static final class SeenTag {
+        public final int id;
+        public final int cameraIndex;
+        /** Camera to tag, meters; 0 when the camera has no 3D solve for it. */
+        public final double distanceMeters;
+        /** Share of the image the tag covers, percent. */
+        public final double area;
+
+        SeenTag(int id, int cameraIndex, double distanceMeters, double area) {
+            this.id = id;
+            this.cameraIndex = cameraIndex;
+            this.distanceMeters = distanceMeters;
+            this.area = area;
+        }
+    }
+
+    /** Values per tag in a Limelight "rawfiducials" array: id, txnc, tync, ta, distToCamera, distToRobot, ambiguity. */
+    private static final int RAW_FIDUCIAL_STRIDE = 7;
+
+    /**
+     * The closest tag in the cameras' "rawfiducials" arrays (one per camera,
+     * null or empty = that camera reports nothing). Closest by the 3D
+     * distance when any tag has one; by image area (largest) when none does,
+     * so the readout still works on a pipeline with the 3D solve off.
+     */
+    public static Optional<SeenTag> closestSeenTag(double[][] rawFiducialsByCamera) {
+        SeenTag byDistance = null;
+        SeenTag byArea = null;
+        for (int camera = 0; camera < rawFiducialsByCamera.length; camera++) {
+            double[] raw = rawFiducialsByCamera[camera];
+            if (raw == null || raw.length % RAW_FIDUCIAL_STRIDE != 0) {
+                continue;
+            }
+            for (int base = 0; base < raw.length; base += RAW_FIDUCIAL_STRIDE) {
+                SeenTag tag = new SeenTag((int) raw[base], camera, raw[base + 4], raw[base + 3]);
+                if (tag.distanceMeters > 0 && (byDistance == null || tag.distanceMeters < byDistance.distanceMeters)) {
+                    byDistance = tag;
+                }
+                if (byArea == null || tag.area > byArea.area) {
+                    byArea = tag;
+                }
+            }
+        }
+        return Optional.ofNullable(byDistance != null ? byDistance : byArea);
+    }
+
+    /** Every tag ID per camera, in the cameras' own order: "funnel: 12 | reef: 18 19" ("" = none). */
+    public static String seenTagsSummary(String[] cameraNames, double[][] rawFiducialsByCamera) {
+        StringBuilder summary = new StringBuilder();
+        for (int camera = 0; camera < rawFiducialsByCamera.length; camera++) {
+            double[] raw = rawFiducialsByCamera[camera];
+            if (raw == null || raw.length == 0 || raw.length % RAW_FIDUCIAL_STRIDE != 0) {
+                continue;
+            }
+            if (summary.length() > 0) {
+                summary.append(" | ");
+            }
+            summary.append(cameraNames[camera]).append(':');
+            for (int base = 0; base < raw.length; base += RAW_FIDUCIAL_STRIDE) {
+                summary.append(' ').append((int) raw[base]);
+            }
+        }
+        return summary.toString();
+    }
+
+    private final double[][] rawFiducialsByCamera = new double[VisionConstants.LIMELIGHT_NAMES.length][];
+
+    /**
+     * Reads what every camera reports this loop. A camera whose array has
+     * not changed for SEEN_TAG_STALE_SECONDS is treated as reporting nothing:
+     * NetworkTables keeps the last value of a camera that lost power or its
+     * link, and a tag in view never yields two identical arrays in a row.
+     */
+    private void refreshSeenTags() {
+        double now = Timer.getFPGATimestamp();
+        for (int i = 0; i < limelightTableNames.length; i++) {
+            var sample = LimelightHelpers.getLimelightDoubleArrayEntry(limelightTableNames[i], "rawfiducials").getAtomic();
+            boolean stale = now - sample.timestamp / 1e6 > VisionConstants.SEEN_TAG_STALE_SECONDS;
+            rawFiducialsByCamera[i] = stale ? null : sample.value;
+        }
+        cachedClosestSeen = closestSeenTag(rawFiducialsByCamera);
+        cachedSeenTagsSummary = seenTagsSummary(VisionConstants.LIMELIGHT_NAMES, rawFiducialsByCamera);
+    }
+
+    /** The closest tag any camera reports this loop, unfiltered - what the dashboard's "Best Tag" shows. */
+    public Optional<SeenTag> getClosestSeenTag() {
+        return cachedClosestSeen;
+    }
+
+    /** Every tag ID each camera reports this loop ("funnel: 12 | reef: 18 19"), "" when none. */
+    public String getSeenTagsSummary() {
+        return cachedSeenTagsSummary;
     }
 
     /**
@@ -993,6 +1109,7 @@ public class Vision extends SubsystemBase {
 
         // Refresh the target caches once per loop; all readers use these.
         refreshTargets(robotPose);
+        refreshSeenTags();
 
         if (positionTrackingEnabled) {
             updateRobotPosition(robotPose);

@@ -922,6 +922,11 @@ public final class Constants {
 		// plenty for the pre-match heading seed.
 		public static final int DISABLED_THROTTLE = 100;
 		public static final int ENABLED_THROTTLE = 0;
+		// The dashboard's "which tags do the cameras see" readout ignores a
+		// camera whose tag list has not changed for this long (NetworkTables
+		// keeps the last value of a camera that lost power or its link).
+		// Longer than the gap between solves at the disabled throttle.
+		public static final double SEEN_TAG_STALE_SECONDS = 10.0;
 
 		// --- Camera Roles ---
 		// Which tag class each Limelight may supply to the ALIGNMENT tracker,

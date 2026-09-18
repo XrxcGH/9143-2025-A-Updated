@@ -424,12 +424,25 @@ public class Dashboard {
         SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
 
         // --- Vision ---
-        // Best VISIBLE tag (any trackable class, ignoring the goal filter and
-        // the latch) so the readouts work with the robot pushed into position
-        // while disabled; positions are in the ROBOT frame
+        // What the cameras SEE, unfiltered - the same tags their streams
+        // draw: the closest one ("Best Tag"), which camera has it, and every
+        // ID per camera. (Best Tag used to come from the alignment cache
+        // below, so it ignored the unmeasured camera, every tag outside a
+        // camera's alignment class and any frame without a 3D solve: the
+        // stream showed a tag and the widget did not move.)
         var vision = swerve.getVision();
+        var seenTag = vision.getClosestSeenTag();
+        SmartDashboard.putNumber("Vision/Best Tag", seenTag.map(t -> (double) t.id).orElse(-1.0));
+        SmartDashboard.putString("Vision/Best Tag Camera",
+            seenTag.map(t -> VisionConstants.LIMELIGHT_NAMES[t.cameraIndex]).orElse(""));
+        SmartDashboard.putString("Vision/Visible Tags", vision.getSeenTagsSummary());
+        // The closest tag a camera may ALIGN on (its class, lens pose
+        // measured), ignoring the goal filter and the latch so the readouts
+        // work with the robot pushed into position while disabled; positions
+        // are in the ROBOT frame. -1 while Best Tag shows an ID = that tag is
+        // seen but is not one this camera aligns on.
         var bestTarget = vision.getBestVisibleTarget();
-        SmartDashboard.putNumber("Vision/Best Tag",
+        SmartDashboard.putNumber("Vision/Alignment Tag",
             bestTarget.map(t -> (double) t.id).orElse(-1.0));
         SmartDashboard.putNumber("Vision/TX",
             bestTarget.map(t -> t.tx).orElse(0.0));
@@ -441,7 +454,8 @@ public class Dashboard {
             bestTarget.map(t -> t.robotFrame.getY()).orElse(0.0));
         SmartDashboard.putNumber("Vision/Square Heading",
             bestTarget.flatMap(t -> t.squareHeading).map(Rotation2d::getDegrees).orElse(0.0));
-        Logger.recordOutput("Vision/BestTag", bestTarget.map(t -> t.id).orElse(-1));
+        Logger.recordOutput("Vision/BestTag", seenTag.map(t -> t.id).orElse(-1));
+        Logger.recordOutput("Vision/AlignmentTag", bestTarget.map(t -> t.id).orElse(-1));
         for (int i = 0; i < visionHasTargetKeys.length; i++) {
             SmartDashboard.putBoolean(visionHasTargetKeys[i], vision.hasTarget(i));
             // Last pose fused from each camera, drawn on the field beside the

@@ -252,7 +252,7 @@
             }
           },
           {
-            "title": "LED State",
+            "title": "Visible Tags",
             "x": 896.0,
             "y": 512.0,
             "width": 256.0,
@@ -260,7 +260,7 @@
             "type": "Text Display",
             "properties": {
               "period": 0.033,
-              "topic": "/SmartDashboard/LEDs/State",
+              "topic": "/SmartDashboard/Vision/Visible Tags",
               "show_submit_button": false
             }
           },

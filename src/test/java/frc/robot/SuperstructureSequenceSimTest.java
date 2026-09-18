@@ -38,9 +38,10 @@ import frc.robot.subsystems.Pace;
  * poses (and for a second button pressed mid-move). Every 5 ms it requires
  * that the pose is inside the clearance table and the L4 pre-top rule holds;
  * per move it requires that the command finishes at its pose, that the
- * carriage's setpoints do not alternate (the fault that shook the elevator
- * on the L4 exit), that neither controller is flooded with setpoints, and
- * that the two mechanisms are never both stationary mid-move.
+ * carriage's setpoints do not alternate (every new setpoint restarts the
+ * MAXMotion profile, so alternating ones shake the elevator - the L4 exit is
+ * the move most exposed to it), that neither controller is flooded with
+ * setpoints, and that the two mechanisms are never both stationary mid-move.
  *
  * The vendor simulators advance on wall-clock time, so the real subsystems
  * cannot be stepped; the Superstructure therefore talks to the CarriageAxis /
@@ -461,9 +462,9 @@ class SuperstructureSequenceSimTest {
     }
 
     /**
-     * The operator's cycle on the new mapping: level -> SCORE (gated on the measured pose) -> home
-     * by itself. After L3 / L4 the exit must wait until the drivetrain has backed away, because it
-     * swings the claw past the front bumper; after L2 it must not wait at all.
+     * The operator's cycle: level -> SCORE (gated on the measured pose) -> home by itself. After
+     * L3 / L4 the exit must wait until the drivetrain has backed away, because it swings the claw
+     * past the front bumper; after L2 it must not wait at all.
      */
     @Test
     void scoreThenHomesByItself() throws IOException {
@@ -478,7 +479,7 @@ class SuperstructureSequenceSimTest {
             Command score = superstructure.score(() -> new Pose2d(robotX[0], 0.0, Rotation2d.kZero));
             CommandScheduler.getInstance().schedule(score);
             boolean swingsForward = !level.equals("L2");
-            // One second at the reef: eject window over, robot has NOT moved
+            // One second at the reef: eject window over, the robot has not moved
             for (int i = 0; i < 50; i++) {
                 loop("score " + level, 0.0);
             }
@@ -509,8 +510,10 @@ class SuperstructureSequenceSimTest {
 
     /**
      * Algae hold (operator D-pad left) from an algae intake pose: the ARM comes back to RAISE and the
-     * carriage is not commanded at all - re-commanding it to its own measured height made the
-     * elevator rumble in place. After leaving L4 the same command DOES put the carriage back.
+     * carriage is not commanded at all - re-commanding it to its own measured height asks the
+     * Spark MAX for a zero-length MAXMotion profile, and the elevator rumbles in place. From L4
+     * the same raiseArm() (which the hold ends in) DOES put the carriage back, because the staged
+     * exit moves it; that move must still finish at the L4 height with the arm at RAISE.
      */
     @Test
     void algaeHoldLeavesTheCarriageAlone() {

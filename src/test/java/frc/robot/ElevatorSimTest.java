@@ -17,10 +17,11 @@ import frc.robot.subsystems.Elevator;
 /**
  * Exercises the Elevator's desktop physics simulation: drives the carriage
  * open-loop to prove the sim wiring (motor output -> plant -> simulated
- * encoder), then verifies the stick-release hold latches on the controller.
+ * encoder), then verifies that holdCurrentPosition() latches the height on
+ * the controller once the open-loop drive stops.
  *
- * NOTE: this deliberately does NOT assert a full MAXMotion profile move.
- * REV's simulated MAXMotion profile advances on WALL-CLOCK time, not the
+ * This deliberately does not assert a full MAXMotion profile move.
+ * REV's simulated MAXMotion profile advances on wall-clock time, not the
  * stepped HAL clock, so profile-following in a fast unit-test loop is
  * nondeterministic (observed landing anywhere from 20 to 43 inches for a
  * 20 inch command depending on host speed). Holding at zero profile
@@ -76,9 +77,10 @@ class ElevatorSimTest {
             "Manual control should raise the simulated carriage, was "
                 + elevator.getCurrentPosition());
 
-        // Release the stick: RobotContainer's default command calls
-        // holdCurrentPosition(), which must latch the height on the
-        // controller so the carriage does not sink under gravity
+        // Stop driving open-loop and call holdCurrentPosition() (what
+        // RobotContainer.enabledInit() does on every enable): it must latch
+        // the height on the controller so the carriage does not sink under
+        // gravity
         elevator.holdCurrentPosition();
         double heldHeight = elevator.getCurrentPosition();
 

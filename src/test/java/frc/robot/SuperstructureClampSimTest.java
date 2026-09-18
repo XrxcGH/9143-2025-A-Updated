@@ -199,7 +199,7 @@ class SuperstructureClampSimTest {
         // carriage must not be clamped to the low-box roof for a sweep the parked arm has not begun
         run("L4 climb from 12 in", carriage(12.0, 0.0, 1.0), arm(RAISE, 1.0), l4Climb(), 5.0, 9, 0, 26.0, 46.0);
         run("L4 climb from 12 in, carriage at 60%", carriage(12.0, 0.0, 0.6), arm(RAISE, 1.0), l4Climb(), 7.0, 9, 0, 26.0, 46.0);
-        // The point of releasing the arm early: the carriage no longer stops at its first clamp
+        // The point of releasing the arm early: the carriage keeps moving instead of stopping at its first clamp
         assertTrue(nominal > 8.0, "the carriage should keep moving through the L4 climb, slowest was "
             + nominal + " in/s");
     }

@@ -66,10 +66,11 @@ public final class Constants {
 		public static final int ELEVATOR_STATUS_PERIOD_MS = 10;
 
 		// --- Mechanism Gearing ---
-		// Power path: NEO -> 15:1 MAXPlanetary (5:1 x 3:1 cartridges; the
-		// second 3:1 was removed in Sept 2026 for speed) -> 90-degree gearbox
-		// (1:1, REV-21-2120) -> 1/2" hex shaft -> 22T #25 sprockets with
-		// chain runs at the top and bottom of the elevator.
+		// Power path: NEO -> 15:1 MAXPlanetary (5:1 x 3:1 cartridges) ->
+		// 90-degree gearbox (1:1, REV-21-2120) -> 1/2" hex shaft -> 22T #25
+		// sprockets with chain runs at the top and bottom of the elevator.
+		// (Before Sept 2026 the stack carried a second 3:1 for 45:1; gains and
+		// speeds recorded for that gearing do not transfer.)
 		public static final double ELEVATOR_GEAR_RATIO = 5.0 * 3.0;
 
 		// Chain advance (inches) per SPROCKET rotation. #25 chain has a
@@ -101,13 +102,14 @@ public final class Constants {
 		//      6.00        1.375            4.36         5.125
 		//     20.00        1.17            17.03        ~17.9
 		//     40.00        1.17            34.05        ~35
-		// (the 8 in test, 6.375, ran during the follower-brake stutter and
-		// is the one outlier). Between the 20 and 40 in tests the slope is
-		// 1.005, so the gearing model is right to within 0.5%; the constant
-		// is NOT a scale error but the height the carriage sits at on its
-		// hard stop in that measurement frame - see ELEVATOR_ZERO_HEIGHT.
-		// The two earlier "corrections" (1.375, then 1.17) were fits to that
-		// offset and are gone.
+		// (the fifth, an 8 in test that read 6.375, was taken while the
+		// elevator was not moving cleanly and is the one outlier). Between
+		// the 20 and 40 in tests the slope is 1.005, so the gearing model is
+		// right to within 0.5%; the constant is NOT a scale error but the
+		// height the carriage sits at on its hard stop in that measurement
+		// frame - see ELEVATOR_ZERO_HEIGHT. The trial ratios in the table
+		// (1.375, 1.17) were single-point fits to that offset: never set this
+		// ratio from one tape reading - take two heights and use the slope.
 		public static final double ELEVATOR_MEASURED_TRAVEL_RATIO = 1.0;
 
 		// Default carriage travel (inches) per MOTOR rotation (~0.733): the
@@ -122,14 +124,13 @@ public final class Constants {
 		// ~6.9 V, plus kG, kS and kA x 200 = ~0.8 V during the acceleration
 		// ramp, so a full-speed climb peaks near 9 V and keeps ~3 V of headroom
 		// for the position loop on a sagging battery. Full 52 in of travel
-		// takes ~1.5 s. (These were 50 / 400 while the Tunables clamps were
-		// 40 / 300, so the robot never actually ran the documented numbers;
-		// the clamps are now 60 / 500 and these defaults are what runs.)
+		// takes ~1.5 s. (The Tunables getters clamp the live values to 60 in/s
+		// and 500 in/s^2.)
 		// Acceleration is the mast's comfort limit, not the motors': the
 		// trapezoidal profile changes commanded acceleration in a step at the
 		// end of every move (MAXMotion has no S-curve in REVLib 2026, so there
 		// is no jerk limit to soften it) and the structure rings at whatever
-		// that step is. 300 in/s^2 visibly shook the elevator as it stopped;
+		// that step is. At 300 in/s^2 the elevator visibly shakes as it stops;
 		// 200 in/s^2 cuts the stopping force from ~173 N to ~116 N at the
 		// carriage and costs only ~0.07 s on a full-travel move. It is also
 		// the deceleration the staged L3/L4 sequences see when the carriage
@@ -144,75 +145,73 @@ public final class Constants {
 		// How far the carriage may stray from the MAXMotion profile before the
 		// controller regenerates the profile from the current position and the
 		// measured velocity. NOT a settling tolerance. With kA carrying the
-		// acceleration the carriage tracks the profile within ~0.1 in, so 0.5
-		// in only fires on a real disturbance (a stall or a collision) instead
-		// of firing on every acceleration ramp, which is what turned a normal
-		// move into a series of regenerated profiles.
-		// 1.0, not 0.5: under a sagging bus the output saturates near cruise,
-		// the error passes half an inch, and the regenerated profile (built on
-		// a lagged velocity) is what then hunts. Every safety gate reads the
-		// MEASURED height, so a wider window costs nothing.
+		// acceleration the carriage tracks the profile within ~0.1 in, so this
+		// window should fire only on a real disturbance (a stall or a
+		// collision) - a window tight enough to fire on an ordinary
+		// acceleration ramp turns one move into a series of regenerated
+		// profiles. 1.0 rather than 0.5: under a sagging bus the output
+		// saturates near cruise, the error passes half an inch, and the
+		// regenerated profile (built on a lagged velocity) then hunts. Every
+		// safety gate reads the MEASURED height, so a wider window costs
+		// nothing.
 		public static final double ELEVATOR_ALLOWED_PROFILE_ERROR = 1.0;
 
 		// --- Closed-Loop Gains (Spark MAX slot 0; error in inches) - tunable defaults ---
 		// kP, kS, the kV scale, kA, kG, and the profile above are all editable
 		// on the Testing tab and re-applied to both controllers the next time
 		// the robot is disabled - no redeploy, no REV Hardware Client.
-		// TUNE - first power-on procedure:
+		// TUNE - procedure after any mechanical change:
 		//   1. Calibrate the height reading against a tape measure (README:
 		//      "Calibrating the elevator height").
-		//   2. Set kG from the holding voltage: hold a height, read
-		//      "Elevator/Hold Volts", and set kG to it. (The readout already
-		//      has kS taken off: the controller adds +kS at rest as well.)
+		//   2. Set kG from "Elevator/kG From Cruise": with the arm at RAISE,
+		//      run one long move each way from the Testing tab; the readout
+		//      is the mean of the applied volts at cruise going up and going
+		//      down, which friction cancels out of. ("Elevator/Hold Volts" is
+		//      a cross-check only: inside the static-friction band the hold
+		//      voltage partly echoes the gains already configured.)
 		//   3. Command a preset and check the carriage tracks without lagging
 		//      on the ramps (that is kA) or resting short (that is kP or kG).
 		// kP sizing: the position loop must supply whatever the feedforward
 		// does not, and at 15:1 one inch of error is only 1.4 motor rotations,
-		// so a given duty-per-inch is 3x weaker at the carriage than the same
-		// number was at 45:1. 0.5 duty/in gives ~880 N per inch of error -
-		// still softer than the 45:1 setup ran (0.3 duty/in there was ~1580
-		// N/in) but firm enough that friction and a mis-set kG leave under
-		// 0.1 in of rest error, and the NEO back-EMF keeps the loop damped
-		// (damping ratio ~0.55 with the CAD mass estimate).
+		// so a duty-per-inch figure is soft at the carriage: 0.4 duty/in is
+		// ~700 N per inch of error. That is firm enough that friction and a
+		// mis-set kG leave about 0.1 in of rest error or less. With kD 0 the
+		// loop's only damping is the NEO's back-EMF: the damping ratio is
+		// ~0.63 at 0.4 (CAD mass estimate) against ~0.56 at 0.5, where every
+		// disturbance at a setpoint rings for two or three visible cycles at
+		// ~6 Hz; the price is ~0.02 in more rest error. kD is not an option:
+		// the hall encoder resolves 0.0175 in, and a derivative of that at
+		// 1 kHz is noise. If the carriage wobbles at a setpoint, 0.3 is ~0.72.
 		// Symptoms: rests short of target -> raise kP, or fix kG (step 2);
 		// buzzes or hunts at rest -> lower kP; overshoots on the way INTO a
 		// target -> lower kA; lags behind on the ramps -> raise kA.
-		// 0.4 (was 0.5): with kD 0 the loop's only damping is the NEO's
-		// back-EMF, and at 0.5 the damping ratio is ~0.56 - every disturbance at
-		// a setpoint rang for two or three visible cycles at ~6 Hz. 0.4 is
-		// ~0.63 for 0.02 in more rest error. (kD is not an option: the hall
-		// encoder resolves 0.0175 in, and a derivative of that at 1 kHz is
-		// noise.) If it still wobbles, 0.3 is ~0.72.
 		public static final double ELEVATOR_kP = 0.4; // Duty cycle per inch of position error
 		public static final double ELEVATOR_kI = 0.0; // Leave 0 - kG handles gravity sag
 		public static final double ELEVATOR_kD = 0.0; // Duty cycle per in/s of error derivative
 
 		// --- On-Controller Feedforward (volts; REVLib FeedForwardConfig) ---
-		// kS: REV's procedure - the largest voltage that does NOT move the
-		// carriage (TUNE: raise until motion just starts, then back off).
-		// A modest starting value breaks the stick-slip that a P-only loop
-		// shows at the slow end of a profile (the carriage sticks, error
-		// builds, it lurches free - "stutters and slows down"). Through
-		// 15:1 this is a small torque, so it cannot cause a runaway.
-		// ZERO, on purpose. The Spark MAX applies kS as +kS whenever the
-		// profile velocity is zero (measured in REV's own simulator: it does
-		// not follow the sign of the error), so a non-zero kS (a) biases the
-		// hold voltage to kG + kS, and (b) steps the feedforward by +2 x kS
-		// at the instant a DESCENT ends (kG - kS while moving down, kG + kS at
-		// rest). That step, into a lightly damped loop, was the wobble around
-		// the setpoints that are reached from above. Moving friction is ~0.2 V,
-		// which the position loop covers with ~0.04 in of lag.
+		// kS: ZERO, on purpose. (REV's definition is the largest voltage that
+		// does NOT move the carriage.) The Spark MAX applies kS as +kS
+		// whenever the profile velocity is zero (measured in REV's own
+		// simulator: it does not follow the sign of the error), so a non-zero
+		// kS (a) biases the hold voltage to kG + kS, and (b) steps the
+		// feedforward by +2 x kS at the instant a DESCENT ends (kG - kS while
+		// moving down, kG + kS at rest). That step, into a lightly damped
+		// loop, shows up as a wobble around every setpoint that is reached
+		// from above. Moving friction is ~0.2 V, which the position loop
+		// covers with ~0.04 in of lag, so nothing is lost by leaving it out.
 		public static final double ELEVATOR_kS = 0.0;
 		// kA: volts per in/s^2 of PROFILE acceleration (REVLib applies it in
 		// MAXMotion modes only). Without it the position loop has to supply
 		// the whole acceleration force out of tracking error: at 15:1 the
 		// carriage plus arm plus the reflected rotor inertia is ~23 kg
-		// effective, so 300 in/s^2 needed ~1.2 V, which at the old kP of 0.1
-		// meant a FULL INCH of lag on the way up and an inch of LEAD on the
-		// way down - the carriage sailed past every target and the profile
-		// regenerated around it. 0.0040 = 12 V / 105 A x (0.733 in/rot /2pi x
-		// 0.0254) / (2 x 0.0248 Nm/A) x 23 kg x 0.0254. Raise it if the
-		// carriage lags on the ramps, lower it if it leads.
+		// effective, so the 200 in/s^2 ramps need ~0.8 V. Bought with error
+		// instead, that is lag on the way up and LEAD on the way down - the
+		// carriage runs past its target and, if the error passes the allowed
+		// profile error, the profile regenerates around it.
+		// 0.0040 = 12 V / 105 A x (0.733 in/rot / 2pi x 0.0254) /
+		// (2 x 0.0248 Nm/A) x 23 kg x 0.0254. Raise it if the carriage lags
+		// on the ramps, lower it if it leads.
 		public static final double ELEVATOR_kA = 0.0040;
 		// kV is NOT a stored constant. It is the NEO back-EMF model,
 		// 12 V / (free speed in in/s), and free speed in inches depends on
@@ -225,9 +224,10 @@ public final class Constants {
 		// springs in the CAD are not on the robot), so the motors hold the
 		// whole carriage + arm + half the middle stage - about 145 N by the
 		// CAD mass estimate, which is ~1.0 V through 15:1 (the estimate spans
-		// 0.8-1.3 V). MEASURE it on the robot: hold a height and read
-		// "Elevator/Hold Volts" (TUNE step 2). If a counterbalance is ever
-		// added, re-measure - kG drops by whatever share it carries.
+		// 0.8-1.3 V). 1.0 is that estimate, NOT a measurement: set it from
+		// the "Elevator/kG From Cruise" readout (TUNE step 2). If a
+		// counterbalance is ever added, re-measure - kG drops by whatever
+		// share it carries.
 		public static final double ELEVATOR_kG = 1.0;
 
 		/** NEO back-EMF velocity feedforward (volts per in/s) for a given carriage travel per motor rotation. */
@@ -260,15 +260,14 @@ public final class Constants {
 		// --- Tolerances (inches) ---
 		// "At target": what the Superstructure waits for before it calls a
 		// pose reached, and what the dashboard's At Target light shows. The
-		// hall encoder resolves 0.0175 in and the tuned loop rests within
-		// ~0.02 in of the setpoint (friction over 12 x kP), so 0.05 in is
-		// about three counts and still reachable. If a pose ever sits waiting,
-		// the loop is resting outside this window - fix kG (Elevator/Hold
-		// Volts) or raise kP rather than loosening this.
-		// 0.25 (was 0.05): the rest band is (friction volts + kG error) /
-		// (12 x kP), about 0.03-0.11 in, so 0.05 was inside it and the light
-		// flickered. This is a "pose reached" flag only - no safety gate reads
-		// it. Judge kG from Elevator/Height against Elevator/Target.
+		// hall encoder resolves 0.0175 in, and the loop's rest band is
+		// (friction volts + kG error) / (12 x kP), about 0.03-0.11 in. The
+		// window has to sit outside that band - a tighter one (0.05 in) lies
+		// inside it and the light flickers. This is a "pose reached" flag
+		// only - no safety gate reads it. If a pose ever sits waiting, the
+		// loop is resting outside this window: fix kG (Elevator/kG From
+		// Cruise) or raise kP rather than loosening this. Judge the rest
+		// error from Elevator/Height against Elevator/Target.
 		public static final double ELEVATOR_ALLOWED_ERROR = 0.25;
 		// Left-vs-right travel disagreement that raises the out-of-sync alert.
 		// Both sides drive the same hex shaft, so this is a slip detector, not
@@ -299,18 +298,18 @@ public final class Constants {
 			CORAL_L1(0.0),
 			CORAL_L2(12.0),
 			CORAL_L3(30.5),
-			// 52.5 left only half an inch to the forward soft limit (53.0) and
-			// sat exactly ON the 20 deg corridor ceiling, and the carriage
-			// stuttered against the top of travel trying to hold it. 51.5 keeps
-			// 1.5 in to the soft limit and 1 in of corridor margin. Raise it
-			// toward 52 if the coral needs the height, but not past it.
+			// 51.5 keeps 1.5 in to the forward soft limit (53.0) and 1 in under
+			// the 20 deg corridor ceiling (52.5). Holding AT 52.5 leaves half
+			// an inch to the soft limit and sits exactly on that ceiling, and
+			// the carriage stutters against the top of travel. Raise it toward
+			// 52 if the coral needs the height, but not past it.
 			CORAL_L4(51.5),
 			ALGAE_LOW_INTAKE(20.5),
 			ALGAE_HIGH_INTAKE(37.5),
-			// Was 52.5: half an inch under the 53.0 soft limit, the height at
-			// which L4 stuttered against the top of travel. 52.0 keeps a full
-			// inch. The barge shot wants height - raise it back toward 52.5
-			// only if the shot needs it AND the carriage holds there quietly.
+			// 52.0 keeps a full inch under the 53.0 soft limit; at half an inch
+			// (52.5) the carriage stutters against the top of travel. The barge
+			// shot wants height - raise it toward 52.5 only if the shot needs
+			// it AND the carriage holds there quietly.
 			ALGAE_SCORE(52.0);
 
 			private final double height;
@@ -334,9 +333,9 @@ public final class Constants {
 		// --- CAN IDs ---
 		public static final int CORAL_PIVOT_MOTOR_ID = 56;  // Pivot TalonFX
 		public static final int CORAL_INTAKE_MOTOR_ID = 57; // Intake TalonFX
-		// VERIFY: this was previously documented/configured as 64, but Phoenix
-		// device IDs only go up to 62 - constructing a device with ID 64
-		// throws and crashes robot code on boot (caught by RobotContainerTest).
+		// Phoenix 6 device IDs only go up to 62: constructing a device with a
+		// larger ID throws and crashes robot code on boot (RobotContainerTest
+		// constructs every device, so it catches this).
 		public static final int CANRANGE_SENSOR_ID = 3;    // CANrange game piece sensor
 
 		// --- DIO Ports ---
@@ -366,21 +365,18 @@ public final class Constants {
 		// "Acceleration" / "Jerk" (Testing tab), re-applied to the TalonFX
 		// the next time the robot is disabled.
 		//
-		// CHAIN-BACKLASH PROFILE (Sept 2026): the pivot chain currently has
-		// slack and backlash, so at the end of a fast move the arm coasts
-		// through the slop and the chain catches it - the whole assembly
-		// gets thrown around. Motion Magic decelerates at the same rate it
-		// accelerates, so the ACCELERATION sets how hard that catch is, and
-		// the JERK limit sets how abruptly the deceleration begins. These
-		// values keep the arm ~2x faster than the first-power-on profile
-		// (90-degree swing ~1.2 s instead of 2.1 s, the 45-degree L4
-		// rotation ~0.9 s) while easing into every stop:
-		// Sized from what the sweeps actually need. The rotations the L3 and
-		// L4 sequences wait on are about 75 deg, and a 75 deg move at 300
-		// deg/s^2 never reaches a 200 deg/s cruise - it peaks at 150 - so the
-		// carriage was waiting on ACCELERATION, not top speed. Raising the
-		// acceleration is what shortens them:
-		//     sweep      200/300      300/800
+		// CHAIN BACKLASH (Sept 2026): the pivot chain has slack, so at the end
+		// of a fast move the arm coasts through the slack and the chain
+		// catches it, which jolts the whole assembly. Motion Magic decelerates
+		// at the same rate it accelerates, so the ACCELERATION sets how hard
+		// that catch is, and the JERK limit sets how abruptly the
+		// deceleration begins.
+		// The profile is sized from what the sweeps need. The rotations the L3
+		// and L4 sequences wait on are about 75 deg, and a short move is
+		// limited by ACCELERATION, not top speed (75 deg at 300 deg/s^2 peaks
+		// at 150 deg/s and never reaches a 200 deg/s cruise), so acceleration
+		// is what shortens them. Sweep times, cruise (deg/s) / accel (deg/s^2):
+		//     sweep      200/300      300/800 (the defaults)
 		//     75 deg     1.30 s       0.88 s
 		//     100 deg    1.45 s       0.97 s
 		//     160 deg    1.77 s       1.18 s
@@ -389,10 +385,10 @@ public final class Constants {
 		//     is ~6.5 V and kP still has room.
 		//   - 800 deg/s^2 costs the motor about 9 A against the arm's inertia -
 		//     nothing. What it costs the GAME PIECE is the real limit: peak
-		//     centripetal load at the claw goes from ~0.4 g to ~1.0 g.
-		//   - 6000 deg/s^3 keeps the S-curve ramp at 0.13 s, the same easing
-		//     the 300/2000 pair had, so the stop still ramps in instead of
-		//     snapping - that is what the chain slop needs.
+		//     centripetal load at the claw is ~1.0 g (~0.4 g at 200/300).
+		//   - 6000 deg/s^3 gives a 0.13 s S-curve ramp (acceleration / jerk),
+		//     so every stop ramps in instead of snapping - that is what the
+		//     chain slack needs.
 		// If a held piece slips: on a LONG swing (algae, base to RAISE) the
 		// peak is the cruise, so lower CRUISE; on the short scoring rotations
 		// the peak is set by acceleration, so lower ACCELERATION.
@@ -403,21 +399,20 @@ public final class Constants {
 		public static final double CORAL_PIVOT_MAX_JERK = 6000.0;        // Jerk limit (deg/s^3); 0.13 s to reach full accel
 
 		// --- Closed-Loop Gains (Phoenix 6 slot 0; voltage-based, error in mechanism rotations) ---
-		// TUNE - starting points for first power-on:
+		// TUNE - procedure after any mechanical change:
 		//   1. Sanity-check the angle reading against the through bore /
 		//      a protractor (ratio is derived from real tooth counts).
 		//   2. Command a preset; raise kP until tracking is crisp, add kD if
 		//      it oscillates.
-		//   3. kG only works if 0 degrees = arm horizontal (Arm_Cosine);
-		//      otherwise leave it 0.
-		// kP sanity: 40 V/rot is 0.11 V per degree - the 2-degree at-target
-		// tolerance is worth only 0.22 V, so this cannot ring on its own; the
+		//   3. Measure the balance angle and kG (procedure at kG below).
+		// kP sanity: 40 V/rot is 0.11 V per degree - the 1-degree at-target
+		// tolerance is worth only 0.11 V, so this cannot ring on its own; the
 		// profile feedforwards below do the moving and kP just corrects error.
 		// Symptoms: stops short of the angle -> raise kP; buzz at rest -> lower.
 		public static final double CORAL_PIVOT_kP = 40.0; // Volts per rotation of position error (~0.11 V/deg)
 		public static final double CORAL_PIVOT_kI = 0.0;  // Leave 0 - use kG for gravity
 		public static final double CORAL_PIVOT_kD = 0.0;  // Volts per rot/s of error derivative
-		// kG no longer needs 0 deg to be horizontal: Phoenix 6 26.x adds
+		// kG does not need 0 deg to be horizontal: Phoenix 6 (26.x) has
 		// Slot0.GravityArmPositionOffset, and Arm_Cosine then outputs
 		// kG x cos(position + offset). This arm's 0 deg has the claw ~33 deg
 		// past vertical toward the rear, so gravity does nothing at the
@@ -433,7 +428,7 @@ public final class Constants {
 		// Expect ~0.3 V (4 kg at ~0.25 m through 65.41:1). Without it the arm
 		// rests 2-3 deg low at RAISE and the algae poses (kG / kP).
 		public static final double CORAL_PIVOT_kG = 0.0;  // Volts to hold the arm with the claw horizontal
-		public static final double CORAL_PIVOT_BALANCE_ANGLE_DEG = 33.0; // Degrees: where gravity does nothing (0 < angle < 180)
+		public static final double CORAL_PIVOT_BALANCE_ANGLE_DEG = 33.0; // Degrees: where gravity does nothing (0 < angle < 180); an estimate until measured (step 1)
 
 		// --- Profile Feedforward (volts) ---
 		// Physics-based so Motion Magic tracks its profile instead of lagging
@@ -444,15 +439,16 @@ public final class Constants {
 		public static final double CORAL_PIVOT_kS = 0.2;  // Volts to overcome static friction (TUNE: raise until motion starts)
 		public static final double CORAL_PIVOT_kV = 7.85; // Volts per pivot rot/s of profile velocity
 		// kA: volts per pivot rot/s^2 of PROFILE acceleration. Motion Magic
-		// applies it on the ramps, so the position loop no longer has to buy
-		// that force with tracking error - the same thing that fixed the
-		// elevator's overshoot. 800 deg/s^2 is 2.2 rot/s^2 and needs ~0.3 V
+		// applies it on the ramps, so the position loop does not have to buy
+		// that force with tracking error (lag on the way in, overshoot at the
+		// end - see ELEVATOR_kA). 800 deg/s^2 is 2.2 rot/s^2 and needs ~0.3 V
 		// against the arm's inertia (~0.8 kg m^2 through 65.41:1), hence 0.13.
 		public static final double CORAL_PIVOT_kA = 0.13;
 
 		// --- Pivot Angle Limits (degrees) ---
-		// The pivot is zeroed at its base position on initialization, so the
-		// base IS zero; there is no travel below it.
+		// The pivot is zeroed at its base position (CorAl stores that zero
+		// against the through bore's absolute reading and restores it at
+		// every start), so the base IS zero; there is no travel below it.
 		public static final double CORAL_PIVOT_MIN_ANGLE = 0.0;   // Reverse soft limit
 		public static final double CORAL_PIVOT_MAX_ANGLE = 160.0; // Forward soft limit
 
@@ -460,7 +456,7 @@ public final class Constants {
 		// "At target" is measured on the THROUGH BORE (the real arm angle),
 		// while the closed loop runs on the motor sensor, so this window has
 		// to cover the chain's backlash and stretch as well as the loop's own
-		// error. 1.0 deg is 0.27 in at the claw (0.54 in at the old 2.0).
+		// error. 1.0 deg is 0.27 in at the claw.
 		// The Superstructure's settle also releases once both mechanisms have
 		// STOPPED, so a tight window here costs precision-chasing time only
 		// when the arm is genuinely still moving.
@@ -473,16 +469,17 @@ public final class Constants {
 		// --- Game Piece Detection (CANrange) ---
 		// The CANrange's own proximity bit is "distance < threshold", with a
 		// hysteresis band around it, and only when the return is strong
-		// enough to count as a valid measurement. With the original 0.1 m
-		// threshold and the 0.01 m default hysteresis the empty claw's own
-		// structure sat right at the threshold, so the bit chattered and the
-		// rising-only debounce latched it as a coral. The fixes: a hysteresis
-		// band wide enough to sit clear of that background, a narrower
-		// field of view so oblique structure is not in the beam, a health
-		// check, and a debounce on BOTH edges. The threshold and hysteresis
-		// are live tunables ("CorAl - Coral Detect ..."): read
-		// CorAl/CANrange Distance on the Testing tab with the claw empty and
-		// with a coral, and put the threshold halfway between.
+		// enough to count as a valid measurement. The empty claw's own
+		// structure returns a reading close to a held coral's, so a verdict
+		// that sits near that background chatters, and a rising-only debounce
+		// latches the chatter as a coral. The verdict is therefore formed in
+		// code (CorAl.readDetection): a signal-strength gate, a measurement
+		// health check, a hysteresis band around the distance threshold, a
+		// narrow field of view so oblique structure is not in the beam, and a
+		// debounce on BOTH edges. The threshold, hysteresis and strength gate
+		// are live tunables ("CorAl - Coral Detect ..." and "CorAl - Coral Min
+		// Signal Strength"); set them from the CorAl/CANrange Distance and
+		// CorAl/CANrange Signal Strength readouts, claw empty and coral held.
 		public static final double GAME_PIECE_DETECTION_CONFIRMATION_TIME = 0.3; // Seconds each edge must persist (both edges)
 		// MEASURED on the robot (Sept 2026), and it settles how this claw
 		// detects a coral. CTRE's CANrange tuning guide describes two setups;
@@ -495,8 +492,8 @@ public final class Constants {
 		// what separates the two, by a factor of sixteen. So the strength gate
 		// does the work and the distance threshold is deliberately generous:
 		// per the guide, it only has to sit above the distance a held piece
-		// reads. This is why an empty claw used to report a coral: the old
-		// strength gate was CTRE's 2500 default, which 3000-4000 clears.
+		// reads. CTRE's default strength gate (2500) is no use here: the empty
+		// claw's 3000-4000 clears it, and an empty claw reports a coral.
 		public static final double GAME_PIECE_MIN_SIGNAL_STRENGTH = 15000;       // Tunable default: ~4x the empty return, far below a held one
 		public static final double GAME_PIECE_DETECTION_THRESHOLD = 0.30;        // Tunable default: well above the 0.05 m a held coral reads (m)
 		public static final double GAME_PIECE_DETECTION_HYSTERESIS = 0.015;      // Tunable default: the verdict only changes outside threshold +/- this (m)
@@ -521,7 +518,8 @@ public final class Constants {
 		public static final double CORAL_INTAKE_SPEED = 0.1;   // Intaking coral (auto-stops on detection)
 		public static final double CORAL_SCORE_SPEED = 0.3;    // Ejecting coral at L2-L4: on THROUGH the claw, the intake's direction
 		// L1 is the odd one out: the coral goes back out the way it came IN,
-		// so the rollers run against the intake direction (negative).
+		// so the rollers run against the intake direction (negative). The
+		// direction is confirmed on the robot; -0.3 is a starting value (TUNE).
 		public static final double CORAL_L1_SCORE_SPEED = -0.3;
 		public static final double ALGAE_INTAKE_SPEED = -0.1;  // Intaking algae (reverse direction)
 		public static final double ALGAE_HOLD_SPEED = -0.025;  // Holding pressure on algae
@@ -529,9 +527,9 @@ public final class Constants {
 
 		// --- Through Bore Encoder (degrees) ---
 		// The REV Through Bore reports one full revolution (360 degrees)
-		// across its duty cycle range. VERIFY the encoder is mounted 1:1 on
-		// the pivot shaft; if it rides a geared/chained shaft instead, scale
-		// this by that stage's ratio.
+		// across its duty cycle range. This assumes the encoder is mounted
+		// 1:1 on the pivot shaft; if it is ever moved to a geared/chained
+		// shaft, scale this by that stage's ratio.
 		public static final double THROUGH_BORE_DEGREES_PER_ROTATION = 360.0;
 		public static final double THROUGH_BORE_ALLOWED_DISCREPANCY = 2.0; // Max motor-vs-through-bore disagreement before re-sync
 		// The rotor is re-seeded from the through bore at the start of a move
@@ -568,20 +566,20 @@ public final class Constants {
 			RAISE(100.0),       // Safe travel / algae hold position
 			CORAL_L1(100.0),
 			// L2 scores at 12.5 rather than the geometric 5: the pivot chain
-			// currently has backlash, so the arm sags a few degrees past
-			// where the rotor thinks it is. At 12 in the CAD gives 10 deg a
-			// full inch to the cross bar but only 0.5 in at 7.5; 12.5 keeps
-			// the inch even 2.5 deg low. Revisit when the chain is fixed.
+			// has backlash, so the arm can sag a few degrees past where the
+			// rotor thinks it is. At 12 in the CAD gives 10 deg a full inch
+			// to the cross bar but only 0.5 in at 7.5; 12.5 keeps the inch
+			// even 2.5 deg low. Revisit if the chain slack is taken out.
 			CORAL_L2(12.5),
-			// L3 was 22.5 at 29 in, a pose the CAD puts ~0.25 in from the
-			// middle-stage top sprocket shaft. 25 deg at 30.5 in is the
-			// nearest pose with a full inch (claw tip 0.7 in further forward
-			// and 1.6 in higher); 27.5 deg there has 1.75 in if it ever rubs.
+			// L3 is 25 deg at 30.5 in: the nearest pose to the geometric one
+			// (22.5 deg at 29 in, which the CAD puts ~0.25 in from the
+			// middle-stage top sprocket shaft) that has a full inch - claw
+			// tip 0.7 in further forward and 1.6 in higher. 27.5 deg at
+			// 30.5 in has 1.75 in if it ever rubs.
 			CORAL_L3(25.0),
-			// L4 was 45, then asked to be 35 "to bring the claw back more".
-			// The CAD map says neither is reachable at 52.5 in: from ~25 to
-			// ~85 deg the claw's lower rear meets the middle-stage top tube
-			// and spring hardware at the top of travel (the bar L4 hit).
+			// L4 cannot be steeper than this. From ~25 to ~85 deg the claw's
+			// lower rear meets the middle-stage top tube and spring hardware
+			// at the top of travel, so a 35 or 45 deg L4 is NOT reachable.
 			// The top of travel is clear only at <= 22.5 deg; 20 gives
 			// ~1.25 in of model clearance (15-20 all work if the coral
 			// wants a different tilt - stay at or below 22.5).
@@ -632,9 +630,9 @@ public final class Constants {
 	 *     middle-stage top tube and constant-force-spring hardware again
 	 *     ("band B": ~41 in at 60 deg, ~46 in at 45 deg, ~51 in at 30 deg).
 	 *     At the top of travel ONLY angles <= 22.5 deg (or >= ~97 deg) are
-	 *     clear. That is the bar L4 was hitting; it is why the L4 pose is
-	 *     20 deg and why the arm can never rotate down to L4 near the top -
-	 *     the rotation happens at the 33 in "station" instead.
+	 *     clear. That is why the L4 pose is 20 deg and why the arm can never
+	 *     rotate down to L4 near the top - the rotation happens at the
+	 *     33 in "station" instead.
 	 *   - 90 deg is NOT clear at every height: band B blocks it from
 	 *     ~36.5 in up. 100 deg is clear from ~4 in to the top, so RAISE (the
 	 *     safe travel / algae hold angle) is 100.
@@ -642,12 +640,13 @@ public final class Constants {
 	 *
 	 * FREE_CORRIDORS is that map with a 1.0 in model margin (about 1.0-1.5 in
 	 * real). The planner's staged sequences were simulated against the full
-	 * model with the 15:1 elevator (50 in/s, 400 in/s^2) and the softened
-	 * pivot profile, sampled every 10 ms: every transit clears by >= 1.0 in,
-	 * also with the arm slowed to 150 deg/s (chain backlash). Every preset
-	 * is inside a corridor: the L3 pose moved from (29 in, 22.5 deg), which
-	 * the model put within ~0.25 in of the top sprocket shaft, to
-	 * (30.5 in, 25 deg), the nearest pose with a full inch.
+	 * CAD model at an elevator profile of 50 in/s and 400 in/s^2 (faster than
+	 * the 40 / 200 defaults), sampled every 10 ms: every transit clears by
+	 * >= 1.0 in, also with the arm slowed to 150 deg/s. The sequences are
+	 * gated on MEASURED height and angle, so clearance does not depend on the
+	 * profile speeds, and SuperstructureSequenceSimTest re-checks every
+	 * ordered pair of operator poses against this table. Every preset is
+	 * inside a corridor (audited at startup: Superstructure.presetAuditMessage).
 	 */
 	public static final class SuperstructureConstants {
 		// --- CAD free corridors ---
@@ -720,7 +719,7 @@ public final class Constants {
 		public static final double HIGH_ANGLE_STAGE = 110.0;        // Degrees
 		public static final double HIGH_ANGLE_MIN_HEIGHT = 8.0;     // Inches
 
-		// --- Mid-height scoring poses (L3): 17 < height < L4_ZONE_MIN_HEIGHT ---
+		// --- Mid-height scoring poses (L3): LOW_BOX_ROOF < height < L4_ZONE_MIN_HEIGHT ---
 		// The arm starts its final rotation (from RAISE) once the carriage is
 		// this close to the target; the carriage keeps settling meanwhile.
 		// 0.5 because the L3 pose (30.5 in, 25 deg) sits half an inch above
@@ -728,8 +727,8 @@ public final class Constants {
 		public static final double MID_POSE_ROTATE_BELOW_TARGET = 0.5; // Inches
 		// Leaving a mid pose: lift to here (all of 25-100 deg is clear at
 		// 31-35 in) while the arm swings up; only descend once the arm is at
-		// BAND_PASS_MIN_ANGLE. This is the fix for the L3 return hitting the
-		// middle-stage top tube when the elevator dropped too early.
+		// BAND_PASS_MIN_ANGLE. A carriage that drops before then puts the claw
+		// into the middle-stage top tube.
 		public static final double MID_POSE_RETURN_LIFT_HEIGHT = 31.0; // Inches
 
 		// --- High scoring pose (L4): height >= L4_ZONE_MIN_HEIGHT ---
@@ -761,13 +760,13 @@ public final class Constants {
 		public static final double ARM_CLAMP_HEIGHT_MARGIN = 0.1;   // Inches
 		// Under a CEILING the arm is sweeping up toward (leaving L4), a real
 		// margin: that is the claw's rear against the middle-stage top tube,
-		// the contact the table has already been caught optimistic about.
+		// the one contact where the robot has shown the table to be optimistic.
 		public static final double ARM_CLAMP_CEILING_MARGIN_RISING = 1.0; // Inches
 		// The arm is let go this long before the carriage reaches
 		// ARM_RELEASE_MIN_HEIGHT (at its measured speed), and held at this
 		// angle until the carriage is actually there. 92.5 deg keeps the tail
 		// bar ~1.1 in behind the funnel's sheet metal (2.25 in at RAISE).
-		// Set the lead to 0 to go back to releasing AT the height.
+		// Set the lead to 0 to release the arm AT the height instead.
 		public static final double ARM_RELEASE_LEAD_SECONDS = 0.2;
 		public static final double ARM_EARLY_HOLD_ANGLE = 92.5;     // Degrees
 		// On an L4 climb the carriage is clamped for the rows between the arm
@@ -782,8 +781,9 @@ public final class Constants {
 		public static final double NEAR_REEF_RELEASE_SECONDS = 0.4;
 		// The angle the arm may hold while the carriage is still below the
 		// final-angle height. 27.5 is the MIDDLE of the 25-30 row (clear
-		// 30-51 in); 25.0 was that row's edge, and a through-bore reading of
-		// 24.x there is in the 20-25 row, which is blocked below 35.5 in.
+		// 30-51 in). The row's edge (25.0) is not usable: a through-bore
+		// reading of 24.x there is in the 20-25 row, which is blocked below
+		// 35.5 in.
 		public static final double L4_STAGE_ANGLE = 27.5;           // Degrees
 		public static final double L4_STAGE_DONE_ANGLE = 30.0;      // Degrees: carriage may continue up
 		public static final double L4_PRE_TOP_HEIGHT = 48.0;        // Inches
@@ -822,8 +822,9 @@ public final class Constants {
 		// waiting longer cannot improve the pose - it only burns match time
 		// when something (chain backlash, a mis-set kG) leaves a mechanism
 		// resting just outside its at-target window.
-		// One velocity LSB is 0.55 in/s (16 ms x 2 filter), so 0.5 was an
-		// equals-zero test; the stopped branch is debounced as well.
+		// One elevator velocity LSB is 0.55 in/s (16 ms x 2 filter), so a
+		// threshold at or below that is an equals-zero test; 1.0 is about two
+		// LSB, and the stopped branch is debounced as well.
 		public static final double SETTLE_STOPPED_ELEVATOR_IN_S = 1.0;  // in/s
 		public static final double SETTLE_STOPPED_DEBOUNCE_SECONDS = 0.08;
 		public static final double SETTLE_STOPPED_PIVOT_DEG_S = 3.0;    // deg/s
@@ -837,7 +838,8 @@ public final class Constants {
 
 	// CANdle disabled (Sept 2026): there is no CANdle on the robot, so the LED
 	// subsystem (subsystems/LEDs.java) and its constants are commented out.
-	// Restore both together.
+	// To restore: uncomment this block, every line of LEDs.java, and the lines
+	// marked "CANdle disabled" in RobotContainer.java and Dashboard.java.
 	//
 	// /**
 	//  * Constants for the LED subsystem (CTRE CANdle).
@@ -919,21 +921,26 @@ public final class Constants {
 		// fan; Limelight's guidance is 100-200. Full rate (0) is restored
 		// the instant the robot enables, so tracking performance is
 		// unaffected. At ~90 fps, 100 still yields ~1 solve/s while disabled,
-		// plenty for the pre-match heading seed.
+		// plenty for the pre-match heading seed. Selecting Test mode on the
+		// Driver Station also lifts the throttle while disabled, so the
+		// dashboard's vision readouts are live on the bench.
 		public static final int DISABLED_THROTTLE = 100;
 		public static final int ENABLED_THROTTLE = 0;
-		// The dashboard's "which tags do the cameras see" readout ignores a
-		// camera whose tag list has not changed for this long (NetworkTables
-		// keeps the last value of a camera that lost power or its link).
-		// Longer than the gap between solves at the disabled throttle.
+		// The dashboard's seen-tag readouts ("Vision/Best Tag", "Vision/Best
+		// Tag Camera", "Vision/Visible Tags") ignore a camera whose tag list
+		// has not changed for this long (NetworkTables keeps the last value
+		// of a camera that lost power or its link). Longer than the gap
+		// between solves at the disabled throttle.
 		public static final double SEEN_TAG_STALE_SECONDS = 10.0;
 
 		// --- Camera Roles ---
 		// Which tag class each Limelight may supply to the ALIGNMENT tracker,
 		// same order as LIMELIGHT_NAMES (every camera still feeds MegaTag pose
 		// estimation with whatever tags it sees). The rear funnel camera is
-		// the only one that should ever align on a coral station, and the
-		// barge camera's pose is a placeholder, so it aligns on nothing.
+		// the only one that should ever align on a coral station. The barge
+		// camera is assigned the barge and processor tags, but its pose is an
+		// unmeasured placeholder, so until that is measured it supplies
+		// nothing and barge / processor alignment has no target.
 		public enum TagClass { REEF, CORAL_STATION, BARGE, PROCESSOR, NONE }
 		public static final TagClass[][] LIMELIGHT_TRACKING_CLASSES = {
 			{TagClass.CORAL_STATION},              // funnel - rear-facing, watches the coral station behind the robot
@@ -960,13 +967,13 @@ public final class Constants {
 		// Y+ toward the robot's RIGHT (note: opposite of WPILib's +Y = left),
 		// Z+ up; meters and degrees. Pitch is entered as positive = lens
 		// tilted UP, yaw as the heading of the lens (180 = rear-facing).
-		// VERIFY the pitch/yaw signs once against the camera's web-UI 3D
-		// preview (it mirrors these values) - if the preview shows the
-		// camera pointing the wrong way, flip the sign here.
+		// When entering a new pose, VERIFY the pitch/yaw signs against the
+		// camera's web-UI 3D preview (it mirrors these values) - if the
+		// preview shows the camera pointing the wrong way, flip the sign here.
 		public static final class CameraPose {
 			public final double forwardMeters, sideMeters, upMeters;
 			public final double rollDegrees, pitchDegrees, yawDegrees;
-			/** False = placeholder; the pose is NOT pushed to the camera. */
+			/** False = placeholder: the pose is NOT pushed to the camera, and the camera supplies no alignment target or heading seed. */
 			public final boolean measured;
 
 			public CameraPose(double forwardMeters, double sideMeters, double upMeters,
@@ -998,10 +1005,12 @@ public final class Constants {
 			// side view with west = rearward, north = up) so the coral
 			// station tag stays in frame when the rear bumpers are flush.
 			new CameraPose(-14.0 * 0.0254, 0.0, 29.625 * 0.0254, 0.0, 50.0, 180.0, true),
-			// barge: PLACEHOLDER - the CAD has its 1x1 mount (front-left,
-			// ~40.6 in up, 13.4 in forward) but no camera body in it, so
-			// there is nothing to derive a pose from. Measure and set
-			// measured = true.
+			// barge: PLACEHOLDER, NOT MEASURED - the CAD has its 1x1 mount
+			// (front-left, ~40.6 in up, 13.4 in forward) but no camera body
+			// in it, so there is nothing to derive a pose from. Measure the
+			// lens pose on the robot, enter it here and set measured = true;
+			// until then this camera supplies no alignment target and no
+			// heading seed.
 			new CameraPose(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false),
 			// reef (front-left, base stage): FROM THE CAD (Leviathan STEP,
 			// lens-barrel cylinder of the LL3G model in the "2x1
@@ -1009,10 +1018,11 @@ public final class Constants {
 			// of center, 11.25 in LEFT of center (negative in Limelight's
 			// Y-right convention), 15.78 in above the floor; optical axis
 			// pitched 20 deg DOWN and yawed 30 deg toward the robot's
-			// centerline (to the right). VERIFY in the camera web UI 3D
-			// preview (http://limelight-reef.local:5801): the model should
-			// sit front-left, looking forward-right and down; if it looks
-			// left instead, flip the yaw sign.
+			// centerline (to the right). Reef alignment runs on the robot
+			// with this pose. To re-check after a remount, open the camera
+			// web UI 3D preview (http://limelight-reef.local:5801): the
+			// model should sit front-left, looking forward-right and down;
+			// if it looks left instead, flip the yaw sign.
 			new CameraPose(11.04 * 0.0254, -11.25 * 0.0254, 15.78 * 0.0254, 0.0, -20.0, -30.0, true),
 		};
 
@@ -1055,9 +1065,11 @@ public final class Constants {
 		public static final double HEADING_RESEED_WINDOW_SECONDS = 2.0;
 
 		// --- Tag Classes (2025 Reefscape field) ---
-		// Only reef and coral station tags are tracked; barge (4, 5, 14, 15)
-		// and processor (3, 16) tags are intentionally left blank for now -
-		// the tracker ignores them entirely. (All tags still feed MegaTag.)
+		// Which tag IDs belong to each alignment class. A tag in none of these
+		// lists has class NONE and the alignment tracker ignores it. (All
+		// tags still feed MegaTag.) Barge and processor tags are classified,
+		// but no camera supplies them until the barge camera's pose is
+		// measured (see LIMELIGHT_TRACKING_CLASSES).
 		public static final int[] REEF_TAGS = {6, 7, 8, 9, 10, 11, 17, 18, 19, 20, 21, 22};
 		public static final int[] CORAL_STATION_TAGS = {1, 2, 12, 13};
 		public static final int[] BARGE_TAGS = {4, 5, 14, 15};
@@ -1084,7 +1096,9 @@ public final class Constants {
 		// the standoff position (0.87) must read as clear.
 		public static final double NEAR_REEF_DISTANCE = 0.80;     // Meters
 		public static final double NEAR_REEF_LATERAL = 0.60;      // Meters either side
-		// TUNE both on the field (push the robot into position, copy Vision/Distance):
+		// FIRST GUESSES: barge / processor alignment has no target until the
+		// barge camera's pose is measured. Once it is, TUNE both on the
+		// field (push the robot into position, copy Vision/Distance):
 		public static final double BARGE_SCORE_DISTANCE = 1.2;    // Centered on the barge tag, this far back, square - the net shot
 		public static final double PROCESSOR_DISTANCE = 0.55;     // Centered on the processor tag, front bumper just off the wall
 
@@ -1118,8 +1132,8 @@ public final class Constants {
 			public static final double MAX_LINEAR_VELOCITY = 2.0;  // m/s command clamp while tracking
 			public static final double MAX_ANGULAR_VELOCITY = 1.0; // rad/s command clamp while tracking
 
-			// Commands are slew-limited: the servo's output used to STEP (0 to
-			// 2 m/s on the first loop, and to zero the instant a frame was
+			// Commands are slew-limited: an unlimited P output STEPS (0 to
+			// 2 m/s on the first loop, and to zero the instant a frame is
 			// missed), which is wheel slip and a lurch. 3 m/s^2 is gentle enough
 			// with the elevator raised; the P law itself never asks for more
 			// than kP x speed of deceleration (1.5 x 2 = 3 m/s^2), so the limit

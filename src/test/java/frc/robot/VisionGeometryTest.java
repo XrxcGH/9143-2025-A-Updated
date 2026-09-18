@@ -19,8 +19,9 @@ import frc.robot.subsystems.Vision;
 /**
  * Pins the camera-space -> robot-frame conversion the alignment tracker
  * relies on, and the field-layout headings it squares up to, against the
- * camera poses in Constants and the rotations the authored paths end at.
- * Pure geometry - no HAL.
+ * camera poses in Constants and the rotations the authored paths end at;
+ * also the tag classes and the dashboard's unfiltered "Best Tag" /
+ * "Visible Tags" selection. Pure geometry - no HAL.
  */
 class VisionGeometryTest {
 
@@ -122,8 +123,8 @@ class VisionGeometryTest {
 
     /**
      * The dashboard's "Best Tag" is the closest tag ANY camera reports - whatever its class, whichever
-     * camera, measured pose or not - so it agrees with the camera streams. (It used to come from the
-     * alignment cache, which drops all of those: the stream showed a tag and the widget did not move.)
+     * camera, measured pose or not - so it agrees with the camera streams. (The alignment cache filters
+     * on all of those, so it cannot feed this readout: a stream would show a tag the widget ignores.)
      */
     @Test
     void bestTagIsTheClosestTagAnyCameraSees() {

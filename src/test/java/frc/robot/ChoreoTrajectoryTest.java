@@ -14,9 +14,10 @@ import edu.wpi.first.hal.HAL;
 /**
  * Proves the Choreo trajectory integration end to end: a real {@code .traj}
  * file in {@code deploy/choreo} is parsed by PathPlanner's Choreo loader
- * ({@link PathPlannerPath#fromChoreoTrajectory}). This is the regression net
- * for the "PathPlanner + Choreo" dual-autonomous setup - if the file schema
- * or the loader ever drifts, this fails before it reaches a robot.
+ * ({@link PathPlannerPath#fromChoreoTrajectory}), the same call
+ * RobotContainer.addChoreoAutos() uses to offer Choreo trajectories alongside
+ * the PathPlanner autos. If the file schema or the loader ever drifts, this
+ * fails before it reaches a robot.
  */
 class ChoreoTrajectoryTest {
 

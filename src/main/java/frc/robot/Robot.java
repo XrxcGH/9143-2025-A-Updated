@@ -77,7 +77,7 @@ public class Robot extends LoggedRobot {
 		Logger.addDataReceiver(new WPILOGWriter(logDir));
 		// Live NetworkTables publication of every recordOutput / @AutoLogOutput
 		// key under /AdvantageKit, so AdvantageScope's NT4 live source (and
-		// the README's ComponentPoses binding) sees RobotState/* in real time
+		// the README's ComponentPoses binding) sees RobotState/* in real time.
 		Logger.addDataReceiver(new NT4Publisher());
 		// Live stream for AdvantageScope's "Connect to Robot" (RLOG). Port
 		// 5810 because the Elastic layout WebServer already owns 5800; both
@@ -91,10 +91,11 @@ public class Robot extends LoggedRobot {
 		// Robot", so every drive station computer gets the same dashboard.
 		WebServer.start(5800, Filesystem.getDeployDirectory().getPath());
 
-		// Seed the dashboard-editable tunables (vision distances, elevator
-		// calibration/gains, handoff timing) with their Constants defaults
-		// if not already stored on the roboRIO - BEFORE the subsystems are
-		// built, since the Elevator configures its controllers from them.
+		// Seed the dashboard-editable tunables (vision distances and tracking
+		// gains, elevator calibration/gains, pivot motion limits, coral
+		// detection, teleop speed scale) with their Constants defaults if not
+		// already stored on the roboRIO - BEFORE the subsystems are built,
+		// since the mechanisms configure their controllers from them.
 		Tunables.init();
 
 		m_robotContainer = new RobotContainer();
@@ -134,7 +135,7 @@ public class Robot extends LoggedRobot {
 
 	@Override
 	public void disabledExit() {
-		// The code isn't fresh anymore! - flaco
+		// First enable since boot: clear the logged "fresh code" flag
 		RobotContainer.freshCode = false;
 		// Hold both mechanisms where they are (see RobotContainer.enabledInit)
 		m_robotContainer.enabledInit();

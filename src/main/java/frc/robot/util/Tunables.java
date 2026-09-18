@@ -21,20 +21,24 @@ import frc.robot.Constants.VisionConstants;
  *
  * What belongs here: empirically measured field/robot numbers that get
  * dialed in on the practice field (camera-read flush distances, branch
- * offsets, tracking gains, handoff timing) and the elevator's calibration
- * and Spark MAX tuning (travel ratio, gains, feedforward, profile), which
- * the Elevator re-applies to its controllers whenever the robot is disabled.
+ * offset, tracking gains, the teleop speed scale), the elevator's
+ * calibration and Spark MAX tuning (travel ratio, hard-stop height, gains,
+ * feedforward, profile), the pivot's Motion Magic profile and gravity
+ * feedforward, and the CANrange coral-detection thresholds. The Elevator
+ * and the CorAl re-apply theirs to the hardware whenever the robot is
+ * disabled.
  * What does NOT belong here: the measured mechanism contact geometry (tuck
  * / low-box limits) - those are physical facts, not tuning knobs - and the
- * CorAl pivot's Phoenix gains, which are applied at boot and tuned live in
- * Phoenix Tuner X.
+ * CorAl pivot's Phoenix closed-loop gains, which are applied at boot and
+ * tuned live in Phoenix Tuner X.
  *
  * Readers call the getters every time they need a value (a Preferences read
  * is one NetworkTables entry lookup - cheap), so edits take effect on the
  * next loop, on the next button press for values the Superstructure reads
- * at plan time, or on the next disable for the elevator controller values.
- * Every getter clamps to a sane range so a typo on the dashboard cannot
- * command something dangerous.
+ * at plan time, or on the next disable for the values held on a motor
+ * controller or sensor (elevator, pivot, CANrange). Every numeric getter
+ * except the two tracking gains clamps to a sane range so a typo on the
+ * dashboard cannot command something dangerous.
  */
 public final class Tunables {
     private Tunables() {}
@@ -76,40 +80,37 @@ public final class Tunables {
     /**
      * Version stamp of the factory defaults in Constants. Stored values
      * survive deploys, so changing a default in Constants does NOTHING on a
-     * robot that already has the key stored - unless this number is bumped,
-     * in which case init() overwrites EVERY tunable with the new defaults
-     * once. Bump it when a default changes and must take effect on the
-     * robot; leave it alone to preserve values tuned on the dashboard.
-     *   1: initial tunables (Sept 2026)
-     *   2: elevator calibration/gain tunables; elevator profile raised to
-     *      16 in/s, 60 in/s^2; L4 arm arrival offset 0 s for that profile
-     *   3: travel ratio back to 1.0 (gearing confirmed by 20/40 in tests);
-     *      new "Height At Hard Stop" 0.875 in
-     *   4: match-pace profiles - elevator 18 in/s, 120 in/s^2; new pivot
-     *      profile tunables 240 deg/s, 480 deg/s^2, jerk 4800 deg/s^3
-     *   5: elevator 20 in/s, 200 in/s^2 (gearing ceiling); pivot softened
-     *      to 200 / 300 / 2000 for chain backlash; L4 arm arrival -0.6 s
-     *      (was hitting the bar), L3 +0.8 s
-     *   6: elevator regeared 15:1 - 50 in/s, 400 in/s^2, kP 0.1, kG 0.6;
-     *      arm arrival offsets retired (the Superstructure now runs
-     *      CAD-derived staged sequences gated on measured state)
+     * robot that already has the key stored - unless this number is bumped.
+     * On the first boot after a bump, init() does one of two things:
+     *   - if it has a targeted migration block for the stored version, it
+     *     overwrites ONLY the keys named there and keeps everything else
+     *     the team has tuned on the dashboard;
+     *   - otherwise it overwrites EVERY tunable with the new defaults.
+     * Bump it when a default changes and must take effect on the robot
+     * (and add a migration block when only a few defaults moved); leave it
+     * alone to preserve values tuned on the dashboard.
+     *
+     * Version 15 is the set of defaults in Constants as released
+     * (Sept 2026); earlier versions were pre-release tuning rounds.
      */
-    private static final int DEFAULTS_VERSION = 15; // 14: pivot profile 300 deg/s / 800 deg/s^2 / jerk 6000 with kA (Sept 17 2026)
+    private static final int DEFAULTS_VERSION = 15;
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
-     * (never overwrites a value the team has already tuned), or overwrites
-     * all of them when {@link #DEFAULTS_VERSION} has been bumped since the
-     * last boot. Call once at robot startup, BEFORE the subsystems are
-     * constructed.
+     * (never overwrites a value the team has already tuned). When
+     * {@link #DEFAULTS_VERSION} has been bumped since the last boot it
+     * instead runs the targeted migration for the stored version or, if
+     * there is none, overwrites every key. Call once at robot startup,
+     * BEFORE the subsystems are constructed.
      */
     public static void init() {
         // 14 -> 15 is a TARGETED migration: only the keys whose defaults
-        // changed are overwritten (elevator kP 0.4, kS 0, profile error 1.0 -
-        // the wobble around setpoints), so everything else the team has tuned
-        // on the dashboard (vision distances, speed scale, ...) survives. A
-        // bump normally resets EVERY tunable; add a block like this one
-        // instead whenever only a few defaults move.
+        // changed are overwritten (elevator kP 0.4, kS 0, profile error
+        // 1.0 in - the values that stop the carriage ringing as it settles
+        // on a setpoint), so everything else the team has tuned on the
+        // dashboard (vision distances, speed scale, ...) survives. A bump
+        // otherwise resets EVERY tunable; add a block like this one whenever
+        // only a few defaults move.
         if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) == 14) {
             Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
             Preferences.setDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
@@ -154,8 +155,9 @@ public final class Tunables {
     }
 
     /**
-     * Overwrites every tunable with its Constants default (the "Reset
-     * Tunables" dashboard button, and a defaults-version bump at boot).
+     * Overwrites every tunable with its Constants default and stamps the
+     * current defaults version (the "Reset Tunables" dashboard button, and
+     * a defaults-version bump at boot that has no targeted migration).
      */
     public static void resetToDefaults() {
         Preferences.setInt(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION);
@@ -229,7 +231,8 @@ public final class Tunables {
 
     /**
      * Measured-over-modeled carriage travel: inches per motor rotation =
-     * 0.244 x this. Clamped so a typo cannot scale the encoder by more than
+     * ~0.733 (ELEVATOR_MODELED_INCHES_PER_ROTATION, the 15:1 gearing model)
+     * x this. Clamped so a typo cannot scale the encoder by more than
      * ~3x in either direction (soft limits and presets are in inches).
      */
     public static double elevatorTravelRatio() {
@@ -270,7 +273,10 @@ public final class Tunables {
         return clamped(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA, 0.0, 0.012);
     }
 
-    /** Gravity feedforward, volts, applied at all times under position control. */
+    /**
+     * Gravity feedforward, volts, applied at all times under position
+     * control. Set it from the "Elevator/kG From Cruise" dashboard readout.
+     */
     public static double elevatorKg() {
         return clamped(ELEVATOR_KG, ElevatorConstants.ELEVATOR_kG, 0.0, 3.0);
     }
@@ -308,14 +314,19 @@ public final class Tunables {
 
     /**
      * Pivot gravity feedforward, volts with the claw HORIZONTAL (the most
-     * gravity the arm ever sees). 0 until measured - see CORAL_PIVOT_kG.
-     * Clamped to about three times the CAD estimate.
+     * gravity the arm ever sees). Not yet measured: the default is 0 (no
+     * gravity feedforward) - see the procedure at CORAL_PIVOT_kG in
+     * Constants. Clamped to about three times the CAD estimate (~0.3 V).
      */
     public static double pivotKg() {
         return clamped(PIVOT_KG, CorAlConstants.CORAL_PIVOT_kG, 0.0, 1.0);
     }
 
-    /** Arm angle (deg) at which gravity does nothing: the claw balanced straight up. */
+    /**
+     * Arm angle (deg) at which gravity does nothing: the claw balanced
+     * straight up. The default is an estimate, to be measured together
+     * with the pivot kG.
+     */
     public static double pivotBalanceAngle() {
         return clamped(PIVOT_BALANCE_ANGLE, CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG, 1.0, 179.0);
     }
@@ -411,12 +422,12 @@ public final class Tunables {
     // Vision tracking gains
     // ------------------------------------------------------------------
 
-    /** m/s of drive command per meter of position error. */
+    /** m/s of drive command per meter of position error (not clamped). */
     public static double trackingDistanceKp() {
         return Preferences.getDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
     }
 
-    /** rad/s of rotation command per degree of angle error. */
+    /** rad/s of rotation command per degree of angle error (not clamped). */
     public static double trackingRotationKp() {
         return Preferences.getDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
     }

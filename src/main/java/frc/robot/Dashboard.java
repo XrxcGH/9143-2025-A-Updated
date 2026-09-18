@@ -43,8 +43,8 @@ import frc.robot.util.Tunables;
  * Central dashboard manager - the ONLY place in the robot code that publishes
  * data for the Elastic dashboard.
  *
- * How the Elastic integration works (Elastic dropped Shuffleboard API
- * support, so this project uses the modern approach):
+ * How the Elastic integration works (Elastic does not support the
+ * Shuffleboard API, so the layout is a file rather than code):
  *
  *  1. This class publishes plain NetworkTables data (numbers, booleans,
  *     sendables like Field2d and the auto chooser) under /SmartDashboard.
@@ -118,13 +118,13 @@ public class Dashboard {
     // glTF CAD model (File > Import CAD or the online converter) and map
     // these array entries to its articulated components in the 3D config.
     // Robot-relative coordinate frame: X forward, Y left, Z up, origin at
-    // the robot center on the floor. All offsets below are PLACEHOLDERS
-    // measured as zero - VERIFY against the CAD model's component origins
-    // (AdvantageScope docs: "Custom Assets > Articulated components").
-    // From the CAD (9143-2025-A-0000 Leviathan STEP, carriage on its hard
-    // stop, floor at the wheel contact): the pivot axis (through-bore bore
-    // centerline) is 12.01 in forward of the frame center and 13.875 in
-    // above the floor.
+    // the robot center on the floor. The offsets below come from the CAD
+    // (9143-2025-A-0000 Leviathan STEP, carriage on its hard stop, floor at
+    // the wheel contact): the pivot axis (through-bore centerline) is
+    // 12.01 in forward of the frame center and 13.875 in above the floor.
+    // They have not been checked against an exported glTF model: when one
+    // is attached, confirm they match its component origins (AdvantageScope
+    // docs: "Custom Assets > Articulated components").
     private static final double ELEVATOR_X_OFFSET = 0.305;  // Meters forward of robot center
     private static final double ARM_PIVOT_HEIGHT = 0.352;   // Pivot height above the floor at the elevator hard stop (meters)
     @AutoLogOutput (key = "Draggables/Components3d")
@@ -242,8 +242,9 @@ public class Dashboard {
         // --- Pre-match utility buttons (Command widgets on the Setup tab) ---
         // ignoringDisable lets the pit crew zero mechanisms without enabling -
         // and ONLY without enabling: zeroing under a latched closed-loop
-        // setpoint shifts its frame and drives the mechanism hard. (These ran
-        // while enabled too; the controller bindings never did.)
+        // setpoint shifts its frame and drives the mechanism hard, so both
+        // buttons do nothing while the robot is enabled (the same rule as the
+        // operator's Back / Start zeroing bindings).
         SmartDashboard.putData("Zero Elevator",
             Commands.runOnce(elevator::resetEncoders, elevator)
                 .onlyIf(edu.wpi.first.wpilibj.DriverStation::isDisabled)
@@ -326,9 +327,10 @@ public class Dashboard {
 
         // 3D component poses for AdvantageScope (robot-relative: X forward,
         // Y left, Z up). Cascade rigging: the middle stage rises at half the
-        // carriage speed. Arm pitches about the Y axis; the sign/zero must
-        // match the CAD component's modeled orientation - VERIFY in
-        // AdvantageScope and flip/offset here if the model swings backward.
+        // carriage speed. The arm pitches about the Y axis; the sign and
+        // zero must match the orientation the CAD component was modeled in -
+        // when a 3D model is attached, check it in AdvantageScope and flip or
+        // offset the rotation here if the arm swings backward.
         componentPoses[LoggingConstants.MIDDLE_STAGE_INDEX] =
             new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters / 2.0, Rotation3d.kZero);
         componentPoses[LoggingConstants.CARRIAGE_INDEX] =
@@ -338,8 +340,8 @@ public class Dashboard {
                 new Rotation3d(0, -Units.degreesToRadians(armAngleDeg), 0));
 
         // --- AdvantageKit structured outputs (.wpilog + RLOG live stream) ---
-        // These are the review-critical fields for AdvantageScope: 2D/3D
-        // field views, swerve visualization, and mechanism traces.
+        // The fields AdvantageScope needs for log review: 2D/3D field
+        // views, swerve visualization, and mechanism traces.
         Logger.recordOutput("RobotState/Pose", Pose2d.struct, driveState.Pose);
         Logger.recordOutput("RobotState/Speeds", ChassisSpeeds.struct, driveState.Speeds);
         if (driveState.ModuleStates != null && driveState.ModuleStates.length == 4) {
@@ -352,8 +354,8 @@ public class Dashboard {
         Logger.recordOutput("CorAl/AngleDegrees", armAngleDeg);
         Logger.recordOutput("CorAl/TargetDegrees", coral.getTargetAngle());
         Logger.recordOutput("CorAl/GamePiece", coral.isGamePieceDetected());
-        // (Vision/BestTag is logged in the Vision block below, from the same
-        // single best-target read as the dashboard values.)
+        // (Vision/BestTag and Vision/AlignmentTag are logged in the Vision
+        // block below, from the same reads as the dashboard values.)
 
         // --- Match / robot vitals ---
         SmartDashboard.putNumber("Match Time", DriverStation.getMatchTime());
@@ -374,19 +376,21 @@ public class Dashboard {
         // 12 V) MINUS kS. The Spark MAX adds +kS whenever the profile is at
         // rest (REVLib 2026 - measured in REV's own sim: it does not follow
         // the sign of the error), so the raw output holding still is
-        // kG + kS + kP x error. With kS taken off, what is left is what kG
-        // should be - "set kG to Hold Volts" used to over-set it by kS.
+        // kG + kS + kP x error. With kS taken off, what is left estimates
+        // kG (copying the raw output into kG would over-set it by kS). Inside
+        // the static-friction band the hold voltage partly echoes the gains
+        // already configured, so prefer "Elevator/kG From Cruise" below.
         SmartDashboard.putNumber("Elevator/Hold Volts",
             elevator.getLeftOutput() * ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE - elevator.staticFeedforward());
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
-        // kG the way that does not depend on friction: the mean of the
-        // applied volts at cruise going up and going down (NaN until both
-        // directions have been seen - run one long move each way).
         // Diagnostic: new setpoints sent to the Spark MAX since boot. While the
         // carriage is just HOLDING this must not move; if the elevator ever
         // rumbles in place, a climbing count means the code is re-commanding
         // it, a steady count means the loop or the mechanism is doing it.
         SmartDashboard.putNumber("Elevator/Setpoint Count", elevator.getSetpointCount());
+        // kG the way that does not depend on friction: the mean of the
+        // applied volts at cruise going up and going down (NaN until both
+        // directions have been seen - run one long move each way).
         SmartDashboard.putNumber("Elevator/Cruise Volts Up", elevator.getCruiseVoltsUp());
         SmartDashboard.putNumber("Elevator/Cruise Volts Down", elevator.getCruiseVoltsDown());
         SmartDashboard.putNumber("Elevator/kG From Cruise", elevator.getKgFromCruise());
@@ -426,10 +430,11 @@ public class Dashboard {
         // --- Vision ---
         // What the cameras SEE, unfiltered - the same tags their streams
         // draw: the closest one ("Best Tag"), which camera has it, and every
-        // ID per camera. (Best Tag used to come from the alignment cache
-        // below, so it ignored the unmeasured camera, every tag outside a
-        // camera's alignment class and any frame without a 3D solve: the
-        // stream showed a tag and the widget did not move.)
+        // ID per camera. These deliberately do NOT come from the alignment
+        // cache below: that cache skips a camera whose lens pose is
+        // unmeasured, every tag outside a camera's alignment class and any
+        // frame without a 3D solve, so a readout built on it can sit still
+        // while a stream plainly shows a tag.
         var vision = swerve.getVision();
         var seenTag = vision.getClosestSeenTag();
         SmartDashboard.putNumber("Vision/Best Tag", seenTag.map(t -> (double) t.id).orElse(-1.0));
@@ -439,8 +444,9 @@ public class Dashboard {
         // The closest tag a camera may ALIGN on (its class, lens pose
         // measured), ignoring the goal filter and the latch so the readouts
         // work with the robot pushed into position while disabled; positions
-        // are in the ROBOT frame. -1 while Best Tag shows an ID = that tag is
-        // seen but is not one this camera aligns on.
+        // are in the ROBOT frame. TX, Distance, Lateral and Square Heading
+        // below describe THIS tag, not Best Tag. -1 while Best Tag shows an
+        // ID = that tag is seen but is not one its camera may align on.
         var bestTarget = vision.getBestVisibleTarget();
         SmartDashboard.putNumber("Vision/Alignment Tag",
             bestTarget.map(t -> (double) t.id).orElse(-1.0));
@@ -484,7 +490,8 @@ public class Dashboard {
         SmartDashboard.putNumber("Vision/Heading Error", swerve.getAlignmentHeadingErrorDegrees());
 
         // --- LEDs (CANdle code commented out - no CANdle on the robot) ---
-        // Restore with the subsystem:
+        // The layout's "LEDs/State" widgets show the placeholder string
+        // below. To restore, publish the real state instead (see LEDs.java):
         // SmartDashboard.putString("LEDs/State",
         //     leds.getState() != null ? leds.getState().name() : "INIT");
         SmartDashboard.putString("LEDs/State", "CANdle code commented out");

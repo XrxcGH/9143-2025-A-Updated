@@ -44,10 +44,14 @@ import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
  *  - PathPlanner AutoBuilder configuration for autonomous path following
  *  - Vision pose fusion (measurements arrive via addVisionMeasurement, with
  *    the FPGA-to-Phoenix timestamp conversion handled here)
- *  - A simple AprilTag tracking command that drives toward the best tag
+ *  - The AprilTag alignment command: a robot-frame servo that drives the
+ *    tracked tag to the goal position Vision resolves (reef branch, coral
+ *    station, barge, processor) and squares the robot to the tag's face
  *  - SysId characterization routines (translation, steer, rotation)
  *  - Operator-perspective handling so field-centric driving matches the
- *    driver's point of view on both alliances
+ *    driver's point of view on both alliances, with the driver's forward
+ *    direction held in the raw gyro frame so vision heading corrections
+ *    never move it (see periodic())
  *
  * The internal Vision subsystem is constructed here; do not create another
  * Vision instance elsewhere.
@@ -112,12 +116,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	private final SwerveRequest.SysIdSwerveSteerGains m_steerCharacterization = new SwerveRequest.SysIdSwerveSteerGains();
 	private final SwerveRequest.SysIdSwerveRotation m_rotationCharacterization = new SwerveRequest.SysIdSwerveRotation();
 
-	// Vision subsystem for AprilTag tracking
+	// Vision subsystem (pose fusion and AprilTag alignment targets)
 	private Vision vision;
-	
-	// Track vision tracking state internally
+
+	// True while an alignment is in progress: set by the hold-to-align
+	// bindings, cleared whenever the tracking command ends
 	private boolean isVisionTrackingEnabled = false;
-	
+
 	public Command aprilTagTrackingCommand;
 
 	// SysId routine for characterizing translation. This is used to find PID gains for the drive motors.
@@ -153,13 +158,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	);
 
 	/*
-		* SysId routine for characterizing rotation.
-		* This is used to find PID gains for the FieldCentricFacingAngle HeadingController.
-		* See the documentation of SwerveRequest.SysIdSwerveRotation for info on importing the log to SysId.
-		*/
+	 * SysId routine for characterizing rotation.
+	 * This is used to find PID gains for the FieldCentricFacingAngle HeadingController.
+	 * See the documentation of SwerveRequest.SysIdSwerveRotation for info on importing the log to SysId.
+	 */
 	private final SysIdRoutine m_sysIdRoutineRotation = new SysIdRoutine(
 		new SysIdRoutine.Config(
-			// This is in radians per secondÂ², but SysId only supports "volts per second"
+			// This is in radians per second^2, but SysId only supports "volts per second"
 			Volts.of(Math.PI / 6).per(Second),
 			// This is in radians per second, but SysId only supports "volts"
 			Volts.of(Math.PI),
@@ -299,7 +304,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	/**
 	 * Returns a command that applies the specified control request to this swerve drivetrain.
 	 *
-	 * @param request Function returning the request to apply
+	 * @param requestSupplier Function returning the request to apply
 	 * @return Command to run
 	 */
 	public Command applyRequest(Supplier<SwerveRequest> requestSupplier) {
@@ -332,9 +337,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 * Set the currently active SysId routine to use.
 	 *
 	 * NOTE: intentionally not called anywhere by default. This is a
-	 * test-session utility: the back/start + X/Y bindings run whichever
-	 * routine is selected here (translation by default), so call this from
-	 * test code or a temporary binding to characterize steer or rotation.
+	 * test-session utility: the driver's Test-mode Back / Start + X / Y
+	 * bindings run whichever routine is selected here (translation by
+	 * default), so call this from test code or a temporary binding to
+	 * characterize steer or rotation.
 	 *
 	 * @param routineType The type of SysId routine to use
 	 */
@@ -362,8 +368,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	}
 
 	/**
-	 * Enable or disable vision tracking
-	 * 
+	 * Enables or disables vision tracking. Enabling only arms the tracking
+	 * command (see createAprilTagTrackingCommand); disabling also releases
+	 * Vision's tag latch.
+	 *
 	 * @param enabled Whether vision tracking should be enabled
 	 */
 	public void setVisionTrackingEnabled(boolean enabled) {
@@ -409,9 +417,11 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 *
 	 * If no trackable tag is visible (or the target is lost mid-approach)
 	 * the command ramps to zero velocity - swerve requests latch, so without
-	 * this the robot would keep driving at its last commanded speed. When the command ends for any reason (cancelled, or interrupted
-	 * by another swerve command), it stops the robot and clears the tracking
-	 * flag so the Y-button toggle can never desync from reality.
+	 * this the robot would keep driving at its last commanded speed. When the
+	 * command ends for any reason (the driver releases the align trigger, or
+	 * another swerve command interrupts it), it stops the robot and clears
+	 * the tracking flag, so isVisionTrackingEnabled() always reflects whether
+	 * an alignment is actually running.
 	 */
 	public Command createAprilTagTrackingCommand() {
 		return startRun(() -> {
@@ -464,16 +474,17 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			m_alignHeadingErrorDeg = headingErrorDeg;
 
 			// ---- Translation: ONE controller on the error VECTOR ----
-			// Each axis used to have its own deadband and its own minimum
-			// speed. As the axes crossed their deadbands at different moments
-			// the commanded velocity snapped between (0.12, 0), (0.12, 0.12)
-			// and (0, 0.12) m/s - the DIRECTION of travel jumping 45-90 deg
-			// with the robot nearly stationary, which makes every swerve
-			// module whip round to a new steering angle: the whole-robot jerk.
-			// Now the speed comes from the length of the error vector and the
-			// direction is simply along it, so it turns smoothly all the way
-			// in; the robot stops when BOTH axes are inside their deadbands
-			// and stays stopped until one grows past the exit ratio.
+			// The speed comes from the length of the error vector and the
+			// direction is simply along it, so the direction of travel turns
+			// smoothly all the way in; the robot stops when BOTH axes are
+			// inside their deadbands and stays stopped until one grows past
+			// the exit ratio. Per-axis controllers, each with its own deadband
+			// and minimum speed, must not be used here: as the axes cross
+			// their deadbands at different moments the commanded velocity
+			// snaps between (min, 0), (min, min) and (0, min) - the DIRECTION
+			// of travel jumping 45-90 deg with the robot nearly stationary,
+			// which makes every swerve module whip round to a new steering
+			// angle and jerks the whole robot.
 			double forwardDeadband = VisionConstants.TrackingGains.FORWARD_ERROR_DEADBAND;
 			double lateralDeadband = VisionConstants.TrackingGains.LATERAL_ERROR_DEADBAND;
 			double exitRatio = VisionConstants.TrackingGains.DEADBAND_EXIT_RATIO;
@@ -481,8 +492,9 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 				&& Math.abs(lateralError) < lateralDeadband;
 			// Held by CONTACT the forward error is, by definition, outside the
 			// ordinary exit band (that is why contact was needed), so it gets
-			// its own: without it the latch set below was undone on the very
-			// next loop, and the robot shoved the reef every 0.35 s.
+			// its own: without it the latch set below would be undone on the
+			// very next loop, and the robot would shove the reef again every
+			// CONTACT_SECONDS.
 			double forwardExit = m_trackContactHeld
 				? VisionConstants.TrackingGains.CONTACT_FORWARD_ERROR * exitRatio : forwardDeadband * exitRatio;
 			boolean outside = Math.abs(forwardError) > forwardExit
@@ -539,9 +551,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			m_aligned = m_trackTranslationHeld && m_trackHeadingHeld;
 			applyTrackingCommand(vx, vy, omega);
 		}).finallyDo(() -> {
-			// Runs on cancel AND on interruption by any other swerve command
-			// (brake, point, D-pad nudges, SysId): stop the robot and drop
-			// the tracking state so the toggle always reflects reality.
+			// Runs on cancel (align trigger released) AND on interruption by
+			// any other swerve command (brake, point, D-pad nudges, SysId):
+			// stop the robot and drop the tracking state so the flag always
+			// reflects reality.
 			isVisionTrackingEnabled = false;
 			vision.toggleTracking(false);
 			clearAlignmentTelemetry();
@@ -593,18 +606,6 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	}
 
 	/**
-	 * Adds a vision pose measurement to the drivetrain's pose estimator.
-	 *
-	 * @param visionPose       robot pose on the field as seen by vision
-	 * @param timestampSeconds capture timestamp in the FPGA timebase
-	 *                         (e.g. from LimelightHelpers); it is converted to
-	 *                         the Phoenix 6 timebase here, which the CTRE
-	 *                         swerve pose estimator requires. Passing raw FPGA
-	 *                         time makes every measurement appear to be from
-	 *                         the wrong moment and corrupts the pose estimate.
-	 * @param stdDevs          measurement standard deviations [x, y, theta]
-	 */
-	/**
 	 * True while vision measurements are being rejected: the robot has spun
 	 * faster than the limit within the last kVisionRejectAfterSpinSeconds
 	 * (motion blur and rolling shutter corrupt the solve; the image was
@@ -616,6 +617,19 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		return Timer.getFPGATimestamp() - m_lastFastRotationTime < kVisionRejectAfterSpinSeconds;
 	}
 
+	/**
+	 * Adds a vision pose measurement to the drivetrain's pose estimator.
+	 * Measurements are dropped while {@link #isRejectingVision()} is true.
+	 *
+	 * @param visionPose       robot pose on the field as seen by vision
+	 * @param timestampSeconds capture timestamp in the FPGA timebase
+	 *                         (e.g. from LimelightHelpers); it is converted to
+	 *                         the Phoenix 6 timebase here, which the CTRE
+	 *                         swerve pose estimator requires. Passing raw FPGA
+	 *                         time makes every measurement appear to be from
+	 *                         the wrong moment and corrupts the pose estimate.
+	 * @param stdDevs          measurement standard deviations [x, y, theta]
+	 */
 	@Override
 	public void addVisionMeasurement(
 		Pose2d visionPose,
@@ -642,7 +656,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 * pose by the placement error. So: keep the vision heading and reset only
 	 * the translation when the seed is strong and agrees with the nominal
 	 * heading within HEADING_SEED_MAX_DISAGREEMENT_DEGREES; otherwise reset
-	 * the full pose as before.
+	 * the full pose (translation and heading) to the nominal start.
 	 */
 	public void resetPoseForAuto(Pose2d nominalStart) {
 		Rotation2d current = getStateCopy().Pose.getRotation();
@@ -735,9 +749,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		// Field-centric requests steer relative to the POSE heading plus the
 		// "operator perspective". The pose heading is vision's to correct:
 		// MegaTag1 re-seeds it whenever the robot sits disabled looking at a
-		// tag (and in a re-seed window). That used to drag the driver's frame
-		// with it - align on a tag, disable in front of it, re-enable, and
-		// "forward" on the stick had moved: the robot drove the wrong way.
+		// tag (and in a re-seed window). If the driver's frame followed the
+		// pose heading, every re-seed would move it - align on a tag, disable
+		// in front of it, re-enable, and "forward" on the stick has moved:
+		// the robot drives the wrong way.
 		// So the driver's forward is kept as a direction in the RAW gyro
 		// frame, which nothing but the gyro moves, and the operator
 		// perspective is recomputed every loop to cancel whatever vision or a
@@ -750,11 +765,12 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		if (alliance.isPresent()) {
 			boolean changed = m_driverForwardAlliance != null && alliance.get() != m_driverForwardAlliance;
 			// Until the driver has zeroed it themselves, a CONVERGED two-or-more
-			// tag heading seed while disabled still sets the driver's frame, as
-			// it always did on a real field (robot booted facing any which way,
+			// tag heading seed while disabled sets the driver's frame, which is
+			// what a real field needs (robot booted facing any which way,
 			// placed on the field, never zeroed). One reef tag in front of the
-			// bumper - the case that used to move the driver's frame - is not a
-			// strong seed, and after a driver zero nothing from vision counts.
+			// bumper - the bench case that must not move the driver's frame -
+			// is not a strong seed, and after a driver zero nothing from vision
+			// counts.
 			boolean seeded = DriverStation.isDisabled() && !m_driverZeroed && vision.hasStrongHeadingSeed();
 			if (m_driverForwardRaw == null || changed || seeded) {
 				m_driverForwardRaw = allianceForward(alliance.get()).minus(poseMinusRaw);

@@ -41,11 +41,11 @@ import frc.robot.util.Tunables;
  *  - Heights are in the preset frame: top of the base-stage 2x1 to the
  *    bottom of the carriage 2x1. On its hard stop the carriage sits ABOVE
  *    that reference by "Elevator - Height At Hard Stop" (1.000 in, the
- *    middle-stage tube), so
- *    the encoder is zeroed TO that value, not to 0, and the reverse soft
- *    limit sits there (README: "Calibrating the elevator height").
+ *    middle-stage tube), so the encoder is zeroed TO that value, not to 0,
+ *    and the reverse soft limit sits there (README: "Calibrating the
+ *    elevator height").
  *  - Height moves use MAXMotion (trapezoidal profiling on the controller)
- *    with on-controller kS/kV/kG feedforward, so the carriage tracks
+ *    with on-controller kS/kV/kA/kG feedforward, so the carriage tracks
  *    smoothly and holds its height at rest and when the operator releases
  *    the stick.
  *  - Soft limits on the controller bound travel in every control mode, and
@@ -55,8 +55,9 @@ import frc.robot.util.Tunables;
  * Preferences-backed tunables (Testing tab). {@link #periodic()} re-applies
  * an edit to both controllers the next time the robot is disabled, so the
  * elevator is calibrated and tuned without a redeploy or the REV Hardware
- * Client. A travel-ratio edit additionally waits for the carriage to be at
- * its base, because it rescales the encoder; it is then re-zeroed there.
+ * Client. A travel-ratio or hard-stop-height edit additionally waits for
+ * the carriage to be at its base, because it rescales or re-references the
+ * encoder; the encoders are then re-referenced there.
  *
  * Dashboard note: this subsystem publishes nothing itself. All telemetry is
  * read through the public getters by the central {@link frc.robot.Dashboard}
@@ -101,9 +102,10 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     private boolean travelRatioChangePending = false;
     /** New setpoints sent to the controller since boot (a diagnostic: it must NOT climb while the carriage is just holding). */
     private int setpointCount = 0;
+    /** Filtered applied volts at steady cruise, up and down (NaN until seen); see sampleCruiseVolts(). */
     private double cruiseVoltsUp = Double.NaN;
     private double cruiseVoltsDown = Double.NaN;
-    /** Paces the tunable poll so nine Preferences reads do not run every loop. */
+    /** Paces the tunable poll so the Preferences reads do not run every loop. */
     private final Timer tunablePollTimer = new Timer();
     private static final double TUNABLE_POLL_SECONDS = 0.5;
 
@@ -216,8 +218,9 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
             .uvwMeasurementPeriod(ElevatorConstants.ELEVATOR_VELOCITY_PERIOD_MS)
             .uvwAverageDepth(ElevatorConstants.ELEVATOR_VELOCITY_AVG_DEPTH);
 
-        // Closed-loop PID gains. Error units are inches after the conversion
-        // factors above; output is duty cycle.
+        // The closed loop runs on the NEO's integrated encoder. Error units
+        // are inches after the conversion factors above; PID output is duty
+        // cycle.
         leaderConfig.closedLoop
             .feedbackSensor(FeedbackSensor.kPrimaryEncoder);
 
@@ -295,22 +298,14 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     }
 
     /**
-     * Re-applies edited tunables to the controllers. Only while DISABLED (a
-     * reconfigure mid-move would stutter the mechanism), polled twice a
-     * second. Gains, feedforward, and profile limits apply right away. The
-     * calibration values (travel ratio, hard-stop height) rescale or
-     * re-reference the encoder, so they are applied only with the carriage
-     * at its base, where the encoders are then re-referenced against the
-     * hard stop; until then they wait and the Dashboard shows an alert.
-     */
-    /**
-     * kG measured the way that does not depend on friction or on the
+     * Measures kG in a way that does not depend on friction or on the
      * configured gains: the applied voltage at steady cruise going UP is
      * kG + kV x v + friction, going DOWN it is kG - kV x v - friction, so
      * their mean is kG. (The hold voltage cannot tell you: inside the static
-     * friction band it only echoes the gains already configured.) Run a long
-     * move each way - Testing tab, arm at RAISE - and read
-     * Elevator/kG From Cruise.
+     * friction band it only echoes the gains already configured.) Samples
+     * are taken only under position control within 5 % of the cruise
+     * velocity, and low-pass filtered per direction. Run a long move each
+     * way - Testing tab, arm at RAISE - and read Elevator/kG From Cruise.
      */
     private void sampleCruiseVolts() {
         if (!positionControlEnabled || appliedCruiseVelocity <= 0) {
@@ -333,19 +328,31 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         return setpointCount;
     }
 
-    /** Mean applied volts at cruise going up / down (NaN until seen), and the kG they imply. */
+    /** Filtered applied volts at steady cruise going up (NaN until an upward cruise has been seen). */
     public double getCruiseVoltsUp() {
         return cruiseVoltsUp;
     }
 
+    /** Filtered applied volts at steady cruise going down (NaN until a downward cruise has been seen). */
     public double getCruiseVoltsDown() {
         return cruiseVoltsDown;
     }
 
+    /** The kG (volts) the two cruise voltages imply: their mean. NaN until both directions have been seen. */
     public double getKgFromCruise() {
         return (cruiseVoltsUp + cruiseVoltsDown) / 2.0;
     }
 
+    /**
+     * Samples the cruise voltage every loop, then re-applies edited tunables
+     * to the controllers. The re-apply runs only while DISABLED (a
+     * reconfigure mid-move would stutter the mechanism), polled twice a
+     * second. Gains, feedforward, and profile limits apply right away. The
+     * calibration values (travel ratio, hard-stop height) rescale or
+     * re-reference the encoder, so they are applied only with the carriage
+     * at its base, where the encoders are then re-referenced against the
+     * hard stop; until then they wait and the Dashboard shows an alert.
+     */
     @Override
     public void periodic() {
         sampleCruiseVolts();
@@ -388,9 +395,11 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     }
 
     /**
-     * Commands the elevator to a height in inches using MAXMotion.
-     * The Spark MAX runs the profile and holds the position afterward;
-     * gravity/friction compensation comes from the configured kS/kV/kG.
+     * Commands the elevator to a height in inches (preset frame, clamped to
+     * the travel limits) using MAXMotion at the given pace. The Spark MAX
+     * runs the profile and holds the position afterward; gravity/friction
+     * compensation comes from the configured kS/kV/kA/kG. A setpoint
+     * identical to the one already running is not re-sent.
      */
     @Override
     public void setPosition(double targetPosition, Pace pace) {
@@ -417,8 +426,9 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     }
 
     /**
-     * Holds the current height under closed-loop control. Used when the driver
-     * releases the manual-control stick so the carriage does not drift down.
+     * Holds the current height under closed-loop control. Used when the
+     * robot is enabled, so a carriage that was left raised does not sink
+     * under gravity before the first command arrives.
      */
     public void holdCurrentPosition() {
         // Already holding a setpoint right here: keep it. A new setpoint at
@@ -444,8 +454,11 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     }
 
     /**
-     * Direct duty-cycle control from the operator stick. Soft limits on the
-     * controllers stop travel at either end of the elevator's range.
+     * Open-loop voltage control from the operator stick: the gravity
+     * feedforward plus the stick scaled to ELEVATOR_MANUAL_MAX_VOLTS. The
+     * leader's soft limits stop travel at either end of the elevator's range.
+     *
+     * @param speed stick value, -1 to 1 (positive = up); deadbanded here
      */
     public void manualControl(double speed) {
         // Manual input overrides position control
@@ -456,10 +469,11 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         if (Math.abs(speed) < ElevatorConstants.ELEVATOR_MANUAL_CONTROL_DEADBAND) {
             speed = 0;
         }
-        // Gravity plus the stick, in volts. Plain duty cycle had no gravity
-        // term: with ~1.2 V needed just to hold, up-stick below ~27 % let the
-        // carriage SINK while the operator pushed up, and full down was twice
-        // as fast as full up.
+        // Gravity plus the stick, in volts. Plain duty cycle has no gravity
+        // term: with about a volt needed just to hold, a small up-stick
+        // would let the carriage SINK while the operator pushed up, and full
+        // down would run far faster than full up. With kG added, the stick
+        // commands the same speed in either direction.
         speed = Math.min(Math.max(speed, -1), 1);
         leftMotor.setVoltage(appliedKg + speed * ElevatorConstants.ELEVATOR_MANUAL_MAX_VOLTS);
     }
@@ -571,7 +585,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         return appliedMaxAcceleration * pace.scale;
     }
 
-    /** True while an edited travel ratio is waiting for the carriage to be at its base. */
+    /** True while an edited travel ratio or hard-stop height is waiting for the carriage to be at its base. */
     public boolean isTravelRatioChangePending() {
         return travelRatioChangePending;
     }

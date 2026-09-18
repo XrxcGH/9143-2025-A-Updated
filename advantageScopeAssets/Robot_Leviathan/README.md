@@ -1,16 +1,27 @@
-Leviathan (9143 Robot A) articulated model for AdvantageScope.
+# Leviathan (Team 9143, Robot A) - articulated model for AdvantageScope
 
-Component mapping - MUST match the order the robot code publishes poses in
-NT://Draggables/Components3d and RobotState/ComponentPoses (see
-Constants.LoggingConstants and Dashboard.update()):
+The component order here **must** match the order in which the robot code
+publishes the component poses - `RobotState/ComponentPoses` and
+`Draggables/Components3d`, both filled in `Dashboard.update()` using the
+indices in `Constants.LoggingConstants`:
 
-  Model    - drive base (follows the robot pose)
-  Model_0  - elevator middle stage (rises at half carriage speed)
-  Model_1  - elevator carriage
-  Model_2  - CorAl arm (pitches about the pivot)
+| File          | Component index | Part                                              |
+|---------------|-----------------|---------------------------------------------------|
+| `model.glb`   | (none)          | Drive base and static structure; follows the robot pose |
+| `model_0.glb` | 0               | Elevator middle stage (rises at half the carriage speed) |
+| `model_1.glb` | 1               | Elevator carriage                                 |
+| `model_2.glb` | 2               | CorAl arm (pitches about the pivot)               |
 
-(This robot has no climb mechanism - an earlier version of this file listed
-Model_1 as "climb", which was a template leftover.)
+`config.json` holds the model name ("Leviathan - 9143A"), the glTF-to-field
+rotation and each component's zeroed position / rotation. The STEP files the
+`.glb` models were converted from are in `../step-files`.
 
-VERIFY on first AdvantageScope session: if the exported glTF components are
-in a different order, either re-export in this order or remap in config.json.
+To use the model, point AdvantageScope at the parent `advantageScopeAssets`
+folder (*Help > Use Custom Assets Folder*) and bind the robot's components to
+`AdvantageKit/RealOutputs/RobotState/ComponentPoses`. See "3D mechanism
+animation" in the repository README.
+
+Check on the first AdvantageScope session after a re-export: if the glTF
+components come out in a different order, either re-export in the order above
+or remap them in `config.json`. If a part floats or swings the wrong way,
+adjust its `zeroedPosition` / `zeroedRotations` there.

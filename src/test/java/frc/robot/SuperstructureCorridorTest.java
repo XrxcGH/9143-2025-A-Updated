@@ -62,7 +62,7 @@ class SuperstructureCorridorTest {
         // RAISE is the travel angle: clear from the base to the top
         assertTrue(Superstructure.elevatorPathClear(BASE, ElevatorConstants.ELEVATOR_MAX_POSITION,
             PivotPresetAngles.RAISE.getAngle()));
-        // Nothing is inside a band any more, so the startup audit is silent.
+        // No preset sits inside a blocked band, so the startup audit is silent.
         assertEquals("", Superstructure.presetAuditMessage());
     }
 
@@ -180,9 +180,10 @@ class SuperstructureCorridorTest {
 
     /**
      * The resting L3 pose reads a little UNDER 25 deg on the through bore
-     * (chain slack), which is the 20-25 row, blocked at 30.5 in. Every
-     * lookup from there used to fail: the shortcut was never chosen and the
-     * sweep helpers returned "no limit".
+     * (chain slack), which is the 20-25 row, blocked at 30.5 in. Lookups
+     * from there must snap the reading into the neighbouring clear row:
+     * otherwise the L3 -> L4 shortcut is never chosen and the sweep helpers
+     * have no row to answer from.
      */
     @Test
     void lookupsFromARestingPoseOnARowEdgeStillWork() {

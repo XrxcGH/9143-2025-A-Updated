@@ -56,8 +56,12 @@ import frc.robot.util.Tunables;
  *   Left stick          - field-centric translation (scaled down automatically
  *                         as the carriage rises: 100 % below 16.5", 40 % at 45"+)
  *   Right stick X       - rotation
- *   Left / right trigger (HOLD) - align on the LEFT / RIGHT reef branch (or the
- *                         coral station when stowed and empty); release = sticks
+ *   Left / right trigger (HOLD) - align on the LEFT / RIGHT reef branch; either
+ *                         trigger centers on the coral station when stowed
+ *                         and empty, and on the barge / processor with an
+ *                         algae carried or at the barge pose (those two need
+ *                         the front camera's pose measured first - see
+ *                         VisionConstants.LIMELIGHT_POSES); release = sticks
  *   Right bumper        - SCORE (same gated command as operator RT; while
  *                         aligning it also waits for "aligned")
  *   Left bumper         - driver heading zero: the way the robot faces now =
@@ -67,8 +71,8 @@ import frc.robot.util.Tunables;
  *   B, Back/Start + X/Y - point wheels / SysId: TEST MODE ONLY
  *
  * OPERATOR (port 1):
- *   A / X / B / Y       - coral L1 / L2 / L3 / L4 (the old D-pad diamond, under
- *                         the right thumb)
+ *   A / X / B / Y       - coral L1 / L2 / L3 / L4 (a diamond under the right
+ *                         thumb: bottom / left / right / top)
  *   Right trigger       - SCORE: waits until the MEASURED pose is reached, runs
  *                         the rollers until the coral has left, then goes home
  *                         by itself (after L3/L4 only once the robot has backed
@@ -137,6 +141,10 @@ public class RobotContainer {
     private final CorAl coral = new CorAl();
     // CANdle disabled (no CANdle on the robot): private final LEDs leds;
 
+    // Logged placeholders for AdvantageScope model work: four identity poses,
+    // and a flag that is true from boot until the robot is first enabled
+    // (cleared in Robot.disabledExit). The live mechanism poses are published
+    // by Dashboard as RobotState/ComponentPoses.
     @AutoLogOutput (key = "Draggables/DesiredComponents3d")
     public static Pose3d[] desiredComponents3d = {new Pose3d(), new Pose3d(), new Pose3d(), new Pose3d()};
     @AutoLogOutput (key = "Draggables/FreshCode")
@@ -166,10 +174,6 @@ public class RobotContainer {
         // line, the field, the import, and the Dashboard argument together:
         // leds = new LEDs(coral::isGamePieceDetected, swerve::isVisionTrackingEnabled);
 
-        // Auto chooser is populated with every auto in deploy/pathplanner/autos.
-        // LoggedDashboardChooser publishes it under SmartDashboard/Auto Mode
-        // (Elastic's ComboBox Chooser widget) AND records the selection in
-        // the AdvantageKit log.
         // Named commands for the PathPlanner autos (registered BEFORE the
         // autos are loaded by buildAutoChooser). "score*" = raise, eject,
         // stow, so the robot drives away with the mechanism tucked;
@@ -204,6 +208,10 @@ public class RobotContainer {
         NamedCommands.registerCommand("stowAfterBackingOff",
             superstructure.stowAfterBackingOff(() -> swerve.getStateCopy().Pose));
 
+        // The auto chooser is populated with every auto in
+        // deploy/pathplanner/autos. LoggedDashboardChooser publishes it under
+        // SmartDashboard/Auto Mode (Elastic's ComboBox Chooser widget) AND
+        // records the selection in the AdvantageKit log.
         SendableChooser<Command> chooser;
         if (AutoBuilder.isConfigured()) {
             chooser = AutoBuilder.buildAutoChooser();
@@ -221,7 +229,8 @@ public class RobotContainer {
         addChoreoAutos();
 
         // Vision alignment goals depend on what the superstructure is doing
-        // (L1 standoff vs. flush scoring vs. algae) - wire that in.
+        // (L1 standoff vs. flush scoring vs. algae); the suppliers below wire
+        // that in.
         // Reef safety (see Superstructure.setNearReefSupplier and
         // Vision.getTrackingGoal): moves into / out of L3 and L4 wait while a
         // reef tag is right in front of the bumper, and the L3 / L4 alignment
@@ -237,9 +246,10 @@ public class RobotContainer {
         swerve.getVision().setReefStandoffSuppliers(
             superstructure::readyToScore, superstructure::isWaitingForBackOff);
 
-        // ...and with a coral in the claw but no level pressed yet (goal still
-        // STOW) the next stop is the reef, not a station: without this the
-        // aligner only accepted station tags and just sat still at the reef.
+        // With a coral in the claw but no level pressed yet (goal still STOW)
+        // the next stop is the reef, not a station, so the aligner is given a
+        // reef goal: a STOW goal accepts only station tags, and the robot
+        // would sit still in front of the reef.
         swerve.getVision().setGoalSupplier(() ->
             superstructure.getGoal() == Superstructure.Goal.STOW && coral.isGamePieceDetected()
                 ? Superstructure.Goal.CORAL_L4 : superstructure.getGoal());
@@ -322,8 +332,9 @@ public class RobotContainer {
         driver_controller.start().and(driver_controller.x()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
 
         // D-pad nudges in all EIGHT directions from the POV angle, so a thumb
-        // that lands on a diagonal still moves the robot (povUp() is true
-        // only at exactly 0 degrees; 45 matched nothing before).
+        // that lands on a diagonal still moves the robot (povUp() and the
+        // other cardinal triggers are true only at exactly their own angle,
+        // so bindings on those alone would ignore a 45-degree press).
         new Trigger(() -> driver_controller.getHID().getPOV() >= 0).whileTrue(swerve.applyRequest(() -> {
             double pov = Math.toRadians(driver_controller.getHID().getPOV()); // 0 = up, clockwise
             return forwardStraight.withVelocityX(0.5 * Math.cos(pov)).withVelocityY(-0.5 * Math.sin(pov));
@@ -359,7 +370,7 @@ public class RobotContainer {
         Trigger teleop = new Trigger(DriverStation::isTeleopEnabled);
         Trigger disabled = new Trigger(DriverStation::isDisabled);
 
-        // ---- Coral levels: the old D-pad diamond, under the right thumb ----
+        // ---- Coral levels: a diamond under the right thumb ----
         operator_controller.a().and(auto).onTrue(superstructure.goToCoralL1()); // bottom
         operator_controller.x().and(auto).onTrue(superstructure.goToCoralL2()); // left
         operator_controller.b().and(auto).onTrue(superstructure.goToCoralL3()); // right
@@ -371,7 +382,7 @@ public class RobotContainer {
 
         // SCORE: gated on the MEASURED pose. Pulled early it simply waits -
         // the rising edge of (trigger AND ready) is what fires - so it can
-        // never interrupt a staged move the way the old eject button did.
+        // never interrupt a staged move that is still on its way to the pose.
         Trigger ready = new Trigger(superstructure::readyToScore);
         Command score = superstructure.score(() -> swerve.getStateCopy().Pose);
         operator_controller.rightTrigger().and(auto).and(ready).onTrue(score);
@@ -391,9 +402,10 @@ public class RobotContainer {
         operator_controller.povLeft().and(auto).onTrue(superstructure.holdAlgae());
         operator_controller.rightBumper().and(auto).onTrue(superstructure.goToBarge()); // RT then fires it
 
-        // D-pad right: swing the arm to the safe travel angle, in place. (It was
-        // on Back, which is also the disabled-only elevator zero: Back still
-        // held from zeroing when the robot enabled fired it without a press.)
+        // D-pad right: swing the arm to the safe travel angle, in place. It is
+        // deliberately NOT on Back or Start: those are the disabled-only
+        // encoder zeros, and a button still held from zeroing when the robot
+        // enables would fire an enabled binding without a fresh press.
         operator_controller.povRight().and(auto).onTrue(superstructure.raiseArm());
 
         // ---- Encoder zeroing: DISABLED only, and only after a 1 s hold ----
@@ -402,7 +414,8 @@ public class RobotContainer {
         operator_controller.start().and(disabled).debounce(1.0)
             .onTrue(Commands.runOnce(coral::resetPivotEncoder, coral).ignoringDisable(true));
 
-        // ---- Manual take-over (replaces the always-live default commands) ----
+        // ---- Manual take-over (the mechanisms have no default commands, so
+        // the sticks are live only while LB is held) ----
         // Pressing LB cancels the running sequence and freezes both
         // mechanisms; sticks jog while it is held; releasing holds position.
         // (AND enabled, so LB already held when the robot enables still starts
@@ -493,10 +506,11 @@ public class RobotContainer {
 
     /**
      * Called from Robot.disabledExit(): HOLD both mechanisms where they are.
-     * Disabling cuts their outputs, and nothing commanded them again until
-     * the operator pressed something - a carriage that was up (the scoring
-     * autos end at L4) sank under gravity with the arm un-held through
-     * heights its angle is not clear at, with no interlock running.
+     * Disabling cuts their outputs, and nothing else commands them again
+     * until the operator presses something. Without this hold, a carriage
+     * that is up when the robot enables (after an auto that ended at a
+     * scoring pose, say) would sink under gravity with the arm un-held,
+     * through heights its angle is not clear at, with no interlock running.
      */
     public void enabledInit() {
         elevator.holdCurrentPosition();

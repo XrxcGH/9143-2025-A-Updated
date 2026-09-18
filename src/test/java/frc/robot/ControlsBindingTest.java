@@ -28,7 +28,8 @@ import frc.robot.subsystems.CorAl;
 import frc.robot.subsystems.Elevator;
 
 /**
- * Binding-logic checks for the proposed controller mapping. Nothing here
+ * Binding-logic checks for the operator controller mapping (see the control
+ * map at the top of RobotContainer). Nothing here
  * depends on simulated motion (REV's simulated MAXMotion runs on wall-clock
  * time): it presses simulated buttons and looks at what the scheduler did.
  */

@@ -2,8 +2,9 @@
 // CANdle LED subsystem - COMMENTED OUT (Sept 2026): there is no CANdle on the
 // robot, so every line below is disabled to keep the device off the CAN bus
 // and the class out of the build. To bring it back: remove the leading "// "
-// from every line of this file, restore LEDConstants in Constants.java, and
-// re-wire the "CANdle disabled" spots in RobotContainer.java and Dashboard.java.
+// from every line of this file, uncomment LEDConstants in Constants.java, and
+// uncomment the lines marked "CANdle disabled" in RobotContainer.java and
+// Dashboard.java (which then publishes the real "LEDs/State").
 // ============================================================================
 
 // package frc.robot.subsystems;

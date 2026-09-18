@@ -4,6 +4,7 @@ import com.revrobotics.PersistMode;
 import com.revrobotics.RelativeEncoder;
 import com.revrobotics.ResetMode;
 import com.revrobotics.sim.SparkMaxSim;
+import com.revrobotics.spark.ClosedLoopSlot;
 import com.revrobotics.spark.FeedbackSensor;
 import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkClosedLoopController;
@@ -76,6 +77,10 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     private boolean manualModeEnabled = false;
     // Track position control mode internally
     private boolean positionControlEnabled = false;
+    // The pace of the setpoint in effect (one Spark MAX closed-loop slot each)
+    private Pace currentPace = Pace.FULL;
+    private static final ClosedLoopSlot[] PACE_SLOTS = {
+        ClosedLoopSlot.kSlot0, ClosedLoopSlot.kSlot1, ClosedLoopSlot.kSlot2, ClosedLoopSlot.kSlot3};
 
     // ------------------------------------------------------------------
     // Live-tunable configuration (Testing tab -> Tunables widget), as last
@@ -209,15 +214,16 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
             .uvwMeasurementPeriod(ElevatorConstants.ELEVATOR_VELOCITY_PERIOD_MS)
             .uvwAverageDepth(ElevatorConstants.ELEVATOR_VELOCITY_AVG_DEPTH);
 
-        // Closed-loop PID gains (slot 0). Error units are inches after the
-        // conversion factors above; output is duty cycle.
+        // Closed-loop PID gains. Error units are inches after the conversion
+        // factors above; output is duty cycle.
         leaderConfig.closedLoop
-            .feedbackSensor(FeedbackSensor.kPrimaryEncoder)
-            .p(appliedKp)
-            .i(ElevatorConstants.ELEVATOR_kI)
-            .d(ElevatorConstants.ELEVATOR_kD)
-            .outputRange(-1, 1);
+            .feedbackSensor(FeedbackSensor.kPrimaryEncoder);
 
+        // One closed-loop slot per Pace: IDENTICAL gains and feedforward, and
+        // MAXMotion limits scaled by the pace. The Superstructure picks the
+        // pace with each setpoint so the carriage travels with the arm
+        // instead of racing it to a clearance limit and braking there.
+        //
         // On-controller feedforward (volts): static friction, velocity, and
         // gravity compensation - the same kS/kV/kG model as WPILib's
         // ElevatorFeedforward, evaluated by the Spark MAX every cycle so the
@@ -226,20 +232,23 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         // and is what keeps the carriage on the profile through the
         // acceleration and deceleration ramps instead of buying that force
         // with position error.
-        leaderConfig.closedLoop.feedForward
-            .kS(appliedKs)
-            .kV(kV)
-            .kA(appliedKa)
-            .kG(appliedKg);
-
+        //
         // MAXMotion profile parameters (inches, inches per second). The
         // profile error is how far the carriage may stray from the profile
         // before MAXMotion regenerates it from the current state - it is
         // not a settling tolerance.
-        leaderConfig.closedLoop.maxMotion
-            .cruiseVelocity(appliedCruiseVelocity)
-            .maxAcceleration(appliedMaxAcceleration)
-            .allowedProfileError(appliedProfileError);
+        for (Pace pace : Pace.values()) {
+            ClosedLoopSlot slot = PACE_SLOTS[pace.ordinal()];
+            leaderConfig.closedLoop
+                .pid(appliedKp, ElevatorConstants.ELEVATOR_kI, ElevatorConstants.ELEVATOR_kD, slot)
+                .outputRange(-1, 1, slot);
+            leaderConfig.closedLoop.feedForward
+                .svag(appliedKs, kV, appliedKa, appliedKg, slot);
+            leaderConfig.closedLoop.maxMotion
+                .cruiseVelocity(appliedCruiseVelocity * pace.scale, slot)
+                .maxAcceleration(appliedMaxAcceleration * pace.scale, slot)
+                .allowedProfileError(appliedProfileError, slot);
+        }
 
         // Soft limits (inches, preset frame) bound travel in every control
         // mode. The reverse limit is the hard-stop height, since that is
@@ -376,7 +385,8 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
      * The Spark MAX runs the profile and holds the position afterward;
      * gravity/friction compensation comes from the configured kS/kV/kG.
      */
-    public void setPosition(double targetPosition) {
+    @Override
+    public void setPosition(double targetPosition, Pace pace) {
         // Clamp target position within safe limits (a preset of 0 means "as
         // low as it goes", which is the hard-stop height)
         targetPosition = Math.min(Math.max(targetPosition, appliedZeroHeight),
@@ -384,16 +394,18 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
 
         // MAXMotion regenerates its profile from the measured state whenever
         // a setpoint arrives, so never re-send the one it is already running.
-        if (positionControlEnabled && targetPosition == currentTargetPosition) {
+        if (positionControlEnabled && targetPosition == currentTargetPosition && pace == currentPace) {
             return;
         }
 
         currentTargetPosition = targetPosition;
+        currentPace = pace;
         positionControlEnabled = true;
         manualModeEnabled = false;
 
         // The controller latches the setpoint; no need to re-send every loop
-        closedLoopController.setSetpoint(targetPosition, ControlType.kMAXMotionPositionControl);
+        closedLoopController.setSetpoint(targetPosition, ControlType.kMAXMotionPositionControl,
+            PACE_SLOTS[pace.ordinal()]);
     }
 
     /**
@@ -532,9 +544,10 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         return appliedCruiseVelocity;
     }
 
-    /** MAXMotion acceleration (in/s^2) currently applied - the planner derives handoffs from it. */
+    /** MAXMotion acceleration (in/s^2) in effect at the current pace - the planner sizes braking distances from it. */
+    @Override
     public double maxAcceleration() {
-        return appliedMaxAcceleration;
+        return appliedMaxAcceleration * currentPace.scale;
     }
 
     /** True while an edited travel ratio is waiting for the carriage to be at its base. */

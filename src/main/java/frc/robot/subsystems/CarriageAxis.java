@@ -14,12 +14,17 @@ public interface CarriageAxis extends Subsystem {
 
     double getVelocity();
 
-    /** Commands a height; the controller profiles to it and holds it. */
-    void setPosition(double heightInches);
+    /** Commands a height at full pace; the controller profiles to it and holds it. */
+    default void setPosition(double heightInches) {
+        setPosition(heightInches, Pace.FULL);
+    }
+
+    /** Commands a height at the given pace (see {@link Pace}). */
+    void setPosition(double heightInches, Pace pace);
 
     boolean isAtTargetPosition();
 
-    /** Profile acceleration in effect, in/s^2 (the planner sizes braking distances from it). */
+    /** Profile acceleration in effect AT THE CURRENT PACE, in/s^2 (the planner sizes braking distances from it). */
     double maxAcceleration();
 
     boolean isInManualMode();

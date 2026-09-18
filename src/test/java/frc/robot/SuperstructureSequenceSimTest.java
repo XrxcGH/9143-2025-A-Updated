@@ -29,6 +29,7 @@ import frc.robot.Constants.ElevatorConstants.PresetHeights;
 import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.subsystems.ArmAxis;
 import frc.robot.subsystems.CarriageAxis;
+import frc.robot.subsystems.Pace;
 
 /**
  * Runs the REAL Superstructure commands - the same objects the operator's
@@ -58,7 +59,7 @@ class SuperstructureSequenceSimTest {
     /** Acceleration-limited axis that brakes in time for its setpoint, continuous across retargets. */
     private static class Profile {
         double position, velocity, setpoint;
-        final double maxVelocity, maxAcceleration;
+        double maxVelocity, maxAcceleration;
 
         Profile(double position, double maxVelocity, double maxAcceleration) {
             this.position = position;
@@ -79,11 +80,14 @@ class SuperstructureSequenceSimTest {
     private static final class SimCarriage extends SubsystemBase implements CarriageAxis {
         final Profile axis;
         final List<Double> setpoints = new ArrayList<>();
+        final double fullVelocity;
         boolean positionMode = false;
+        Pace pace = Pace.FULL;
 
         SimCarriage(double speedScale) {
-            axis = new Profile(ElevatorConstants.ELEVATOR_ZERO_HEIGHT,
-                ElevatorConstants.ELEVATOR_MAX_VELOCITY * speedScale, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
+            fullVelocity = ElevatorConstants.ELEVATOR_MAX_VELOCITY * speedScale;
+            axis = new Profile(ElevatorConstants.ELEVATOR_ZERO_HEIGHT, fullVelocity,
+                ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
         }
 
         @Override public double getCurrentPosition() { return axis.position; }
@@ -96,12 +100,15 @@ class SuperstructureSequenceSimTest {
         @Override public void manualControl(double stick) { }
         @Override public void holdCurrentPosition() { setPosition(axis.position); }
 
-        @Override public void setPosition(double height) {
+        @Override public void setPosition(double height, Pace newPace) {
             height = Math.min(Math.max(height, ElevatorConstants.ELEVATOR_ZERO_HEIGHT), ElevatorConstants.ELEVATOR_MAX_POSITION);
-            if (positionMode && height == axis.setpoint) {
+            if (positionMode && height == axis.setpoint && newPace == pace) {
                 return; // the real Elevator ignores a repeat of its setpoint too
             }
             positionMode = true;
+            pace = newPace;
+            axis.maxVelocity = fullVelocity * pace.scale;
+            axis.maxAcceleration = ElevatorConstants.ELEVATOR_MAX_ACCELERATION * pace.scale;
             axis.setpoint = height;
             setpoints.add(height);
         }
@@ -112,12 +119,14 @@ class SuperstructureSequenceSimTest {
         /** Through bore minus rotor: the chain's slack as the gates see it. */
         final double slackDegrees;
         final List<Double> setpoints = new ArrayList<>();
+        final double fullVelocity, fullAcceleration;
         boolean positionMode = false;
         double target = 0.0;
 
         SimArm(double speedScale, double slackDegrees) {
-            axis = new Profile(0.0, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY * speedScale,
-                CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION * speedScale);
+            fullVelocity = CorAlConstants.CORAL_PIVOT_MAX_VELOCITY * speedScale;
+            fullAcceleration = CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION * speedScale;
+            axis = new Profile(0.0, fullVelocity, fullAcceleration);
             this.slackDegrees = slackDegrees;
         }
 
@@ -129,6 +138,10 @@ class SuperstructureSequenceSimTest {
         @Override public double getPivotAngle() { return Math.max(0.0, axis.position + slack()); }
         @Override public double getPivotVelocity() { return axis.velocity; }
         @Override public double getTargetAngle() { return target; }
+        @Override public void setProfileScale(double scale) {
+            axis.maxVelocity = fullVelocity * scale;
+            axis.maxAcceleration = fullAcceleration * scale * scale;
+        }
         @Override public boolean isAtTargetAngle() {
             return Math.abs(getPivotAngle() - target) <= CorAlConstants.CORAL_PIVOT_ALLOWED_ERROR;
         }
@@ -227,6 +240,37 @@ class SuperstructureSequenceSimTest {
         CommandScheduler.getInstance().run();
     }
 
+    /** Counts dips in the carriage's speed that are followed by a recovery: it braked for something and was re-released. */
+    private static final class HitchCounter {
+        private static final double DEPTH = 6.0; // in/s
+        double peak = 0.0, trough = 0.0;
+        boolean dipping = false;
+        int hitches = 0;
+        double slowestMidMove = Double.MAX_VALUE;
+
+        void sample(double speed, boolean midMove) {
+            if (midMove) {
+                slowestMidMove = Math.min(slowestMidMove, speed);
+            }
+            if (!dipping) {
+                peak = Math.max(peak, speed);
+                if (speed < peak - DEPTH) {
+                    dipping = true;
+                    trough = speed;
+                }
+            } else {
+                trough = Math.min(trough, speed);
+                if (speed > trough + DEPTH) {
+                    hitches++;
+                    dipping = false;
+                    peak = speed;
+                }
+            }
+        }
+    }
+
+    private HitchCounter lastHitches = new HitchCounter();
+
     private static int reversals(List<Double> setpoints) {
         int count = 0;
         for (int i = 2; i < setpoints.size(); i++) {
@@ -247,12 +291,18 @@ class SuperstructureSequenceSimTest {
         double stationary = 0.0;
         double longestStationary = 0.0;
         double elapsed = 0.0;
+        HitchCounter hitchCounter = new HitchCounter();
+        lastHitches = hitchCounter;
+        double startHeight = carriage.axis.position;
         loop(label, slack); // the first run() initializes it
         while (command.isScheduled() && elapsed < timeLimit) {
             loop(label, slack);
             elapsed += DT * PHYSICS_PER_LOOP;
             boolean arrived = Math.abs(carriage.axis.position - destination.height) < 0.3
                 && Math.abs(arm.axis.position - destination.angle) < 1.5;
+            boolean midMove = Math.abs(carriage.axis.position - startHeight) > 5.0
+                && Math.abs(carriage.axis.position - destination.height) > 5.0;
+            hitchCounter.sample(Math.abs(carriage.axis.velocity), midMove);
             if (!arrived && Math.abs(carriage.axis.velocity) < 0.5 && Math.abs(arm.axis.velocity) < 3.0) {
                 stationary += DT * PHYSICS_PER_LOOP;
                 longestStationary = Math.max(longestStationary, stationary);
@@ -267,7 +317,8 @@ class SuperstructureSequenceSimTest {
         metrics.add(String.format("%s,%.2f,%d,%d,%d,%.2f,%.2f,%.1f", label, elapsed, carriage.setpoints.size(),
             reversals(carriage.setpoints), arm.setpoints.size(), longestStationary,
             carriage.axis.position, arm.getPivotAngle())
-            + "," + carriage.setpoints.toString().replace(", ", " ") + "," + arm.setpoints.toString().replace(", ", " "));
+            + "," + carriage.setpoints.toString().replace(", ", " ") + "," + arm.setpoints.toString().replace(", ", " ")
+            + "," + hitchCounter.hitches + String.format(",%.1f", hitchCounter.slowestMidMove == Double.MAX_VALUE ? -1.0 : hitchCounter.slowestMidMove));
 
         assertTrue(!command.isScheduled(), String.format("%s: did not finish in %.1f s (stuck at %.2f in, %.1f deg; carriage -> %.2f, arm -> %.1f)",
             label, timeLimit, carriage.axis.position, arm.getPivotAngle(), carriage.axis.setpoint, arm.target));
@@ -285,6 +336,17 @@ class SuperstructureSequenceSimTest {
                 String.format("%s: %d arm setpoints %s", label, arm.setpoints.size(), arm.setpoints));
             assertTrue(longestStationary <= 0.2,
                 String.format("%s: both mechanisms stationary for %.2f s mid-move", label, longestStationary));
+            // The scoring climbs run in unison: the carriage never brakes for the arm and is re-released.
+            // (The paces and the arm's release lead in Superstructure are what make this true.)
+            if (label.matches(".* (BASE|L1|L2)->(L3|L4)$") || label.endsWith(" L3->L4")) {
+                assertTrue(hitchCounter.hitches == 0, String.format("%s: the carriage braked for the arm %d time(s), slowest %.1f in/s %s",
+                    label, hitchCounter.hitches, hitchCounter.slowestMidMove, carriage.setpoints));
+            }
+            // Leaving L4 the gates force the carriage to wait on the arm; paced, it must at least keep moving.
+            if (label.matches(".* L4->(BASE|L1|L2)$")) {
+                assertTrue(hitchCounter.slowestMidMove >= 4.0,
+                    String.format("%s: the carriage all but stopped mid-exit (%.1f in/s)", label, hitchCounter.slowestMidMove));
+            }
         }
     }
 
@@ -311,7 +373,7 @@ class SuperstructureSequenceSimTest {
         Path dir = Path.of("build", "sim");
         Files.createDirectories(dir);
         List<String> lines = new ArrayList<>();
-        lines.add("move,seconds,carriage_setpoints,carriage_reversals,arm_setpoints,longest_both_stationary_s,end_height,end_angle,carriage_list,arm_list");
+        lines.add("move,seconds,carriage_setpoints,carriage_reversals,arm_setpoints,longest_both_stationary_s,end_height,end_angle,carriage_list,arm_list,carriage_hitches,carriage_slowest_mid_move");
         lines.addAll(metrics);
         Files.write(dir.resolve(name), lines);
     }
@@ -335,6 +397,59 @@ class SuperstructureSequenceSimTest {
             everyPair("slowCarriage", 0.6, 1.0, 0.0, false);
         } finally {
             writeMetrics("sequence_metrics_offnominal.csv");
+        }
+    }
+
+    /**
+     * What each carriage pace does to the moves it applies to: time, hitches (the carriage braking
+     * for the arm and being re-released) and the slowest it went mid-move. Writes
+     * build/sim/paces.csv; the paces in Superstructure are the fastest hitch-free ones from it.
+     */
+    @Test
+    void pacesCompared() throws IOException {
+        Pace l4 = Superstructure.climbToL4Pace;
+        Pace l3 = Superstructure.climbToL3Pace;
+        Pace exit = Superstructure.l4ExitPace;
+        List<String> lines = new ArrayList<>();
+        lines.add("move,pace,lead_s,seconds,carriage_setpoints,hitches,slowest_mid_move_in_s");
+        try {
+            String[][] moves = {{"BASE", "L4"}, {"L2", "L4"}, {"BASE", "L3"}, {"L2", "L3"}, {"L4", "BASE"}, {"L4", "L2"}};
+            for (String[] move : moves) {
+                for (Pace pace : Pace.values()) {
+                  for (double lead : new double[] {0.0, 0.2}) {
+                    Superstructure.armReleaseLeadSeconds = lead;
+                    // lead 0.0 rows also switch the exit's shaping waypoint off (far above the carriage = never used)
+                    Superstructure.l4ExitShapeHeight = lead == 0.0 ? 99.0 : SuperstructureConstants.L4_RETURN_SHAPE_HEIGHT;
+                    Superstructure.climbToL4Pace = pace;
+                    Superstructure.climbToL3Pace = pace;
+                    Superstructure.l4ExitPace = pace;
+                    build(1.0, 1.0, 0.0);
+                    Pose from = poses().stream().filter(q -> q.name.equals(move[0])).findFirst().orElseThrow();
+                    Pose to = poses().stream().filter(q -> q.name.equals(move[1])).findFirst().orElseThrow();
+                    if (!from.name.equals("BASE")) {
+                        Superstructure.climbToL4Pace = Pace.FULL;
+                        Superstructure.l4ExitPace = Pace.FULL;
+                        run("paces (setup)", from.go.get(), from, 12.0, 0.0, false);
+                        Superstructure.climbToL4Pace = pace;
+                        Superstructure.l4ExitPace = pace;
+                    }
+                    int before = metrics.size();
+                    run("paces " + from.name + "->" + to.name + " " + pace, to.go.get(), to, 12.0, 0.0, false);
+                    String[] row = metrics.get(before).split(",");
+                    lines.add(String.format("%s->%s,%s,%.1f,%s,%s,%d,%.1f", from.name, to.name, pace, lead, row[1], row[2],
+                        lastHitches.hitches, lastHitches.slowestMidMove == Double.MAX_VALUE ? -1.0 : lastHitches.slowestMidMove));
+                  }
+                }
+            }
+        } finally {
+            Superstructure.climbToL4Pace = l4;
+            Superstructure.climbToL3Pace = l3;
+            Superstructure.l4ExitPace = exit;
+            Superstructure.armReleaseLeadSeconds = SuperstructureConstants.ARM_RELEASE_LEAD_SECONDS;
+            Superstructure.l4ExitShapeHeight = SuperstructureConstants.L4_RETURN_SHAPE_HEIGHT;
+            Path dir = Path.of("build", "sim");
+            Files.createDirectories(dir);
+            Files.write(dir.resolve("paces.csv"), lines);
         }
     }
 

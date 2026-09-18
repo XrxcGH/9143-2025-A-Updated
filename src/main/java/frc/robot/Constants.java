@@ -752,6 +752,22 @@ public final class Constants {
 		// RATCHET_MARGIN inside, so the two can never wait on each other), and
 		// the arm stops this far short of a row that is not open.
 		public static final double ARM_CLAMP_HEIGHT_MARGIN = 0.1;   // Inches
+		// Under a CEILING the arm is sweeping up toward (leaving L4), a real
+		// margin: that is the claw's rear against the middle-stage top tube,
+		// the contact the table has already been caught optimistic about.
+		public static final double ARM_CLAMP_CEILING_MARGIN_RISING = 1.0; // Inches
+		// The arm is let go this long before the carriage reaches
+		// ARM_RELEASE_MIN_HEIGHT (at its measured speed), and held at this
+		// angle until the carriage is actually there. 92.5 deg keeps the tail
+		// bar ~1.1 in behind the funnel's sheet metal (2.25 in at RAISE).
+		// Set the lead to 0 to go back to releasing AT the height.
+		public static final double ARM_RELEASE_LEAD_SECONDS = 0.2;
+		public static final double ARM_EARLY_HOLD_ANGLE = 92.5;     // Degrees
+		// On an L4 climb the carriage is clamped for the rows between the arm
+		// and the limit the arm has been sent to, plus this much further (two
+		// table rows), so it never parks above the height that would let the
+		// arm into its next row.
+		public static final double ARM_COMMIT_LOOKAHEAD = 10.0;     // Degrees
 		public static final double ARM_CLAMP_ANGLE_MARGIN = 2.5;    // Degrees
 		// "Near the reef" (see Superstructure.setNearReefSupplier) stays true
 		// this long after the last sighting: a dropped camera frame is not
@@ -772,6 +788,12 @@ public final class Constants {
 		// station, swing to RAISE below 37 in (90 deg clear to 36.5), then
 		// descend freely.
 		public static final double L4_RETURN_DROP_HEIGHT = 39.0;         // Inches
+		// Not a clearance gate, a speed-shaping waypoint: the exit's first leg
+		// runs at full pace to here (still at the L4 angle, clear 35.5-52.5
+		// in), so the carriage is already slowing as the arm is released, and
+		// the rest of the way to the drop height and the station is paced to
+		// the arm (Superstructure.l4ExitPace).
+		public static final double L4_RETURN_SHAPE_HEIGHT = 41.5;        // Inches
 		public static final double L4_RETURN_ROTATE_MAX_HEIGHT = 43.0;   // Inches
 		public static final double L4_RETURN_STAGE_ANGLE = 45.0;         // Degrees
 		public static final double L4_RETURN_STAGE_DONE_ANGLE = 40.0;    // Degrees

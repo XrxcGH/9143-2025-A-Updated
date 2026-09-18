@@ -15,6 +15,13 @@ public interface ArmAxis extends Subsystem {
     /** Commands an angle; the controller profiles to it and holds it. */
     void setPivotAngle(double angleDegrees);
 
+    /**
+     * Runs the arm's profile at a fraction of its tuned speed (the whole
+     * profile is time-scaled: cruise x s, acceleration x s^2, jerk x s^3), so
+     * a sweep that would finish long before the carriage can take its time.
+     */
+    void setProfileScale(double scale);
+
     /** The angle last commanded. */
     double getTargetAngle();
 

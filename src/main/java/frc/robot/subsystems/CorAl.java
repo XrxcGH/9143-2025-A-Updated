@@ -128,6 +128,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     private double appliedCruiseVelocity;  // deg/s
     private double appliedMaxAcceleration; // deg/s^2
     private double appliedMaxJerk;         // deg/s^3
+    private double profileScale = 1.0;     // fraction of the tuned profile in effect (setProfileScale)
     private double appliedKg;              // V with the claw horizontal
     private double appliedBalanceAngle;    // deg where gravity does nothing
     private final Timer tunablePollTimer = new Timer();
@@ -324,10 +325,32 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      * never snaps into or out of motion.
      */
     private MotionMagicConfigs motionMagicConfig() {
+        // Time-scaling a profile by 1 / s keeps its shape: v x s, a x s^2, j x s^3.
+        double s = profileScale;
         return new MotionMagicConfigs()
-            .withMotionMagicCruiseVelocity(appliedCruiseVelocity / 360.0)
-            .withMotionMagicAcceleration(appliedMaxAcceleration / 360.0)
-            .withMotionMagicJerk(appliedMaxJerk / 360.0);
+            .withMotionMagicCruiseVelocity(appliedCruiseVelocity * s / 360.0)
+            .withMotionMagicAcceleration(appliedMaxAcceleration * s * s / 360.0)
+            .withMotionMagicJerk(appliedMaxJerk * s * s * s / 360.0);
+    }
+
+    /**
+     * Runs the pivot's profile at a fraction of its tuned speed, so a sweep
+     * that would finish long before the carriage gets there can take its
+     * time instead (the Superstructure paces the two mechanisms to travel
+     * together). Only the Motion Magic group is sent, with a ZERO timeout -
+     * fire and forget, this runs on the main loop - and only when the scale
+     * actually changes. If the write were ever lost the arm would simply run
+     * the previous profile: smoothness, not safety - the clearance clamps
+     * read measured positions.
+     */
+    @Override
+    public void setProfileScale(double scale) {
+        scale = Math.min(Math.max(scale, 0.3), 1.0);
+        if (Math.abs(scale - profileScale) < 0.01) {
+            return;
+        }
+        profileScale = scale;
+        pivotMotor.getConfigurator().apply(motionMagicConfig(), 0);
     }
 
     private void configureIntakeMotor(TalonFX motor) {
@@ -766,7 +789,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
 
     /** Acceleration (deg/s^2) currently applied to the pivot. */
     public double maxAcceleration() {
-        return appliedMaxAcceleration;
+        return appliedMaxAcceleration * profileScale * profileScale;
     }
 
     /** Jerk limit (deg/s^3) currently applied to the pivot. */

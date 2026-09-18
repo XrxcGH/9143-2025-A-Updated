@@ -39,7 +39,8 @@ import frc.robot.util.Tunables;
  *    "Elevator - Travel Ratio" tunable (confirmed 1.0 on the robot).
  *  - Heights are in the preset frame: top of the base-stage 2x1 to the
  *    bottom of the carriage 2x1. On its hard stop the carriage sits ABOVE
- *    that reference by "Elevator - Height At Hard Stop" (~0.875 in), so
+ *    that reference by "Elevator - Height At Hard Stop" (1.000 in, the
+ *    middle-stage tube), so
  *    the encoder is zeroed TO that value, not to 0, and the reverse soft
  *    limit sits there (README: "Calibrating the elevator height").
  *  - Height moves use MAXMotion (trapezoidal profiling on the controller)

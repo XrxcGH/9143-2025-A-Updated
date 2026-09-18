@@ -91,7 +91,9 @@ public final class Constants {
 		//
 		// CONFIRMED 1.0 on the robot (Sept 2026). Five tape tests, measured
 		// from the top of the base-stage 2x1 to the bottom of the carriage
-		// 2x1, all fit ONE line: measured = model travel + ~0.875 in.
+		// 2x1, all fit ONE line: measured = model travel + a constant, and
+		// that constant is the 1 in middle-stage tube (the tape readings put
+		// it near 0.875 - they were 1/8 in optimistic).
 		//   commanded   ratio applied   model travel   tape
 		//      2.00        1.0              2.00        ~2.75
 		//      6.00        1.375            4.36         5.125
@@ -219,17 +221,19 @@ public final class Constants {
 		// All heights (presets, contact points, soft limits, dashboard) are
 		// measured from the top of the base-stage 2x1 to the bottom of the
 		// carriage 2x1, with the middle stage between them. On its hard stop
-		// the carriage does NOT sit at 0 in that frame: five tape tests put
-		// it ~0.875 in above the reference (see the travel-ratio note), and
-		// the CAD (Leviathan STEP, everything on its hard stops) puts it at
-		// exactly 1.000 in - the base stage's bottom cross tube tops out at
-		// Y 5.875, the middle stage's 1 in tube sits on it, and the carriage
-		// tube bottom is at 6.875. Tape at rest settles which. The encoder
-		// is referenced TO this value, not zeroed, every time the carriage
-		// is at its hard stop, so a commanded 20 in lands the tape at 20 in.
+		// the carriage does NOT sit at 0 in that frame: the middle-stage tube
+		// is in the gap, and it is a 2x1 lying on its 1 in side, so the gap is
+		// exactly the tube: 1.000 in (team, Sept 2026). The CAD agrees - the
+		// base stage's bottom cross tube tops out at Y 5.875, the middle
+		// stage's 1 in tube sits on it, and the carriage tube bottom is at
+		// 6.875 - and so does the CAD clearance analysis, which is computed
+		// with the carriage resting at 1.000. (Five tape tests read ~0.875;
+		// they were an eighth of an inch optimistic.) The encoder is
+		// referenced TO this value, not zeroed, every time the carriage is at
+		// its hard stop, so a commanded 20 in lands the tape at 20 in.
 		// Default of the "Elevator - Height At Hard Stop" tunable. The
 		// reverse soft limit is this height; presets of 0 clamp to it.
-		public static final double ELEVATOR_ZERO_HEIGHT = 0.875;
+		public static final double ELEVATOR_ZERO_HEIGHT = 1.0;
 		public static final double ELEVATOR_MAX_POSITION = 53.0; // Forward soft limit
 
 		// --- Tolerances (inches) ---

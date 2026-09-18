@@ -87,7 +87,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 9; // 9: elevator kG 1.0 (no counterbalance) and 200 in/s^2 (mast ring at the stop), Sept 17 2026
+    private static final int DEFAULTS_VERSION = 10; // 10: hard-stop height 1.000 in (the middle-stage tube), Sept 17 2026
 
     /**
      * Seeds every key with its Constants default if it does not exist yet

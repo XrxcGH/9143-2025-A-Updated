@@ -53,11 +53,12 @@ import frc.robot.subsystems.Swerve;
 // the SDS layout drawing - if it differs from 2.625", adjust the back module
 // X/Y positions accordingly.
 //
-// NOTE: tuner-project.json (Tuner X project in the repo root) is STALE - it
-// models all four modules as MK4n (18.75 steer) and holds different CANcoder
-// offsets. This file's per-module steer ratios match the physical robot; the
-// CANcoder offsets below should still be re-verified in Tuner X with all
-// wheels aligned straight forward before competition.
+// NOTE: this file is the source of truth - no Tuner X project file is kept
+// in the repository. Tuner X's generator assumes one module type for all
+// four, so a regenerated file would overwrite the per-module steer ratios
+// below, which match the physical robot (MK4i front, MK4n back). After any
+// module work, re-measure the CANcoder offsets in Tuner X with all wheels
+// aligned straight forward and enter them here by hand.
 public class TunerConstants {
 	// Both sets of gains need to be tuned to your individual robot.
 

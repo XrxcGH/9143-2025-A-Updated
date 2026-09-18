@@ -63,6 +63,9 @@ import frc.robot.util.Tunables;
  *   Left bumper         - driver heading zero: the way the robot faces now =
  *                         stick forward (back+LB also re-seeds the pose heading)
  *   A (hold)            - X-lock the wheels (brake)
+ *   Y                   - re-seed the POSE heading from the AprilTags in view
+ *                         (MegaTag1 fused for 2 s); the driver's own "forward"
+ *                         does not move
  *   D-pad               - slow robot-centric nudges, all 8 directions
  *   B, Back/Start + X/Y - point wheels / SysId: TEST MODE ONLY
  *
@@ -338,6 +341,17 @@ public class RobotContainer {
                 DriverStation.isDisabled() && !swerve.getVision().hasFreshHeadingSeed())).ignoringDisable(true));
         driver_controller.back().and(driver_controller.leftBumper())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(true)).ignoringDisable(true));
+
+        // Y: correct the POSE heading from tag geometry. While enabled only
+        // MegaTag2 is fused, and MegaTag2 takes its heading FROM the pose, so
+        // a heading that has drifted (a hard hit, a long match) is never
+        // corrected by it; this fuses MegaTag1, whose solve carries its own
+        // heading, for HEADING_RESEED_WINDOW_SECONDS. With no tag in view it
+        // does nothing. The driver's frame is held in the raw gyro frame, so
+        // "forward" on the stick does not move. (Not in Test mode, where
+        // Back / Start + Y are the SysId bindings.)
+        driver_controller.y().and(testMode.negate())
+            .onTrue(Commands.runOnce(() -> swerve.getVision().requestHeadingReseed()).ignoringDisable(true));
 
         // HOLD a trigger to align on that side's branch; release = sticks.
         driver_controller.leftTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.LEFT));

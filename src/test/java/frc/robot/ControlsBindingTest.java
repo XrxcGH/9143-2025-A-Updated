@@ -114,6 +114,14 @@ class ControlsBindingTest {
     }
 
     @Test
+    void driverYOpensTheHeadingReseedWindow() {
+        assertFalse(container.swerve.getVision().isReseedingHeading(), "no re-seed window before the press");
+        driver.setYButton(true);
+        run(3);
+        assertTrue(container.swerve.getVision().isReseedingHeading(), "driver Y = fuse MegaTag1 for the re-seed window");
+    }
+
+    @Test
     void sticksAreDeadWithoutTheManualModifier() {
         operator.setLeftY(-1.0);   // full up
         operator.setRightY(-1.0);

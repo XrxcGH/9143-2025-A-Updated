@@ -1056,9 +1056,9 @@ public final class Constants {
 		// ...and the estimator heading must have CONVERGED on that solve: it
 		// must agree with the solve's own heading within this much
 		public static final double HEADING_SEED_AGREEMENT_DEGREES = 3.0;
-		// Heading re-seed while enabled (Vision.requestHeadingReseed - not
-		// bound to a button by default): MegaTag1 is fused for this long so
-		// the heading corrects from tag geometry
+		// Heading re-seed while enabled (driver Y, Vision.requestHeadingReseed):
+		// MegaTag1 is fused for this long so the pose heading corrects from
+		// tag geometry
 		public static final double HEADING_RESEED_WINDOW_SECONDS = 2.0;
 
 		// --- Tag Classes (2025 Reefscape field) ---

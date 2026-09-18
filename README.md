@@ -31,6 +31,7 @@ One coral cycle is **LT → a face button → RT** on the operator's controller:
 | **Right bumper** | **SCORE** — the same gated command as the operator's RT; while aligning it also waits for *aligned* |
 | Left bumper | **Driver heading zero**: the way the robot faces now becomes "forward" on the stick |
 | A (hold) | X-lock the wheels (brake) |
+| Y | **Re-seed the pose heading** from the AprilTags in view (MegaTag1 fused for 2 s). The driver's own "forward" does not move |
 | D-pad | Slow robot-centric nudges, all 8 directions |
 | B, Back/Start + X/Y | Point modules / SysId — **Test mode only** |
 
@@ -38,6 +39,7 @@ One coral cycle is **LT → a face button → RT** on the operator's controller:
 - **What the align triggers aim at** follows what the robot is doing. With a coral level selected, or with a coral in the claw and no level pressed yet: the LEFT / RIGHT **reef branch**. Stowed and empty: **centered on the coral station** (approached backward). Carrying an algae or at the barge pose: **centered on the barge or processor tag**, whichever is in view. For the centered targets either trigger does the same thing.
 - **Hold a trigger + RB** fires the instant the robot is aligned **and** the scoring pose is reached.
 - **Driver heading zero** moves only the driver's frame, never the pose estimator's heading, so it is safe at any time (point the robot away from you first). While disabled with no tag supplying a heading it also seeds the pose heading to alliance-forward; **Back + left bumper** forces that seed at any time.
+- **Heading re-seed (Y).** While enabled only MegaTag2 is fused, and MegaTag2 takes its heading *from* the pose, so it never corrects a pose heading that has drifted (a hard hit, a long match). Y fuses MegaTag1 — whose solve carries its own heading — for 2 s (`HEADING_RESEED_WINDOW_SECONDS`), with the same plausibility gates as the disabled seed; `Vision/Reseeding Heading` shows the window. With no tag in view it does nothing. Inactive in Test mode, where Back / Start + Y are SysId bindings.
 - **SysId** applies open-loop voltage steps to the drivetrain, so those bindings (and B, point modules) exist only when Test mode is selected on the Driver Station.
 
 ### Operator (Xbox controller, port 1)
@@ -396,7 +398,7 @@ Logging runs through **AdvantageKit** (`Robot` extends `LoggedRobot`):
 ### 3D mechanism animation (CAD in AdvantageScope)
 `Dashboard` publishes `RobotState/ComponentPoses` — a `Pose3d[]` of `{middle stage, carriage, arm}` in the robot frame (X forward, Y left, Z up) — every loop, so the elevator and arm animate in 3D from real match logs **and** in simulation. A 2D schematic (`SmartDashboard/Superstructure Mechanism`) is also published for **Glass**/AdvantageScope.
 
-The articulated robot model ships with the repository in [advantageScopeAssets/Robot_Leviathan](advantageScopeAssets/Robot_Leviathan): `model.glb` (static chassis), `model_0.glb` (middle stage), `model_1.glb` (carriage), `model_2.glb` (arm) and a `config.json`; the STEP exports they were converted from are in `advantageScopeAssets/step-files`. To use it in AdvantageScope's **3D Field** tab (one-time, per laptop):
+The articulated robot model lives in [advantageScopeAssets/Robot_Leviathan](advantageScopeAssets/Robot_Leviathan). The repository carries its `config.json` and a README with the component order; **the model binaries are not in the repository** (the robot's CAD is not distributed, and the folder's `.glb` / `.step` files are git-ignored). Export your own from the CAD as four glTF binaries — `model.glb` (static chassis), `model_0.glb` (middle stage), `model_1.glb` (carriage), `model_2.glb` (arm) — and drop them into that folder. Then, in AdvantageScope's **3D Field** tab (one-time, per laptop):
 
 1. *Help → Use Custom Assets Folder* and select this repository's `advantageScopeAssets` folder (or copy `Robot_Leviathan/` into the folder opened by *Help → Show Assets Folder*).
 2. Select the **Leviathan - 9143A** robot model, then bind its components to the `AdvantageKit/RealOutputs/RobotState/ComponentPoses` field. Live-over-NT and log viewing both use the same field.
@@ -430,7 +432,7 @@ Two build details:
 - Tests fork one JVM per class (`forkEvery`) because simulated CAN devices reject duplicate IDs within a process.
 
 ### Other tools
-- **Phoenix Tuner X**: CTRE device config/firmware, hoot log viewing, swerve project generator (note: `tuner-project.json` does not match the robot — see the checklist).
+- **Phoenix Tuner X**: CTRE device config/firmware, hoot log viewing, swerve project generator (no Tuner X project file is kept in the repository — see the checklist before regenerating `TunerConstants.java`).
 - **REV Hardware Client**: Spark MAX firmware. The elevator gains are dashboard tunables, so the client is not needed for tuning.
 - **PathPlanner GUI**: edit paths/autos in `src/main/deploy/pathplanner`.
 - **Choreo**: draw time-optimal trajectories into `src/main/deploy/choreo`; they appear in the auto chooser automatically (see [Autonomous](#autonomous-pathplanner--choreo)).
@@ -556,7 +558,7 @@ Reading it:
 
 `SuperstructureConstants.FREE_CORRIDORS` is this map with a 1" margin, and the staged sequences were simulated against the full map. Two things are **not in the model**: the funnel's sheet-metal lips below ≈ 22" (the reason `ARM_RELEASE_MIN_HEIGHT` is 24") and the reef. At the L4 angle the claw stays inside the bumper plane (the game manual gives branch tips at 31.875"/47.625"/72", inset 1⅝"/1⅝"/1⅛" from the reef face), so only the coral itself reaches the branch.
 
-The analysis scripts and the full-assembly STEP exports are **not part of this repository**. (The four STEP files under `advantageScopeAssets/step-files` are the separate per-component exports used for the AdvantageScope model.) If the claw, the elevator tubes or the spring hardware change, the analysis has to be repeated with the method above and `FREE_CORRIDORS` updated; `SuperstructureCorridorTest` will then check the presets and staged waypoints against the new table.
+The analysis scripts and the STEP exports are **not part of this repository**. If the claw, the elevator tubes or the spring hardware change, the analysis has to be repeated with the method above and `FREE_CORRIDORS` updated; `SuperstructureCorridorTest` will then check the presets and staged waypoints against the new table.
 
 ---
 
@@ -573,7 +575,7 @@ The motion profiles, the controller mapping, reef and coral-station alignment, t
 7. **Verify a 20" and a 40" elevator move with a tape** after any mechanical work on the elevator — see [Calibrating the elevator height](#calibrating-the-elevator-height). The hard-stop height is 1.000" and the travel ratio should stay at 1.0.
 8. **Sanity-check the CorAl pivot angle** against the through bore encoder after any work on the pivot. The 65.41:1 ratio is derived from the real gear train (10:58 → 18:58 → 12:42), and the through bore must be mounted 1:1 on the pivot shaft.
 9. **Re-check the coral's landing on each branch** if a preset is changed. Every preset is inside the CAD corridors with a full inch of model clearance: L3 is (30.5", 25°) — 27.5° at the same height has 1¾" if it ever rubs — and L2 is 12.5° rather than the geometric 5° so the arm keeps an inch to the cross bar even when chain slack lets it sag 2.5°.
-10. **CANcoder offsets: do not regenerate `TunerConstants.java` from `tuner-project.json`.** The Tuner project models all four modules as MK4n and its offsets disagree with `TunerConstants.java`, which holds the values the robot runs with (mixed per-module steer ratios, offsets, 12.375" module positions confirmed from the CAD). After any module work, re-measure the offsets in Tuner X with the wheels aligned straight forward and enter them by hand.
+10. **CANcoder offsets: `TunerConstants.java` is the source of truth.** It holds the values the robot runs with (mixed per-module steer ratios — MK4i front, MK4n back — the offsets, and the 12.375" module positions confirmed from the CAD), and no Tuner X project file is kept in the repository. A project regenerated in Tuner X with one module type for all four would overwrite the per-module steer ratios. After any module work, re-measure the offsets in Tuner X with the wheels aligned straight forward and enter them by hand.
 11. **Firmware**: 2026 firmware on all CTRE devices (TalonFX, CANcoder, Pigeon 2, CANrange), current Spark MAX firmware via the REV Hardware Client, the 2026 roboRIO image, Limelight OS 2026.0+.
 12. **CAN IDs** must match the map at the top of `Constants.java` (the CANrange is ID 3). Phoenix device IDs must be 0–62.
 13. **Reload the Elastic layout** on every drive laptop after deploying (`File → Load Layout From Robot`).
@@ -590,6 +592,10 @@ The motion profiles, the controller mapping, reef and coral-station alignment, t
 - **PathplannerLib 2026.1.2**: autonomous path generation and following — also loads **Choreo** `.traj` files, so Choreo is supported with no extra vendordep.
 - **AdvantageKit 26.0.2**: logging framework (`LoggedRobot`, `.wpilog` + RLOG live stream, logged auto chooser).
 - **LimelightHelpers v1.14** (source file in the project): Limelight interface; requires Limelight OS 2026.0+ on the cameras.
+
+## License
+
+The team's code is released under the [MIT License](LICENSE). Files that come from elsewhere keep their own terms: the WPILib project template and build files ([WPILib-License.md](WPILib-License.md)), `LimelightHelpers.java` (Limelight), `util/Elastic.java` (the Elastic dashboard's license, linked in its header) and `generated/TunerConstants.java` (generated by CTRE Tuner X). The vendor libraries are downloaded by Gradle under their own licenses.
 
 ## Getting Started
 

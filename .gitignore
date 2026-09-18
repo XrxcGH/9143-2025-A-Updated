@@ -189,3 +189,8 @@ compile_commands.json
 # Per-user editor-assistant settings, and AdvantageKit / WPILib data logs saved outside logs/
 .claude/settings.local.json
 *.wpilog
+
+# Robot CAD is not distributed: AdvantageScope model binaries and STEP exports
+advantageScopeAssets/**/*.glb
+advantageScopeAssets/**/*.step
+advantageScopeAssets/step-files/

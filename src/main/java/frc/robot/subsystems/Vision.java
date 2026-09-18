@@ -935,12 +935,12 @@ public class Vision extends SubsystemBase {
     /**
      * Asks for the heading to be re-seeded from tag geometry: MegaTag1 (whose
      * solve carries an absolute heading) is fused for the next
-     * HEADING_RESEED_WINDOW_SECONDS even though the robot is enabled. Meant
-     * as a "fix my field-centric heading" action while a tag is in view;
-     * unlike a gyro re-zero it cannot feed MegaTag2 a made-up heading.
-     *
-     * NOTE: currently not bound to a button (the driver's left bumper
-     * zeroes the driver's heading frame - see Swerve.zeroDriverHeading).
+     * HEADING_RESEED_WINDOW_SECONDS even though the robot is enabled. It
+     * corrects a drifted POSE heading while a tag is in view; unlike a gyro
+     * re-zero it cannot feed MegaTag2 a made-up heading, and with no tag in
+     * view it does nothing. Bound to the driver's Y button. (The driver's
+     * left bumper is something else: it zeroes the driver's own heading
+     * frame - see Swerve.zeroDriverHeading.)
      */
     public void requestHeadingReseed() {
         reseedUntil = Timer.getFPGATimestamp() + VisionConstants.HEADING_RESEED_WINDOW_SECONDS;

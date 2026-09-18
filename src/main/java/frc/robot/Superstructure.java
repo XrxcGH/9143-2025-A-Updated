@@ -494,6 +494,8 @@ public class Superstructure {
     // clamp really moved, and holds off small steps while the carriage is
     // still far from needing them.
 
+    /** Targets closer than this to the commanded height do not change the ratchet's direction. */
+    private static final double DIRECTION_EPSILON = 0.01; // inches
     /** Smallest clamp advance worth a profile restart while the carriage is not yet braking for the old one. */
     private static final double LATCH_MIN_STEP = 2.0;   // inches
     /** Extra distance on top of the braking distance inside which a clamp advance is sent at once. */
@@ -580,9 +582,19 @@ public class Superstructure {
             double target = targetSupplier.getAsDouble();
             // Direction from the last COMMANDED height once there is one, so
             // a carriage resting a hair either side of its setpoint does not
-            // flip the ratchet back and forth.
+            // flip the ratchet back and forth. A target EQUAL to what is
+            // already commanded keeps the direction it had: this used to be
+            // "target >= reference", which reads a finished DESCENT (latch ==
+            // target) as a climb - the ratchet flipped direction every loop,
+            // alternating "go to 39 in" with "hold where you are" every 20 ms.
+            // That was the L4 exit shaking the elevator and never getting down.
             double reference = Double.isNaN(latch[0]) ? elevator.getCurrentPosition() : latch[0];
-            boolean up = target >= reference;
+            boolean up = target > reference + DIRECTION_EPSILON ? true
+                : target < reference - DIRECTION_EPSILON ? false
+                : wasUp[0];
+            if (Double.isNaN(latch[0]) && Math.abs(target - reference) <= DIRECTION_EPSILON) {
+                up = target >= elevator.getCurrentPosition(); // nothing commanded yet and already there
+            }
             if (up != wasUp[0]) {
                 latch[0] = Double.NaN; // the target moved to the other side: start a fresh latch
                 wasUp[0] = up;

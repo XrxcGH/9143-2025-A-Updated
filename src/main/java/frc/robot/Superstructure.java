@@ -605,6 +605,8 @@ public class Superstructure {
     // clamp really moved, and holds off small steps while the carriage is
     // still far from needing them.
 
+    /** raiseArm puts the carriage back only if an exit moved it at least this far (never a zero-length move). */
+    private static final double RAISE_ARM_PUT_BACK_MIN = 0.5; // inches
     /** Targets closer than this to the commanded height do not change the ratchet's direction. */
     private static final double DIRECTION_EPSILON = 0.01; // inches
     /**
@@ -1544,8 +1546,19 @@ public class Superstructure {
             // The staged exits move the carriage (L4 drops to its station);
             // at RAISE every height is clear, so put it back where it was.
             double stay = elevator.getCurrentPosition();
+            // ...but ONLY if an exit actually moved it. From every other pose
+            // (the algae intakes above all - this is the algae hold) the
+            // carriage never leaves its setpoint, and re-commanding it to its
+            // own MEASURED height asked the Spark MAX for a zero-length
+            // MAXMotion profile - the one thing the algae hold did to the
+            // elevator that no other pose does (every other pose is a real
+            // move to a preset), and the suspected cause of it rumbling in
+            // place there. The carriage keeps the setpoint it has.
             return escapeToSafe(stay)
-                .andThen(both(stay, SAFE_ANGLE))
+                .andThen(Commands.either(
+                    both(stay, SAFE_ANGLE),
+                    armTo(SAFE_ANGLE),
+                    () -> Math.abs(elevator.getCurrentPosition() - stay) > RAISE_ARM_PUT_BACK_MIN))
                 .andThen(armArrived());
         }, Set.of(elevator, coral));
     }
@@ -1607,6 +1620,25 @@ public class Superstructure {
     }
 
     /**
+     * The roller duty that releases what is held at the given goal. L2 - L4
+     * push the coral on THROUGH the claw (the intake's direction, faster);
+     * L1 sends it back out the way it came in, so its sign is the opposite
+     * of both the intake's and the other levels'. Algae leave the way the
+     * L2 - L4 coral do.
+     */
+    static double scoreSpeed(Goal goal) {
+        switch (goal) {
+            case ALGAE_SCORE:
+            case ALGAE_CARRY:
+                return CorAlConstants.ALGAE_SCORE_SPEED;
+            case CORAL_L1:
+                return CorAlConstants.CORAL_L1_SCORE_SPEED;
+            default:
+                return CorAlConstants.CORAL_SCORE_SPEED;
+        }
+    }
+
+    /**
      * Ejects the held coral at the current pose: run the rollers outward
      * briefly, then stop them. The operator drives the pose; this only
      * handles the rollers.
@@ -1617,7 +1649,7 @@ public class Superstructure {
         // progress (leaving the carriage parked at whatever clamp the
         // ratchet last sent) and made any pose button cancel the eject.
         return Commands.sequence(
-            Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.CORAL_SCORE_SPEED)),
+            Commands.runOnce(() -> coral.setIntakeSpeed(scoreSpeed(currentGoal))),
             Commands.waitSeconds(0.5),
             Commands.runOnce(coral::stopIntake)
         ).handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
@@ -1776,7 +1808,7 @@ public class Superstructure {
             Pose2d ejectedAt = robotPose.get();
 
             Command rollersOut = Commands.startEnd(
-                () -> coral.setIntakeSpeed(algae ? CorAlConstants.ALGAE_SCORE_SPEED : CorAlConstants.CORAL_SCORE_SPEED),
+                () -> coral.setIntakeSpeed(scoreSpeed(scored)), // L1 runs the rollers the other way
                 coral::stopIntake, coral);
             Command ejectWindow = algae
                 ? Commands.waitSeconds(0.5)

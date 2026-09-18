@@ -287,6 +287,10 @@ public final class Constants {
 
 		// --- Manual Control (unitless stick values) ---
 		public static final double ELEVATOR_MANUAL_CONTROL_DEADBAND = 0.2; // Stick deadband
+		// "Hold here" keeps the setpoint the carriage already has when it is at
+		// rest within this of it, instead of issuing a new one at the measured
+		// height (a zero-length profile).
+		public static final double ELEVATOR_HOLD_KEEP_WINDOW = 0.5; // Inches
 		public static final double ELEVATOR_MANUAL_MAX_VOLTS = 3.0;        // Full stick = kG +/- this (about 17 in/s either way)
 
 		// --- Preset Heights (inches; bottom of carriage 2x1 to top of base stage 2x1) ---
@@ -515,7 +519,10 @@ public final class Constants {
 
 		// --- Roller Speeds (duty cycle, -1 to 1; positive = coral intake direction) ---
 		public static final double CORAL_INTAKE_SPEED = 0.1;   // Intaking coral (auto-stops on detection)
-		public static final double CORAL_SCORE_SPEED = 0.3;    // Ejecting coral
+		public static final double CORAL_SCORE_SPEED = 0.3;    // Ejecting coral at L2-L4: on THROUGH the claw, the intake's direction
+		// L1 is the odd one out: the coral goes back out the way it came IN,
+		// so the rollers run against the intake direction (negative).
+		public static final double CORAL_L1_SCORE_SPEED = -0.3;
 		public static final double ALGAE_INTAKE_SPEED = -0.1;  // Intaking algae (reverse direction)
 		public static final double ALGAE_HOLD_SPEED = -0.025;  // Holding pressure on algae
 		public static final double ALGAE_SCORE_SPEED = 0.5;    // Ejecting algae

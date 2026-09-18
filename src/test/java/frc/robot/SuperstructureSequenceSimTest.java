@@ -148,7 +148,13 @@ class SuperstructureSequenceSimTest {
         }
         @Override public double maxAcceleration() { return axis.maxAcceleration; }
         @Override public void manualPivotControl(double stick) { }
-        @Override public void setIntakeSpeed(double dutyCycle) { }
+        /** Every non-zero roller duty commanded, in order. */
+        final List<Double> rollerDuties = new ArrayList<>();
+        @Override public void setIntakeSpeed(double dutyCycle) {
+            if (dutyCycle != 0.0) {
+                rollerDuties.add(dutyCycle);
+            }
+        }
         @Override public void stopIntake() { }
         @Override public boolean isGamePieceDetected() { return false; }
 
@@ -499,6 +505,57 @@ class SuperstructureSequenceSimTest {
                 carriage.setpoints.toString().replace(", ", " "), arm.setpoints.toString().replace(", ", " ")));
         }
         writeMetrics("sequence_metrics_score.csv");
+    }
+
+    /**
+     * Algae hold (operator D-pad left) from an algae intake pose: the ARM comes back to RAISE and the
+     * carriage is not commanded at all - re-commanding it to its own measured height made the
+     * elevator rumble in place. After leaving L4 the same command DOES put the carriage back.
+     */
+    @Test
+    void algaeHoldLeavesTheCarriageAlone() {
+        for (String intake : new String[] {"ALGAE_LOW", "ALGAE_HIGH"}) {
+            build(1.0, 1.0, 0.0);
+            Pose pose = poses().stream().filter(q -> q.name.equals(intake)).findFirst().orElseThrow();
+            run("algae hold (setup) " + intake, pose.go.get(), pose, 12.0, 0.0, false);
+            Pose held = new Pose(intake + " held", pose.height, PivotPresetAngles.RAISE.getAngle(), superstructure::holdAlgae);
+            run("algae hold " + intake, held.go.get(), held, 12.0, 0.0, false);
+            assertTrue(carriage.setpoints.isEmpty(),
+                intake + ": algae hold re-commanded the carriage " + carriage.setpoints);
+        }
+        build(1.0, 1.0, 0.0);
+        Pose l4 = poses().get(4);
+        run("raise arm (setup) L4", l4.go.get(), l4, 12.0, 0.0, false);
+        Pose raised = new Pose("L4 raised", l4.height, PivotPresetAngles.RAISE.getAngle(), superstructure::raiseArm);
+        run("raise arm from L4", raised.go.get(), raised, 12.0, 0.0, false);
+    }
+
+    /**
+     * L1 releases the coral back out the way it came in: the rollers run AGAINST the intake
+     * direction there, and with it (faster) at every other level - score() and the autos' eject alike.
+     */
+    @Test
+    void l1EjectsAgainstTheIntakeDirection() {
+        double intake = Math.signum(CorAlConstants.CORAL_INTAKE_SPEED);
+        for (String level : new String[] {"L1", "L2", "L3", "L4"}) {
+            for (boolean auto : new boolean[] {false, true}) {
+                build(1.0, 1.0, 0.0);
+                Pose pose = poses().stream().filter(q -> q.name.equals(level)).findFirst().orElseThrow();
+                run("eject (setup) " + level, pose.go.get(), pose, 12.0, 0.0, false);
+                arm.rollerDuties.clear();
+                Command eject = auto ? superstructure.ejectCoral()
+                    : superstructure.score(() -> new Pose2d(0.0, 0.0, Rotation2d.kZero));
+                CommandScheduler.getInstance().schedule(eject);
+                for (int i = 0; i < 10; i++) {
+                    loop("eject " + level, 0.0);
+                }
+                assertTrue(!arm.rollerDuties.isEmpty(), level + ": the rollers never ran");
+                double expected = level.equals("L1") ? -intake : intake;
+                assertTrue(Math.signum(arm.rollerDuties.get(0)) == expected,
+                    String.format("%s (%s): rollers ran at %.2f", level, auto ? "ejectCoral" : "score", arm.rollerDuties.get(0)));
+                CommandScheduler.getInstance().cancelAll();
+            }
+        }
     }
 
     /**

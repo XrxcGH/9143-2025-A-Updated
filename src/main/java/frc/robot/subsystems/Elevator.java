@@ -99,6 +99,8 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     private double appliedProfileError;
     /** True while an edited travel ratio / hard-stop height is waiting for the carriage to be at its base. */
     private boolean travelRatioChangePending = false;
+    /** New setpoints sent to the controller since boot (a diagnostic: it must NOT climb while the carriage is just holding). */
+    private int setpointCount = 0;
     private double cruiseVoltsUp = Double.NaN;
     private double cruiseVoltsDown = Double.NaN;
     /** Paces the tunable poll so nine Preferences reads do not run every loop. */
@@ -326,6 +328,11 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         }
     }
 
+    /** New closed-loop setpoints sent since boot. While the carriage is holding still this must not change. */
+    public int getSetpointCount() {
+        return setpointCount;
+    }
+
     /** Mean applied volts at cruise going up / down (NaN until seen), and the kG they imply. */
     public double getCruiseVoltsUp() {
         return cruiseVoltsUp;
@@ -400,6 +407,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
 
         currentTargetPosition = targetPosition;
         currentPace = pace;
+        setpointCount++;
         positionControlEnabled = true;
         manualModeEnabled = false;
 
@@ -413,6 +421,14 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
      * releases the manual-control stick so the carriage does not drift down.
      */
     public void holdCurrentPosition() {
+        // Already holding a setpoint right here: keep it. A new setpoint at
+        // the measured height is a zero-length MAXMotion profile - at best
+        // pointless, and it moves the hold by the resting error.
+        if (positionControlEnabled
+                && Math.abs(currentTargetPosition - getCurrentPosition()) <= ElevatorConstants.ELEVATOR_HOLD_KEEP_WINDOW
+                && Math.abs(getVelocity()) <= 1.0) {
+            return;
+        }
         setPosition(getCurrentPosition());
     }
 

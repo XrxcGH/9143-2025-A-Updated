@@ -382,6 +382,11 @@ public class Dashboard {
         // kG the way that does not depend on friction: the mean of the
         // applied volts at cruise going up and going down (NaN until both
         // directions have been seen - run one long move each way).
+        // Diagnostic: new setpoints sent to the Spark MAX since boot. While the
+        // carriage is just HOLDING this must not move; if the elevator ever
+        // rumbles in place, a climbing count means the code is re-commanding
+        // it, a steady count means the loop or the mechanism is doing it.
+        SmartDashboard.putNumber("Elevator/Setpoint Count", elevator.getSetpointCount());
         SmartDashboard.putNumber("Elevator/Cruise Volts Up", elevator.getCruiseVoltsUp());
         SmartDashboard.putNumber("Elevator/Cruise Volts Down", elevator.getCruiseVoltsDown());
         SmartDashboard.putNumber("Elevator/kG From Cruise", elevator.getKgFromCruise());

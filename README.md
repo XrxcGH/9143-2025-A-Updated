@@ -78,29 +78,20 @@ Pivot arm + intake rollers (both Kraken X60). The REV Through Bore absolute enco
 ### Superstructure ([Superstructure.java](src/main/java/frc/robot/Superstructure.java))
 The command factory for all coordinated elevator + CorAl motion. The free region of (elevator height, arm angle) was computed from the robot CAD — every CorAl part's true outline swept about the pivot against the base stage, the middle stage (which rises at *half* the carriage travel), the funnel, frame and bumpers — and validated against the two contacts measured on the robot (0° at ≈10.75", 5° at ≈23", both reproduced within ½"). See *CAD clearance analysis* below for the map. The planner moves through that region in **staged, state-gated steps**: every trigger is a measured height or angle, never a timer, so the sequences stay safe at any elevator or pivot speed — only their duration changes.
 
-**How a move runs.** A press plans a **route** through the free region and then follows it, so the elevator and the arm move *together* for the whole move instead of taking turns at stations:
+**How a move runs.** Every move is planned from the mechanisms' **measured** state when the button is pressed, and runs as staged steps whose handovers are measured heights and angles, never timers — so the sequences are safe at any elevator or pivot speed, and only their duration changes. What the free region forces:
 
-1. **Plan.** A shortest-time search over the corridor map (0.5" × 2.5° grid, diagonal steps costed as the slower axis so the search prefers moving both mechanisms at once) finds a path from wherever the mechanisms are to the target pose. Interior nodes must clear the corridors with a margin (½" and 2°), so a route never rides an edge.
-2. **Straighten.** Waypoints are dropped wherever the route can reach past them, giving a few long legs. The test for "can reach" is that the whole **rectangle** between two waypoints is clear — not just the straight line — because both mechanisms are commanded to the waypoint at once and each runs its own profile, so the pair can pass through any pose in that box. A leg whose box is clear is therefore safe *however the two interleave*, which is what lets them both simply go.
-3. **Follow.** Both mechanisms are commanded to the current waypoint; the follower advances to the next one as soon as the pose is within 1.5" / 8° **and** the next leg's box is clear from where the mechanisms actually are. Advancing early is what blends the legs into one motion — the profiles retarget before they decelerate — and the box check is what keeps that safe.
+- **Low box.** Any arm angle from 8° up is clear below 16.5", so base→L2 and base→L1 move both mechanisms together. Tucked (< 8°) is allowed only below 8.5" (the cross bar under the top sprockets).
+- **Climbing out** needs the arm at ≥ 75° — the middle-stage top tube blocks roughly 18–30" for lower angles — and from **RAISE = 100°** the carriage may go anywhere. **90° is not a travel angle**: the claw's lower rear meets the middle-stage top tube from ≈ 36" up. Ascents give the carriage a ratcheting head start (8.5" while tucked → 16.5" once clear → 36" past 75° → anything once the arm reads RAISE).
+- **L3 (30.5", 25°)**: climb at RAISE, rotate within ½" of the target (the 25–30° corridor starts at 30"). Leaving, the carriage lifts clear of the tube and then **descends continuously** as the arm swings up — its floor falls from 30" to nothing as the arm passes 75°, so the lift and the descent are one motion.
+- **L4 (52.5", 20°)**: the top of travel is clear only at ≤ 22.5° and the 100°→20° rotation is impossible up there, so the carriage rises to the **33" station** (where 25–100° are all clear) and the arm starts rotating **as the carriage arrives** — the gate is the window, not a settled height. From there the two run **together**: the arm continues down to 20° while the carriage climbs behind it, its ceiling rising as the arm comes down (36" at 95°, 40" at 70°, 48" at 40°, 52.5" at 25°). Leaving mirrors it: drop to 39" at the L4 angle, then the arm sweeps up to RAISE while the carriage keeps descending, its floor falling as the arm rises.
+- **Algae poses (160°)** hit the bumper below ≈ 7.5", so the arm waits at 110° until the carriage is above 8" — and, leaving an algae pose for anything low, the arm comes back to RAISE before the carriage drops below 8".
+- **Stow** tucks to 0° once the descending carriage passes 8.5".
 
-If no route exists from the current pose — which takes a pose only manual control can create, such as a tucked arm parked high — the arm is first swung to **RAISE (100°)**, which is clear at every height, and the route is planned from there. That fallback streams targets through a **corridor clamp** that is momentum-aware: each mechanism's window is the intersection of the corridor bands over everything the *other* one can still reach before it could brake to a stop (v²/2a), so a fast-moving arm cannot have its window closed out from under it.
+**Why it is not a step-by-step routine.** The carriage is never commanded to an intermediate height and left to wait there. It is given the **final** height every loop, clamped to what the corridors allow for the angles the arm still has to sweep; as the arm advances the clamp opens and the carriage keeps moving. That costs one walk of the 32-row corridor table per loop, allocation-free, and it cannot deadlock, because the arm's direction within a stage is fixed so the clamp only ever moves in the carriage's favour. Simulated with the profiles the robot runs, the L4 climb from the station takes **0.97 s with the carriage never stopping**, against 1.46 s with 0.82 s of it standing still before.
 
-What the free region forces, for reference: tucked (< 8°) only near the base; climbing out of the low box needs the arm past ~75°, and from RAISE the carriage may go anywhere (**90° is not a travel angle** — band B blocks it above ≈ 36"); the top of travel is clear only at ≤ 22.5°, so on the way to L4 the carriage rises *behind* the arm as it comes down, each unlocking the other; algae angles (160°) need height before the arm can swing that far over.
+A route-planning version of this was tried and **reverted**: searching a path over a grid of the corridor map cost millions of lookups inside a command's initialization, which overran the robot loop and made every mechanism worse, and its no-route fallback could end up commanding nothing at all. The lesson is in the commit history — per-loop geometry has to be a table walk, not a search.
 
-Simulated against the corridor map with the profiles the robot runs (elevator 40 in/s and 200 in/s², pivot 200°/s and 300°/s²), following each route with the same lookahead the robot uses:
-
-| Move | Time | Both mechanisms moving |
-|---|---|---|
-| base → L4 | 2.7 s | 88 % of the move |
-| L4 → base | 2.6 s | 86 % |
-| base → L3 | 2.1 s | 83 % |
-| base → L2 | 0.5 s | 80 % |
-| L4 → L3 | 1.1 s | 74 % |
-| base → algae high | 2.0 s | 93 % |
-| algae high → barge | 0.9 s | 92 % |
-
-`SuperstructureCorridorTest` pins all of it: every preset-to-preset route exists, every waypoint and every leg box is clear, and a kinematic run of the real follower (5 ms steps) arrives without ever getting more than a tenth of an inch outside a corridor band or standing still mid-move.
+`SuperstructureCorridorTest` pins the geometry and the overlaps: the corridor table's shape, the measured contacts, every preset pose, the staged waypoints, and — for each sweep — the carriage target the robot would command at every arm angle, which must keep both the pose and the path to it inside the corridors and must actually arrive.
 
 Everything is decided from **measured** height and angle, never timing, and every move is planned from the current pose — buttons are safe in any order at any time, including pressing a new one mid-move. Manual stick control bypasses these interlocks.
 

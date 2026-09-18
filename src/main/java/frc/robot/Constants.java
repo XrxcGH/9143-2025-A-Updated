@@ -62,6 +62,8 @@ public final class Constants {
 		// over 2 samples is ~24 ms of lag and still quiet enough to read.
 		public static final int ELEVATOR_VELOCITY_PERIOD_MS = 16; // 8-64 ms
 		public static final int ELEVATOR_VELOCITY_AVG_DEPTH = 2;  // 1, 2, 4 or 8
+		// CAN status period for the leader's position and velocity frames.
+		public static final int ELEVATOR_STATUS_PERIOD_MS = 10;
 
 		// --- Mechanism Gearing ---
 		// Power path: NEO -> 15:1 MAXPlanetary (5:1 x 3:1 cartridges; the
@@ -482,6 +484,10 @@ public final class Constants {
 		// this by that stage's ratio.
 		public static final double THROUGH_BORE_DEGREES_PER_ROTATION = 360.0;
 		public static final double THROUGH_BORE_ALLOWED_DISCREPANCY = 2.0; // Max motor-vs-through-bore disagreement before re-sync
+		// The rotor is re-seeded from the through bore at the start of a move
+		// only if the arm is slower than this: a seed taken at speed is stale
+		// by the sensor + CAN latency and steps the closed loop's feedback.
+		public static final double PIVOT_RESEED_MAX_VELOCITY = 10.0; // deg/s
 
 		// --- Preset Angles (degrees) ---
 		// 0 deg is the CAD's intake pose: the claw points up and ~33 deg past
@@ -668,7 +674,11 @@ public final class Constants {
 		// and only then send the carriage to the top.
 		public static final double L4_STATION_HEIGHT = 33.0;        // Inches
 		public static final double L4_ROTATE_START_HEIGHT = 31.0;   // Inches: arm may leave RAISE
-		public static final double L4_STAGE_ANGLE = 25.0;           // Degrees
+		// The angle the arm may hold while the carriage is still below the
+		// final-angle height. 27.5 is the MIDDLE of the 25-30 row (clear
+		// 30-51 in); 25.0 was that row's edge, and a through-bore reading of
+		// 24.x there is in the 20-25 row, which is blocked below 35.5 in.
+		public static final double L4_STAGE_ANGLE = 27.5;           // Degrees
 		public static final double L4_STAGE_DONE_ANGLE = 30.0;      // Degrees: carriage may continue up
 		public static final double L4_PRE_TOP_HEIGHT = 48.0;        // Inches
 		public static final double L4_FINAL_ANGLE_MIN_HEIGHT = 37.0; // Inches: arm may finish to 20 deg
@@ -705,6 +715,9 @@ public final class Constants {
 		// Minimum settle dwell, so "stopped" cannot fire before the mechanisms
 		// have started moving.
 		public static final double SETTLE_MIN_SECONDS = 0.2;
+		// Same idea for a mid-sequence "arm has arrived" wait: the S-curve
+		// takes ~0.1 s to get the arm above the stopped threshold.
+		public static final double ARM_ARRIVED_MIN_SECONDS = 0.15;
 	}
 
 	// CANdle disabled (Sept 2026): there is no CANdle on the robot, so the LED

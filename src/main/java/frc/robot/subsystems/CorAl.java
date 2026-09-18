@@ -300,16 +300,27 @@ public class CorAl extends SubsystemBase {
     public void setPivotAngle(double targetAngle) {
         targetAngle = Math.min(Math.max(targetAngle, CorAlConstants.CORAL_PIVOT_MIN_ANGLE),
                              CorAlConstants.CORAL_PIVOT_MAX_ANGLE);
+        // Re-sending the target it is already holding would only re-seed
+        // and restart the request for nothing.
+        if (positionControlActive && targetAngle == currentTargetAngle) {
+            return;
+        }
         currentTargetAngle = targetAngle;
         positionControlActive = true;
         manualControlActive = false;
 
         // Seed the motor sensor from the absolute encoder before starting the
-        // move (never mid-move; see periodic()), so the profile targets the
-        // true mechanism angle with no residual offset. Zero timeout: the
-        // default setPosition overload BLOCKS the main loop waiting for the
-        // device ack (up to 100 ms); fire-and-forget still applies the value.
-        if (isThroughBoreConnected()) {
+        // move, so the profile targets the true mechanism angle with no
+        // residual offset - but ONLY from rest. The Superstructure retargets
+        // the arm mid-sweep (45 -> 100, 27.5 -> 20) at up to 300 deg/s, and
+        // a seed taken there is stale by the DIO + CAN latency: 300 deg/s x
+        // ~10 ms = 3 deg of step in the closed loop's feedback, in the
+        // direction of travel, on top of the chain slack that separates the
+        // two sensors under load. That step was the arm "jumping". Zero
+        // timeout: the default setPosition overload BLOCKS the main loop
+        // waiting for the device ack (up to 100 ms).
+        if (isThroughBoreConnected()
+                && Math.abs(getPivotVelocity()) <= CorAlConstants.PIVOT_RESEED_MAX_VELOCITY) {
             pivotMotor.setPosition(getThroughBoreAngle() / 360.0, 0);
         }
 

@@ -207,6 +207,13 @@ public class Elevator extends SubsystemBase {
             .uvwMeasurementPeriod(ElevatorConstants.ELEVATOR_VELOCITY_PERIOD_MS)
             .uvwAverageDepth(ElevatorConstants.ELEVATOR_VELOCITY_AVG_DEPTH);
 
+        // Height and velocity frames at 10 ms instead of the 20 ms default:
+        // every Superstructure gate and clamp reads these on the roboRIO, and
+        // at 40 in/s a 20 ms-old height is 0.8 in out of date.
+        leaderConfig.signals
+            .primaryEncoderPositionPeriodMs(ElevatorConstants.ELEVATOR_STATUS_PERIOD_MS)
+            .primaryEncoderVelocityPeriodMs(ElevatorConstants.ELEVATOR_STATUS_PERIOD_MS);
+
         // Closed-loop PID gains (slot 0). Error units are inches after the
         // conversion factors above; output is duty cycle.
         leaderConfig.closedLoop
@@ -331,6 +338,12 @@ public class Elevator extends SubsystemBase {
         // low as it goes", which is the hard-stop height)
         targetPosition = Math.min(Math.max(targetPosition, appliedZeroHeight),
             ElevatorConstants.ELEVATOR_MAX_POSITION);
+
+        // MAXMotion regenerates its profile from the measured state whenever
+        // a setpoint arrives, so never re-send the one it is already running.
+        if (positionControlEnabled && targetPosition == currentTargetPosition) {
+            return;
+        }
 
         currentTargetPosition = targetPosition;
         positionControlEnabled = true;

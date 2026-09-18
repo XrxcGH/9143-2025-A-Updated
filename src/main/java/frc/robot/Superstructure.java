@@ -280,7 +280,9 @@ public class Superstructure {
             return SuperstructureConstants.LOW_BOX_ROOF;
         }
         if (armAngle < SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE) {
-            return SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT;
+            // A margin under the mid-corridor ceiling, so a carriage parked
+            // here is inside the L4 rotation window, not resting on its edge.
+            return SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT - SuperstructureConstants.RATCHET_MARGIN;
         }
         return ElevatorConstants.ELEVATOR_MAX_POSITION;
     }
@@ -344,20 +346,35 @@ public class Superstructure {
      * and {@code to} - the angles the arm still has to pass through - so the
      * carriage never climbs into a height the arm is about to block.
      */
+    /*
+     * FAILS CLOSED. The walk stops at the first angle whose band does not
+     * contain this height. That is legitimate when moving on is what
+     * unlocks that angle - its NEAREST band is ahead of the carriage (the
+     * L4 climb: 20 deg only opens above 35.5 in, 2.5 in ahead). It is NOT
+     * legitimate when the arm is about to ENTER that angle (it is within
+     * IMMINENT_SWEEP of where the arm is now) and the row's nearest band is
+     * BEHIND the carriage - it overshot that row's ceiling - or when the
+     * current pose is outside the table altogether. The old walk returned
+     * "no limit" for both, releasing the carriage exactly when it should
+     * hold; those now return the current height. A blocked row far along
+     * the sweep is still just the end of the walk: the arm is gated on the
+     * carriage's height before it gets there.
+     */
     public static double ceilingForSweep(double from, double to, double height) {
         double ceiling = ElevatorConstants.ELEVATOR_MAX_POSITION;
-        // Walk FROM the arm's current angle toward its destination. The first
-        // sample is the current pose, which is clear; the walk stops at the
-        // first angle whose band does not contain this height, because the
-        // arm cannot pass that angle until the carriage has moved - and by
-        // then this is recomputed.
-        double step = to >= from ? SWEEP_STEP : -SWEEP_STEP;
-        double angle = from;
+        double start = snapIntoTable(from, height);
+        double step = to >= start ? SWEEP_STEP : -SWEEP_STEP;
+        double angle = start;
+        boolean first = true;
         while (true) {
             double rowCeiling = bandCeiling(angle, height);
             if (Double.isNaN(rowCeiling)) {
+                if (first || (Math.abs(angle - start) <= IMMINENT_SWEEP && !rowOpensToward(angle, height, true))) {
+                    return Math.min(ceiling, height); // hold: do not climb into it
+                }
                 break;
             }
+            first = false;
             ceiling = Math.min(ceiling, rowCeiling);
             if (angle == to) {
                 break;
@@ -373,13 +390,19 @@ public class Superstructure {
     /** Mirror of {@link #ceilingForSweep} for descents. */
     public static double floorForSweep(double from, double to, double height) {
         double floor = ElevatorConstants.ELEVATOR_ZERO_HEIGHT;
-        double step = to >= from ? SWEEP_STEP : -SWEEP_STEP;
-        double angle = from;
+        double start = snapIntoTable(from, height);
+        double step = to >= start ? SWEEP_STEP : -SWEEP_STEP;
+        double angle = start;
+        boolean first = true;
         while (true) {
             double rowFloor = bandFloor(angle, height);
             if (Double.isNaN(rowFloor)) {
+                if (first || (Math.abs(angle - start) <= IMMINENT_SWEEP && !rowOpensToward(angle, height, false))) {
+                    return Math.max(floor, height); // hold: do not descend into it
+                }
                 break;
             }
+            first = false;
             floor = Math.max(floor, rowFloor);
             if (angle == to) {
                 break;
@@ -393,6 +416,113 @@ public class Superstructure {
     }
 
     private static final double SWEEP_STEP = 2.5;
+    /** A blocked row this close (deg) to the arm is one the arm is about to enter. */
+    private static final double IMMINENT_SWEEP = 5.0;
+
+    /**
+     * The measured arm angle, nudged by at most SAFE_ANGLE_TOLERANCE onto a
+     * table row that contains this height. A scoring pose that sits ON a
+     * row boundary (L3 is 25.0 deg, the edge of the 25-30 row whose
+     * corridor starts at 30 in) reads 24.x on the through bore once the
+     * chain settles, and the 20-25 row says 30.5 in is blocked - so every
+     * lookup from the resting L3 pose failed, and the L3 -> L4 shortcut was
+     * never taken. The exposure is the one the resting pose already has.
+     */
+    static double snapIntoTable(double angle, double height) {
+        if (!Double.isNaN(bandCeiling(angle, height))) {
+            return angle;
+        }
+        for (double d = 1.0; d <= SuperstructureConstants.SAFE_ANGLE_TOLERANCE + 1e-9; d += 1.0) {
+            if (!Double.isNaN(bandCeiling(angle + d, height))) {
+                return angle + d;
+            }
+            if (!Double.isNaN(bandCeiling(angle - d, height))) {
+                return angle - d;
+            }
+        }
+        return angle;
+    }
+
+    /**
+     * True if the band of this angle's row NEAREST to {@code height} lies on
+     * the travel side of it (above when climbing): carrying on is what
+     * unlocks that angle. False when the nearest band is behind - the
+     * carriage has overshot it - or the row has no band at all.
+     */
+    private static boolean rowOpensToward(double angle, double height, boolean up) {
+        for (double[] row : SuperstructureConstants.FREE_CORRIDORS) {
+            if (angle < row[0]) {
+                double nearest = Double.POSITIVE_INFINITY;
+                boolean nearestIsAhead = false;
+                for (int b = 1; b <= 3; b += 2) {
+                    if (Double.isNaN(row[b])) {
+                        continue;
+                    }
+                    boolean above = row[b] > height;
+                    double gap = above ? row[b] - height : height - row[b + 1];
+                    boolean ahead = above == up;
+                    if (gap < nearest || (gap == nearest && ahead)) {
+                        nearest = gap;
+                        nearestIsAhead = ahead;
+                    }
+                }
+                return nearestIsAhead;
+            }
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------------
+    // Carriage setpoint latch
+    // ------------------------------------------------------------------
+    // MAXMotion restarts its profile from the MEASURED position and a
+    // lagged measured velocity every time the setpoint changes. The ratchets
+    // used to send max(clamp, measuredHeight) every loop, so at a clamp the
+    // setpoint changed every 20 ms and the profile restarted fifty times a
+    // second - the hunting. The latch sends a new setpoint only when the
+    // clamp really moved, and holds off small steps while the carriage is
+    // still far from needing them.
+
+    /** Smallest clamp advance worth a profile restart while the carriage is not yet braking for the old one. */
+    private static final double LATCH_MIN_STEP = 2.0;   // inches
+    /** Extra distance on top of the braking distance inside which a clamp advance is sent at once. */
+    private static final double LATCH_BRAKE_PAD = 1.5;  // inches
+    /** A clamp that moves BACK by less than this is ignored (arm-angle chatter at a gate). */
+    private static final double LATCH_RETREAT_MIN = 0.25; // inches
+
+    /**
+     * Sends {@code desired} to the carriage through a per-command latch
+     * ({@code latch[0]}, NaN until first use). {@code up} is the travel
+     * direction the desired value was computed for.
+     */
+    private void commandCarriage(double[] latch, double desired, double finalTarget, boolean up) {
+        double height = elevator.getCurrentPosition();
+        if (Double.isNaN(latch[0])) {
+            latch[0] = up ? Math.max(desired, height) : Math.min(desired, height);
+            elevator.setPosition(latch[0]);
+            return;
+        }
+        double advance = up ? desired - latch[0] : latch[0] - desired;
+        if (advance > 1e-6) {
+            double v = elevator.getVelocity();
+            double braking = v * v / (2.0 * Math.max(elevator.maxAcceleration(), 1.0)) + LATCH_BRAKE_PAD;
+            boolean reachesTarget = up ? desired >= finalTarget - 1e-6 : desired <= finalTarget + 1e-6;
+            boolean aboutToBrake = Math.abs(latch[0] - height) <= braking;
+            if (reachesTarget || advance >= LATCH_MIN_STEP || aboutToBrake) {
+                latch[0] = desired;
+                elevator.setPosition(desired);
+            }
+        } else if (advance < -LATCH_RETREAT_MIN) {
+            // The clamp moved back (a gate re-closed). Stop where we are,
+            // once, rather than chasing the measured height every loop.
+            double stopAt = up ? Math.max(desired, height) : Math.min(desired, height);
+            boolean stillAhead = up ? latch[0] - stopAt > LATCH_RETREAT_MIN : stopAt - latch[0] > LATCH_RETREAT_MIN;
+            if (stillAhead) {
+                latch[0] = stopAt;
+                elevator.setPosition(stopAt);
+            }
+        }
+    }
 
     /**
      * Climbs toward {@code target} as fast as the arm allows: every loop the
@@ -400,20 +530,30 @@ public class Superstructure {
      * the arm has left to do, and never below where it already is.
      */
     private Command climbWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
+        double[] latch = {Double.NaN};
         return Commands.run(() -> {
             double target = targetSupplier.getAsDouble();
-            double height = elevator.getCurrentPosition();
-            double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-            // A target the corridor allows is commanded as it is - the
-            // scoring poses sit near the top of their band by design, so
-            // subtracting a margin from those would leave the carriage
-            // permanently low. Only a target the corridor does NOT allow is
-            // clamped, and then it stops a margin short of the limit rather
-            // than exactly on it, so the tracking error of a carriage
-            // decelerating into its clamp stays inside the corridor.
-            double ceiling = target <= raw ? target : raw - SuperstructureConstants.RATCHET_MARGIN;
-            elevator.setPosition(Math.max(Math.min(target, ceiling), height));
+            commandCarriage(latch, climbGoal(target, armDestination.getAsDouble()), target, true);
         }, elevator);
+    }
+
+    /** The height a climb toward {@code target} may be commanded to right now. */
+    private double climbGoal(double target, double armDestination) {
+        double raw = ceilingForSweep(coral.getPivotAngle(), armDestination, elevator.getCurrentPosition());
+        // A target the corridor allows is commanded as it is - the scoring
+        // poses sit near the top of their band by design, so subtracting a
+        // margin from those would leave the carriage permanently low. Only
+        // a target the corridor does NOT allow is clamped, and then it stops
+        // a margin short of the limit rather than exactly on it, so the
+        // tracking error of a carriage decelerating into its clamp stays
+        // inside the corridor.
+        return target <= raw ? target : raw - SuperstructureConstants.RATCHET_MARGIN;
+    }
+
+    /** Mirror of {@link #climbGoal}: a legal target as it is, an illegal one a margin ABOVE the floor. */
+    private double descentGoal(double target, double armDestination) {
+        double raw = floorForSweep(coral.getPivotAngle(), armDestination, elevator.getCurrentPosition());
+        return target >= raw ? target : raw + SuperstructureConstants.RATCHET_MARGIN;
     }
 
     /**
@@ -423,31 +563,22 @@ public class Superstructure {
      * work to do and the carriage would otherwise sit still waiting for it.
      */
     private Command travelWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
+        double[] latch = {Double.NaN};
+        boolean[] wasUp = {true};
         return Commands.run(() -> {
             double target = targetSupplier.getAsDouble();
-            double height = elevator.getCurrentPosition();
-            if (target >= height) {
-                double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-                double ceiling = target <= raw ? target : raw - SuperstructureConstants.RATCHET_MARGIN;
-                elevator.setPosition(Math.max(Math.min(target, ceiling), height));
-            } else {
-                double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-                double floor = target >= raw ? target : raw + SuperstructureConstants.RATCHET_MARGIN;
-                elevator.setPosition(Math.min(Math.max(target, floor), height));
+            // Direction from the last COMMANDED height once there is one, so
+            // a carriage resting a hair either side of its setpoint does not
+            // flip the ratchet back and forth.
+            double reference = Double.isNaN(latch[0]) ? elevator.getCurrentPosition() : latch[0];
+            boolean up = target >= reference;
+            if (up != wasUp[0]) {
+                latch[0] = Double.NaN; // the target moved to the other side: start a fresh latch
+                wasUp[0] = up;
             }
-        }, elevator);
-    }
-
-    /** Mirror of {@link #climbWithArm}: descends as fast as the arm allows. */
-    private Command descendWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
-        return Commands.run(() -> {
-            double target = targetSupplier.getAsDouble();
-            double height = elevator.getCurrentPosition();
-            double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-            // Mirror of the ceiling rule: a legal target as it is, an
-            // illegal one clamped a margin ABOVE the floor, not on it.
-            double floor = target >= raw ? target : raw + SuperstructureConstants.RATCHET_MARGIN;
-            elevator.setPosition(Math.min(Math.max(target, floor), height));
+            double goal = up ? climbGoal(target, armDestination.getAsDouble())
+                : descentGoal(target, armDestination.getAsDouble());
+            commandCarriage(latch, goal, target, up);
         }, elevator);
     }
 
@@ -493,6 +624,9 @@ public class Superstructure {
                 || toAngle >= SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
             return NO_BAND;
         }
+        // The MEASURED start angle, nudged onto the row that holds this
+        // height: a resting L3 reads 24.x deg, a hair under its own row.
+        fromAngle = snapIntoTable(fromAngle, fromHeight);
         double fromLo = bandFloor(fromAngle, fromHeight);
         double toLo = bandFloor(toAngle, target);
         if (Double.isNaN(fromLo) || Double.isNaN(toLo)) {
@@ -535,7 +669,12 @@ public class Superstructure {
         double target = Math.max(targetHeight, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
 
         // ---- Moves that never leave the low box need no RAISE excursion ----
-        boolean startsLow = h0 <= SuperstructureConstants.LOW_BOX_ROOF;
+        // "Starts low" means it will STILL be low once it has stopped: a
+        // second press can catch the carriage at 15 in climbing at 40 in/s,
+        // and that carriage coasts four inches through the low box roof.
+        double v0 = elevator.getVelocity();
+        double coast = v0 > 0 ? v0 * v0 / (2.0 * Math.max(elevator.maxAcceleration(), 1.0)) : 0.0;
+        boolean startsLow = h0 + coast <= SuperstructureConstants.LOW_BOX_ROOF;
         boolean endsLow = target <= SuperstructureConstants.LOW_BOX_ROOF;
         boolean armStartsClear = a0 >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE;
         if (startsLow && endsLow && targetAngle < SuperstructureConstants.HIGH_ANGLE_STAGE) {
@@ -615,21 +754,45 @@ public class Superstructure {
         // margin to spare, but a window around it does not: a symmetric one
         // would let the arm start turning an inch short of the overlap,
         // which for the L3 climb is below the 20-25 deg corridor floor.
+        //
+        // The carriage is NEVER sent to the turn height. It used to be, and
+        // the gate then waited for the carriage to reach the very height its
+        // profile was stopping at: a carriage resting 0.02 in short never
+        // opened it, there was no timeout, and even when it opened the
+        // carriage had stopped first. Now the carriage travels toward the
+        // real target behind the ratchet from the first loop, and the turn
+        // height is only the threshold the ARM waits for as it goes past.
         Command reachTurn = rotateAt >= startHeight
             ? Commands.waitUntil(() -> heightAtLeast(rotateAt))
             : Commands.waitUntil(() -> heightAtMost(rotateAt));
+        boolean gated = target > SuperstructureConstants.L4_PRE_TOP_HEIGHT;
         DoubleSupplier carriageTarget = () ->
-            target > SuperstructureConstants.L4_PRE_TOP_HEIGHT
-                && !armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
-                    ? SuperstructureConstants.L4_PRE_TOP_HEIGHT : target;
-        Command armWork = armTo(targetAngle)
-            .andThen(Commands.waitUntil(coral::isAtTargetAngle)
-                .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS));
-        return elevatorTo(rotateAt)
-            .andThen(reachTurn)
-            .andThen(Commands.deadline(armWork, travelWithArm(carriageTarget, () -> targetAngle)))
-            .andThen(elevatorTo(target))
+            gated && !armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
+                ? SuperstructureConstants.L4_PRE_TOP_HEIGHT : target;
+        Command armWork = reachTurn
+            .andThen(armTo(targetAngle))
+            .andThen(armArrived());
+        return Commands.deadline(armWork, travelWithArm(carriageTarget, () -> targetAngle))
+            // Last leg once the arm has arrived (see above) - but never past
+            // the pre-top height unless the arm is really inside its gate.
+            .andThen(Commands.either(elevatorTo(target), Commands.none(),
+                () -> !gated || armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)))
             .andThen(settle());
+    }
+
+    /**
+     * Waits for the arm to arrive: inside its at-target window, OR stopped.
+     * The window is measured on the through bore while the loop closes on
+     * the rotor, so with chain slack the arm can rest a degree or two
+     * outside it for good - and the old wait then parked BOTH mechanisms
+     * for the whole 3 s timeout. Once the arm has stopped, waiting longer
+     * cannot improve the angle.
+     */
+    private Command armArrived() {
+        return Commands.waitSeconds(SuperstructureConstants.ARM_ARRIVED_MIN_SECONDS)
+            .andThen(Commands.waitUntil(() -> coral.isAtTargetAngle()
+                || Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S))
+            .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS);
     }
 
     /**
@@ -644,13 +807,27 @@ public class Superstructure {
         double a0 = coral.getPivotAngle();
 
         if (a0 >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE - TOL) {
-            return Commands.none(); // already free to travel
+            // Free to travel - IF the arm is staying here. A second button
+            // press mid-move finds the arm at 99 deg on its way down to a
+            // scoring angle (or on its way out to 160), and the old plan's
+            // setpoint is still latched on the TalonFX: nothing re-commanded
+            // the arm, so it carried on while the new plan drove the carriage
+            // through a band that is only clear at RAISE. Re-latch it.
+            double armGoal = coral.getTargetAngle();
+            boolean parked = armGoal >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE - TOL
+                && armGoal <= SuperstructureConstants.HIGH_ANGLE_STAGE;
+            if (parked || a0 > SuperstructureConstants.HIGH_ANGLE_STAGE) {
+                return Commands.none(); // (beyond the stage angle, lowerFirst / approach re-command it)
+            }
+            return armTo(SAFE_ANGLE)
+                .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)
+                    && coral.getPivotVelocity() >= -SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S));
         }
         if (h0 >= SuperstructureConstants.L4_ZONE_MIN_HEIGHT && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
-            return leaveHighPose(targetHeight < SuperstructureConstants.L4_STATION_HEIGHT);
+            return leaveHighPose(targetHeight);
         }
         if (h0 > SuperstructureConstants.LOW_BOX_ROOF && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
-            return leaveMidPose(h0, targetHeight < SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
+            return leaveMidPose(h0, targetHeight);
         }
         if (h0 > SuperstructureConstants.LOW_BOX_ROOF) {
             // Arm between the band-pass and safe-travel angles above the low
@@ -674,14 +851,13 @@ public class Superstructure {
         // behind the ratcheting ceiling (tuck limit -> low box roof -> mid
         // corridor -> anything), or down behind the falling floor. Either
         // way the carriage is moving while the arm is, so nothing waits.
+        double[] climbLatch = {Double.NaN};
         return Commands.deadline(
             armTo(SAFE_ANGLE)
                 .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE))),
             targetHeight > h0
-                ? Commands.run(() -> {
-                    double ceiling = climbCeiling(coral.getPivotAngle());
-                    elevator.setPosition(Math.max(Math.min(targetHeight, ceiling), elevator.getCurrentPosition()));
-                }, elevator)
+                ? Commands.run(() -> commandCarriage(climbLatch,
+                    Math.min(targetHeight, climbCeiling(coral.getPivotAngle())), targetHeight, true), elevator)
                 : travelWithArm(() -> targetHeight, () -> SAFE_ANGLE));
     }
 
@@ -691,7 +867,8 @@ public class Superstructure {
      * arm is free to travel. Descending any earlier sweeps the claw into
      * the middle-stage top tube.
      */
-    private Command leaveMidPose(double currentHeight, boolean descendingNext) {
+    private Command leaveMidPose(double currentHeight, double targetHeight) {
+        boolean descendingNext = targetHeight < SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT;
         double lift = Math.max(currentHeight, SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
         // A descent may start as soon as the arm clears band A (the mid
         // corridor is clear all the way down from 75 deg up); a climb has
@@ -704,11 +881,12 @@ public class Superstructure {
         // the descent are one motion rather than two.
         Command armWork = armTo(SAFE_ANGLE)
             .andThen(Commands.waitUntil(() -> armAtLeast(release)));
-        return elevatorTo(lift)
-            .andThen(Commands.deadline(armWork,
-                descendWithArm(() -> armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)
-                        ? ElevatorConstants.ELEVATOR_ZERO_HEIGHT : lift,
-                    () -> SAFE_ANGLE)));
+        // Once band A is cleared the carriage heads for the REAL target, up
+        // or down. It used to head for the hard stop regardless, so a move
+        // up from L3 (and raiseArm / holdAlgae) dived toward the base first.
+        return Commands.deadline(armWork,
+            travelWithArm(() -> armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE) ? targetHeight : lift,
+                () -> SAFE_ANGLE));
     }
 
     /**
@@ -716,7 +894,8 @@ public class Superstructure {
      * the arm to 45 deg while low enough, drop to the station, swing to
      * RAISE below the safe-rotate height, then the carriage is free.
      */
-    private Command leaveHighPose(boolean descendingNext) {
+    private Command leaveHighPose(double targetHeight) {
+        boolean descendingNext = targetHeight < SuperstructureConstants.L4_STATION_HEIGHT;
         double release = descendingNext ? SuperstructureConstants.BAND_PASS_MIN_ANGLE
             : SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE;
         // The carriage drops first (the top is only clear at the L4 angle),
@@ -731,18 +910,23 @@ public class Superstructure {
         // Mirror of the climb: continuous down to the station, and below it
         // only once the arm has cleared band A, which is what the staged
         // version waited for.
-        return elevatorTo(SuperstructureConstants.L4_RETURN_DROP_HEIGHT)
-            .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT)))
-            .andThen(Commands.deadline(armWork,
-                descendWithArm(() -> {
-                    if (armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)) {
-                        return ElevatorConstants.ELEVATOR_ZERO_HEIGHT;   // band A cleared: all the way down
-                    }
-                    if (armAtLeast(SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE)) {
-                        return SuperstructureConstants.L4_STATION_HEIGHT; // staged: down to the station
-                    }
-                    return SuperstructureConstants.L4_RETURN_DROP_HEIGHT; // arm still near the L4 angle
-                }, () -> SAFE_ANGLE)));
+        // One command owns the carriage for the whole exit, so there is no
+        // loop in which it sits on a stale setpoint between steps. Below the
+        // station it heads for the REAL target (it used to head for the hard
+        // stop even when the next pose was above).
+        Command gatedArmWork = Commands.waitUntil(
+                () -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT))
+            .andThen(armWork);
+        return Commands.deadline(gatedArmWork,
+            travelWithArm(() -> {
+                if (armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)) {
+                    return targetHeight;                                   // band A cleared: on to the target
+                }
+                if (armAtLeast(SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE)) {
+                    return SuperstructureConstants.L4_STATION_HEIGHT;      // staged: the station (load-bearing)
+                }
+                return SuperstructureConstants.L4_RETURN_DROP_HEIGHT;      // arm still near the L4 angle
+            }, () -> SAFE_ANGLE));
     }
 
     /**
@@ -808,12 +992,24 @@ public class Superstructure {
         // arm continues down to the scoring angle while the carriage climbs
         // continuously behind it, its ceiling rising as the arm comes down
         // (36 in at 95 deg, 40 at 70, 48 at 40, 52.5 at 25). No second stop.
-        double stageAngle = Math.min(targetAngle, SuperstructureConstants.L4_STAGE_ANGLE);
-        Command armWork = armTo(stageAngle)
+        // MAX, not min: the stage angle is the one the arm may hold BELOW the
+        // final-angle height. (This was Math.min, which made it the scoring
+        // angle itself - the arm went straight to 20 deg through the 20-25
+        // row, whose corridor only starts at 35.5 in, and the 37 in gate
+        // below guarded nothing.) Nominally the carriage is past 37 in long
+        // before the arm gets near the stage angle, so the retarget happens
+        // mid-sweep and the arm never slows for it.
+        double stageAngle = Math.max(targetAngle, SuperstructureConstants.L4_STAGE_ANGLE);
+        boolean[] released = {false};
+        Command armWork = Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)
+                && heightAtMost(SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT))
+            .andThen(Commands.runOnce(() -> {
+                released[0] = true;
+                coral.setPivotAngle(stageAngle);
+            }, coral))
             .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT)))
             .andThen(armTo(targetAngle))
-            .andThen(Commands.waitUntil(coral::isAtTargetAngle)
-                .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS));
+            .andThen(armArrived());
         // The last few inches still wait for the arm to REACH the scoring
         // angle. The corridor table says 25 deg is clear to 51 in, but the
         // robot says otherwise up there - L4 caught the top bar when the
@@ -821,13 +1017,28 @@ public class Superstructure {
         // still at 25 - so the pre-top height stays a hard ceiling until the
         // arm is inside its final gate, exactly as the staged version had it.
         // Everything below that is continuous.
-        return elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT)
-            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)
-                && heightAtMost(SuperstructureConstants.L4_STATION_HEIGHT + 2.0)))
-            .andThen(Commands.deadline(armWork,
-                climbWithArm(() -> armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
-                        ? targetHeight : SuperstructureConstants.L4_PRE_TOP_HEIGHT,
-                    () -> targetAngle)))
+        //
+        // The carriage is no longer sent to the 33 in station and re-released
+        // from there (a stop, then a retarget that went BACKWARDS to the
+        // ratchet's first clamp). One ratchet owns it from the first loop:
+        // it climbs straight to the clamp the arm's sweep allows (35.5 in
+        // while the arm is at RAISE), the arm is released as the carriage
+        // passes 31 in, and the clamp opens as the arm comes down. Only a
+        // carriage that starts ABOVE the rotation window comes down to the
+        // station first.
+        return Commands.deadline(armWork,
+                travelWithArm(() -> {
+                    if (!released[0] && elevator.getCurrentPosition()
+                            > SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT) {
+                        return SuperstructureConstants.L4_STATION_HEIGHT;
+                    }
+                    return armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
+                        ? targetHeight : SuperstructureConstants.L4_PRE_TOP_HEIGHT;
+                },
+                // Coming down to the station the arm is parked at RAISE, not
+                // sweeping; from the release on it sweeps to the scoring angle.
+                () -> !released[0] && elevator.getCurrentPosition() > SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT
+                    ? SAFE_ANGLE : targetAngle))
             .andThen(settle());
     }
 
@@ -850,12 +1061,14 @@ public class Superstructure {
      * are, using the staged exits when leaving L3 or L4.
      */
     public Command raiseArm() {
-        return Commands.defer(() ->
-            escapeToSafe(elevator.getCurrentPosition())
-                .andThen(armTo(SAFE_ANGLE))
-                .andThen(Commands.waitUntil(coral::isAtTargetAngle)
-                    .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS)),
-            Set.of(elevator, coral));
+        return Commands.defer(() -> {
+            // The staged exits move the carriage (L4 drops to its station);
+            // at RAISE every height is clear, so put it back where it was.
+            double stay = elevator.getCurrentPosition();
+            return escapeToSafe(stay)
+                .andThen(both(stay, SAFE_ANGLE))
+                .andThen(armArrived());
+        }, Set.of(elevator, coral));
     }
 
     /**
@@ -920,10 +1133,14 @@ public class Superstructure {
      * handles the rollers.
      */
     public Command ejectCoral() {
+        // Deliberately requires NO subsystem: the rollers share the CorAl
+        // subsystem with the pivot, so requiring it made X cancel a move in
+        // progress (leaving the carriage parked at whatever clamp the
+        // ratchet last sent) and made any pose button cancel the eject.
         return Commands.sequence(
-            Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.CORAL_SCORE_SPEED), coral),
+            Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.CORAL_SCORE_SPEED)),
             Commands.waitSeconds(0.5),
-            Commands.runOnce(coral::stopIntake, coral)
+            Commands.runOnce(coral::stopIntake)
         ).handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
     }
 

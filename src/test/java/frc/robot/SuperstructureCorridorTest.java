@@ -131,7 +131,8 @@ class SuperstructureCorridorTest {
             assertTrue(Superstructure.elevatorPathClear(BASE + 3.0, SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT, a), "mid corridor at " + a);
         }
         // L4 station: every angle from the stage angle to RAISE is clear across the rotate window
-        for (double h = SuperstructureConstants.L4_ROTATE_START_HEIGHT; h <= SuperstructureConstants.L4_STATION_HEIGHT + 1.0; h += 0.5) {
+        // (the arm is released anywhere in this window, up to the mid-corridor ceiling the ratchet parks under)
+        for (double h = SuperstructureConstants.L4_ROTATE_START_HEIGHT; h <= SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT; h += 0.5) {
             assertTrue(Superstructure.pivotPathClear(SuperstructureConstants.L4_STAGE_ANGLE, PivotPresetAngles.RAISE.getAngle(), h),
                 "station rotation at " + h);
         }
@@ -175,6 +176,52 @@ class SuperstructureCorridorTest {
         assertTrue(Superstructure.elevatorPathClear(BASE, ElevatorConstants.ELEVATOR_MAX_POSITION, SuperstructureConstants.HIGH_ANGLE_STAGE));
         assertTrue(Superstructure.elevatorPathClear(SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT, ElevatorConstants.ELEVATOR_MAX_POSITION,
             PivotPresetAngles.ALGAE_INTAKE.getAngle()));
+    }
+
+    /**
+     * The resting L3 pose reads a little UNDER 25 deg on the through bore
+     * (chain slack), which is the 20-25 row, blocked at 30.5 in. Every
+     * lookup from there used to fail: the shortcut was never chosen and the
+     * sweep helpers returned "no limit".
+     */
+    @Test
+    void lookupsFromARestingPoseOnARowEdgeStillWork() {
+        double l3 = PresetHeights.CORAL_L3.getHeight();
+        double l4 = PresetHeights.CORAL_L4.getHeight();
+        double a4 = PivotPresetAngles.CORAL_L4.getAngle();
+        for (double sag = 0.0; sag <= 2.5; sag += 0.5) {
+            double measured = PivotPresetAngles.CORAL_L3.getAngle() - sag;
+            assertFalse(Double.isNaN(Superstructure.directTransferHeight(l3, measured, l4, a4)),
+                "L3 -> L4 shortcut must be chosen with the arm reading " + measured);
+            // The climb is released toward the pre-top height, not held and not unlimited
+            double ceiling = Superstructure.ceilingForSweep(measured, a4, l3);
+            assertTrue(ceiling >= SuperstructureConstants.L4_PRE_TOP_HEIGHT && ceiling <= 51.0,
+                "climb ceiling from a sagged L3 was " + ceiling);
+        }
+        // A pose that is really outside the table is NOT nudged in
+        assertTrue(Double.isNaN(Superstructure.directTransferHeight(l3, 15.0, l4, a4)));
+    }
+
+    /** The sweep helpers hold the carriage instead of releasing it when the table has no answer. */
+    @Test
+    void sweepHelpersFailClosed() {
+        double raise = PivotPresetAngles.RAISE.getAngle();
+        double a4 = PivotPresetAngles.CORAL_L4.getAngle();
+        double l4 = PresetHeights.CORAL_L4.getHeight();
+        // Current pose outside the table (80 deg at 39.5 in is in band B): hold, do not move into it
+        assertEquals(39.5, Superstructure.ceilingForSweep(80.0, raise, 39.5), 1e-9);
+        assertEquals(39.5, Superstructure.floorForSweep(80.0, raise, 39.5), 1e-9);
+        // Carriage overshot the mid-corridor ceiling during the L4 sweep: hold, not "no limit"
+        assertTrue(Superstructure.ceilingForSweep(raise, a4, 36.6) <= 36.6);
+        // ...but the legitimate unlock still works: 20 deg only opens above 35.5 in, just ahead
+        assertEquals(36.0, Superstructure.ceilingForSweep(raise, a4, 33.0), 1e-9);
+        // L4 exit: the 25-30 row does not hold 51.5 in, and descending is what unlocks it
+        assertEquals(35.5, Superstructure.floorForSweep(a4, raise, l4), 1e-9);
+        // A carriage passing 20 in on its way up, arm parked at RAISE: the 65-70 row's gap far along
+        // the sweep is NOT a reason to brake - the arm is gated on height before it gets there
+        assertEquals(36.0, Superstructure.ceilingForSweep(98.0, a4, 20.0), 1e-9);
+        // Coming down to the L4 station with the arm parked at RAISE is unrestricted
+        assertEquals(BASE, Superstructure.floorForSweep(raise, raise, 45.0), 1e-9);
     }
 
     /**

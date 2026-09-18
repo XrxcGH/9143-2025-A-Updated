@@ -176,4 +176,76 @@ class SuperstructureCorridorTest {
         assertTrue(Superstructure.elevatorPathClear(SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT, ElevatorConstants.ELEVATOR_MAX_POSITION,
             PivotPresetAngles.ALGAE_INTAKE.getAngle()));
     }
+
+    /**
+     * The L3 <-> L4 shortcut: both directions have an overlap to turn in,
+     * every leg of both is inside the corridors, and no other pair of
+     * operator poses is short-cut - the low box and the upper corridor do
+     * not overlap at any scoring angle, and the rest are at travel angles
+     * already. Also pins the L4 pose off the top of travel.
+     */
+    @Test
+    void directTransferShortCutsL3AndL4AndNothingElse() {
+        double l3 = PresetHeights.CORAL_L3.getHeight();
+        double a3 = PivotPresetAngles.CORAL_L3.getAngle();
+        double l4 = PresetHeights.CORAL_L4.getHeight();
+        double a4 = PivotPresetAngles.CORAL_L4.getAngle();
+
+        double up = Superstructure.directTransferHeight(l3, a3, l4, a4);
+        double down = Superstructure.directTransferHeight(l4, a4, l3, a3);
+        assertFalse(Double.isNaN(up), "L3 -> L4 has an overlap to turn in");
+        assertFalse(Double.isNaN(down), "L4 -> L3 has an overlap to turn in");
+        // Never turns above the ceiling the robot itself imposed: the table
+        // is optimistic at the top of travel (L4 caught the top bar there).
+        assertTrue(up <= SuperstructureConstants.L4_PRE_TOP_HEIGHT, "turn height under the pre-top ceiling");
+        assertTrue(down <= SuperstructureConstants.L4_PRE_TOP_HEIGHT, "turn height under the pre-top ceiling");
+        // The turn is on the way, not a detour: it is between the two poses.
+        assertTrue(up >= l3 && up <= l4, "the L3 -> L4 turn happens during the climb");
+        assertTrue(down <= l4 && down >= l3, "the L4 -> L3 turn happens during the descent");
+
+        // Every leg of both transfers, with the turn itself at that height.
+        double[][] legs = {{l3, a3, up, l4, a4}, {l4, a4, down, l3, a3}};
+        for (double[] leg : legs) {
+            assertTrue(Superstructure.elevatorPathClear(leg[0], leg[2], leg[1]), "travel to the turn height");
+            assertTrue(Superstructure.pivotPathClear(leg[1], leg[4], leg[2]), "the turn itself");
+            assertTrue(Superstructure.elevatorPathClear(leg[2], leg[3], leg[4]), "carry on to the target");
+            assertTrue(Superstructure.poseClear(leg[2], leg[1]), "turn height clear at the start angle");
+            assertTrue(Superstructure.poseClear(leg[2], leg[4]), "turn height clear at the target angle");
+        }
+        // The arm only turns the few degrees between the two poses, never
+        // out to RAISE: that is the whole point of the shortcut.
+        assertTrue(Math.abs(a4 - a3) < SuperstructureConstants.BAND_PASS_MIN_ANGLE - a3,
+            "the transfer rotation is the gap between the poses, not a RAISE excursion");
+
+        // Nothing that crosses between the low box and the upper corridor:
+        // the middle-stage top tube sits between them at every low angle.
+        double l2 = PresetHeights.CORAL_L2.getHeight();
+        double a2 = PivotPresetAngles.CORAL_L2.getAngle();
+        double aBase = PivotPresetAngles.BASE.getAngle();
+        double[][] crossing = {
+            {BASE, aBase, l3, a3}, {BASE, aBase, l4, a4},
+            {l2, a2, l3, a3}, {l2, a2, l4, a4},
+            {l3, a3, BASE, aBase}, {l4, a4, BASE, aBase},
+            {l3, a3, l2, a2}, {l4, a4, l2, a2},
+        };
+        for (double[] pair : crossing) {
+            assertTrue(Double.isNaN(Superstructure.directTransferHeight(pair[0], pair[1], pair[2], pair[3])),
+                "no overlap between the low box and the upper corridor: " + pair[1] + " deg -> " + pair[3] + " deg");
+        }
+        // Poses at or past a travel angle are excluded outright - there is no
+        // excursion in those plans to remove.
+        double algaeHigh = PresetHeights.ALGAE_HIGH_INTAKE.getHeight();
+        double aAlgae = PivotPresetAngles.ALGAE_INTAKE.getAngle();
+        assertTrue(Double.isNaN(Superstructure.directTransferHeight(l4, a4, BASE, PivotPresetAngles.CORAL_L1.getAngle())));
+        assertTrue(Double.isNaN(Superstructure.directTransferHeight(l3, a3, algaeHigh, aAlgae)));
+        assertTrue(Double.isNaN(Superstructure.directTransferHeight(algaeHigh, aAlgae, l4, a4)));
+        assertTrue(Double.isNaN(Superstructure.directTransferHeight(PresetHeights.ALGAE_SCORE.getHeight(),
+            PivotPresetAngles.ALGAE_SCORE.getAngle(), l3, a3)));
+
+        // L4 keeps clear of the top of travel and of its own band ceiling,
+        // so the carriage is not holding a height it has to fight for.
+        assertTrue(l4 <= ElevatorConstants.ELEVATOR_MAX_POSITION - 1.0, "L4 stays an inch off the forward soft limit");
+        assertTrue(Superstructure.poseClear(l4 + SuperstructureConstants.RATCHET_MARGIN, a4),
+            "L4 is inside its corridor, not sitting on the ceiling");
+    }
 }

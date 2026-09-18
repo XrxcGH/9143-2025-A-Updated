@@ -180,7 +180,8 @@ public class Superstructure {
         return String.format(
             "L4 up: RAISE to %.0f in, rotate to %.0f deg there, climb to %.0f, finish %.0f deg above %.0f, top | "
                 + "L4 down: drop to %.0f at %.0f deg, %.0f deg below %.0f, station %.0f, RAISE below %.0f | "
-                + "L3 up: rotate %.0f in below target; down: lift to %.0f, descend at RAISE",
+                + "L3 up: rotate %.0f in below target; down: lift to %.0f, descend at RAISE | "
+                + "L3 <-> L4: direct, arm turns inside the band overlap (no RAISE)",
             SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.L4_STAGE_ANGLE,
             SuperstructureConstants.L4_PRE_TOP_HEIGHT, PivotPresetAngles.CORAL_L4.getAngle(),
             SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT,
@@ -391,12 +392,14 @@ public class Superstructure {
             double target = targetSupplier.getAsDouble();
             double height = elevator.getCurrentPosition();
             double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-            // The margin holds the carriage short of a ceiling it is being
-            // clamped AT, but never short of the target itself: the scoring
-            // poses sit at the top of their band by design (L4 is 52.5 in a
-            // band that ends at 52.5), so subtracting a margin from those
-            // would leave the carriage permanently half an inch low.
-            double ceiling = Math.max(raw - SuperstructureConstants.RATCHET_MARGIN, Math.min(target, raw));
+            // A target the corridor allows is commanded as it is - the
+            // scoring poses sit near the top of their band by design, so
+            // subtracting a margin from those would leave the carriage
+            // permanently low. Only a target the corridor does NOT allow is
+            // clamped, and then it stops a margin short of the limit rather
+            // than exactly on it, so the tracking error of a carriage
+            // decelerating into its clamp stays inside the corridor.
+            double ceiling = target <= raw ? target : raw - SuperstructureConstants.RATCHET_MARGIN;
             elevator.setPosition(Math.max(Math.min(target, ceiling), height));
         }, elevator);
     }
@@ -413,11 +416,11 @@ public class Superstructure {
             double height = elevator.getCurrentPosition();
             if (target >= height) {
                 double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-                double ceiling = Math.max(raw - SuperstructureConstants.RATCHET_MARGIN, Math.min(target, raw));
+                double ceiling = target <= raw ? target : raw - SuperstructureConstants.RATCHET_MARGIN;
                 elevator.setPosition(Math.max(Math.min(target, ceiling), height));
             } else {
                 double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-                double floor = Math.min(raw + SuperstructureConstants.RATCHET_MARGIN, Math.max(target, raw));
+                double floor = target >= raw ? target : raw + SuperstructureConstants.RATCHET_MARGIN;
                 elevator.setPosition(Math.min(Math.max(target, floor), height));
             }
         }, elevator);
@@ -429,9 +432,74 @@ public class Superstructure {
             double target = targetSupplier.getAsDouble();
             double height = elevator.getCurrentPosition();
             double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
-            double floor = Math.min(raw + SuperstructureConstants.RATCHET_MARGIN, Math.max(target, raw));
+            // Mirror of the ceiling rule: a legal target as it is, an
+            // illegal one clamped a margin ABOVE the floor, not on it.
+            double floor = target >= raw ? target : raw + SuperstructureConstants.RATCHET_MARGIN;
             elevator.setPosition(Math.min(Math.max(target, floor), height));
         }, elevator);
+    }
+
+    // ==================================================================
+    // Direct transfer between scoring poses
+    // ==================================================================
+
+    /**
+     * Height at which the arm can turn straight from {@code fromAngle} to
+     * {@code toAngle} on the way between two poses, or NaN when no such
+     * height exists and the move has to go round by RAISE.
+     *
+     * Two poses whose corridor bands OVERLAP do not need the RAISE
+     * excursion. L3 (25 deg, clear 30-51 in) and L4 (20 deg, clear
+     * 35.5-52.5 in) overlap over 36-51, so anywhere in there the arm simply
+     * turns the five degrees between them; the generic plan rotated 75 deg
+     * out to RAISE and 80 back to avoid those five.
+     *
+     * Checked against every ordered pair of operator poses, this is the only
+     * pair it changes, and that is geometry rather than luck:
+     *   - BASE/L2 to L3/L4 - the low box (up to ~20 in) and the upper
+     *     corridor (from ~30 in) do not overlap at any low angle, because
+     *     the middle-stage top tube sits between them. The arm HAS to come
+     *     up to 75-100 deg to cross, so the excursion is the move.
+     *   - anything to L1, the algae poses, or from them - those poses are at
+     *     or beyond RAISE already, so there is no excursion to remove; the
+     *     existing plan commands both mechanisms together.
+     * That leaves L3 and L4, the two poses that share the upper corridor.
+     *
+     * The turn happens at the point of the overlap nearest the carriage, so
+     * it starts as soon as the carriage gets there and never detours to
+     * reach it. It is never above the pre-top height: the table is
+     * optimistic at the top of travel (this is where L4 caught the top bar)
+     * and the pre-top height is the ceiling the robot has actually held the
+     * carriage at while the arm swept through these angles.
+     */
+    public static double directTransferHeight(double fromHeight, double fromAngle,
+            double toHeight, double toAngle) {
+        double target = Math.max(toHeight, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
+        // Scoring angles only. At or past the band-pass angle the arm is
+        // already free to travel, so the normal plan has no excursion in it.
+        if (fromAngle >= SuperstructureConstants.BAND_PASS_MIN_ANGLE
+                || toAngle >= SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
+            return NO_BAND;
+        }
+        double fromLo = bandFloor(fromAngle, fromHeight);
+        double toLo = bandFloor(toAngle, target);
+        if (Double.isNaN(fromLo) || Double.isNaN(toLo)) {
+            return NO_BAND; // one of the poses is not in a corridor at all
+        }
+        double lo = Math.max(fromLo, toLo) + SuperstructureConstants.RATCHET_MARGIN;
+        double hi = Math.min(bandCeiling(fromAngle, fromHeight), bandCeiling(toAngle, target))
+            - SuperstructureConstants.RATCHET_MARGIN;
+        hi = Math.min(hi, SuperstructureConstants.L4_PRE_TOP_HEIGHT);
+        if (lo > hi) {
+            return NO_BAND; // the bands do not overlap: go round by RAISE
+        }
+        double rotateAt = Math.min(Math.max(fromHeight, lo), hi);
+        if (!pivotPathClear(fromAngle, toAngle, rotateAt)
+                || !elevatorPathClear(fromHeight, rotateAt, fromAngle)
+                || !elevatorPathClear(rotateAt, target, toAngle)) {
+            return NO_BAND;
+        }
+        return rotateAt;
     }
 
     // ==================================================================
@@ -503,7 +571,53 @@ public class Superstructure {
             lowerFirst = both(Math.max(target, SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT), holdAngle)
                 .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.HIGH_ANGLE_STAGE)));
         }
+        // ---- Scoring pose to scoring pose (L3 <-> L4) ----
+        // Their corridors overlap, so the arm turns the few degrees between
+        // them at a height that suits both instead of swinging out to RAISE
+        // and back. Every other pair either has no overlap (the tube between
+        // the low box and the upper corridor) or is already at a travel
+        // angle, and falls through to the plan below.
+        double rotateAt = directTransferHeight(h0, a0, target, targetAngle);
+        if (!Double.isNaN(rotateAt)) {
+            return directTransfer(h0, rotateAt, target, targetAngle);
+        }
         return lowerFirst.andThen(escapeToSafe(target)).andThen(approach(target, targetAngle));
+    }
+
+    /**
+     * Runs a direct scoring-pose transfer: travel to the turn height, and
+     * turn there while the carriage carries on toward the target behind the
+     * ratchet. The carriage is moving the whole time, and above the pre-top
+     * height it still waits for the arm's final gate - the one limit the
+     * robot, rather than the table, put there.
+     *
+     * The last leg is commanded once the arm has ARRIVED, because a pose
+     * whose band floor is a row boundary (L3 at exactly 25 deg) is only
+     * reachable with the arm at its angle; the ratchet alone would hold the
+     * carriage at the previous row's floor.
+     */
+    private Command directTransfer(double startHeight, double rotateAt, double target, double targetAngle) {
+        // The turn starts when the carriage REACHES the turn height from the
+        // side it started on - not within a window around it. The turn
+        // height sits inside the overlap of the two bands with the ratchet
+        // margin to spare, but a window around it does not: a symmetric one
+        // would let the arm start turning an inch short of the overlap,
+        // which for the L3 climb is below the 20-25 deg corridor floor.
+        Command reachTurn = rotateAt >= startHeight
+            ? Commands.waitUntil(() -> heightAtLeast(rotateAt))
+            : Commands.waitUntil(() -> heightAtMost(rotateAt));
+        DoubleSupplier carriageTarget = () ->
+            target > SuperstructureConstants.L4_PRE_TOP_HEIGHT
+                && !armAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
+                    ? SuperstructureConstants.L4_PRE_TOP_HEIGHT : target;
+        Command armWork = armTo(targetAngle)
+            .andThen(Commands.waitUntil(coral::isAtTargetAngle)
+                .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS));
+        return elevatorTo(rotateAt)
+            .andThen(reachTurn)
+            .andThen(Commands.deadline(armWork, travelWithArm(carriageTarget, () -> targetAngle)))
+            .andThen(elevatorTo(target))
+            .andThen(settle());
     }
 
     /**

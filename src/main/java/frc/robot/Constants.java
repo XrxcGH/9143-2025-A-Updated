@@ -270,7 +270,12 @@ public final class Constants {
 			CORAL_L1(0.0),
 			CORAL_L2(12.0),
 			CORAL_L3(30.5),
-			CORAL_L4(52.5),
+			// 52.5 left only half an inch to the forward soft limit (53.0) and
+			// sat exactly ON the 20 deg corridor ceiling, and the carriage
+			// stuttered against the top of travel trying to hold it. 51.5 keeps
+			// 1.5 in to the soft limit and 1 in of corridor margin. Raise it
+			// toward 52 if the coral needs the height, but not past it.
+			CORAL_L4(51.5),
 			ALGAE_LOW_INTAKE(20.5),
 			ALGAE_HIGH_INTAKE(37.5),
 			ALGAE_SCORE(52.5);

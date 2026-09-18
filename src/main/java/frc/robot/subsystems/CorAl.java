@@ -99,6 +99,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     // Landing correction (see PIVOT_LANDING_* in CorAlConstants)
     private final Timer landingStillTimer = new Timer();
     private int landingCorrections = 0;
+    private double landingReferenceAngle = 0.0;
 
     // ------------------------------------------------------------------
     // The through bore is an ABSOLUTE encoder, but it used to be treated as
@@ -437,15 +438,27 @@ public class CorAl extends SubsystemBase implements ArmAxis {
             landingStillTimer.restart();
             return;
         }
-        if (Math.abs(getPivotVelocity()) > CorAlConstants.PIVOT_LANDING_STILL_DEG_S) {
+        double actual = getThroughBoreAngle();
+        // "Still" means the rotor AND the real arm: while the carriage is
+        // accelerating the arm swings in its chain slack with the rotor dead
+        // still, and a correction taken off a swinging reading is a twitch.
+        if (Math.abs(getPivotVelocity()) > CorAlConstants.PIVOT_LANDING_STILL_DEG_S
+                || Math.abs(actual - landingReferenceAngle) > CorAlConstants.PIVOT_LANDING_STEADY_DEG) {
             landingStillTimer.restart();
+            landingReferenceAngle = actual;
             return;
         }
         if (!landingStillTimer.hasElapsed(CorAlConstants.PIVOT_LANDING_STILL_SECONDS)
                 || landingCorrections >= CorAlConstants.PIVOT_LANDING_MAX_CORRECTIONS) {
             return;
         }
-        double actual = getThroughBoreAngle();
+        // Not against either end of travel: at 0 deg the arm is ON its hard
+        // stop and at the forward soft limit the controller will not push
+        // further, so a "correction" there only winds the rotor into the stop.
+        if (currentTargetAngle < CorAlConstants.CORAL_PIVOT_MIN_ANGLE + CorAlConstants.PIVOT_LANDING_END_ZONE_DEG
+                || currentTargetAngle > CorAlConstants.CORAL_PIVOT_MAX_ANGLE - CorAlConstants.PIVOT_LANDING_END_ZONE_DEG) {
+            return;
+        }
         double error = Math.abs(currentTargetAngle - actual);
         if (error <= CorAlConstants.PIVOT_LANDING_TOLERANCE_DEG || error > CorAlConstants.PIVOT_LANDING_MAX_DEG) {
             return;

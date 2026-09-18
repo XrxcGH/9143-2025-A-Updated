@@ -448,6 +448,9 @@ public class Dashboard {
         }
         SmartDashboard.putString("Vision/Branch Side", vision.getBranchSide().name());
         SmartDashboard.putNumber("Vision/Latched Tag", vision.getLatchedTagId());
+        // Reef safety: moves into / out of L3 and L4 are held while this is true
+        SmartDashboard.putBoolean("Superstructure/Near Reef", superstructure.isNearReef());
+        SmartDashboard.putBoolean("Superstructure/Waiting For Reef Clearance", superstructure.isWaitingForReefClearance());
         SmartDashboard.putNumber("Vision/Heading Offset", vision.getLatchedHeadingOffsetDegrees());
         SmartDashboard.putBoolean("Vision/Heading Seed Fresh", vision.hasFreshHeadingSeed());
         SmartDashboard.putBoolean("Vision/Reseeding Heading", vision.isReseedingHeading());

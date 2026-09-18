@@ -546,6 +546,8 @@ public final class Constants {
 		public static final double PIVOT_LANDING_TOLERANCE_DEG = 0.75;
 		public static final double PIVOT_LANDING_MAX_DEG = 12.0;
 		public static final int PIVOT_LANDING_MAX_CORRECTIONS = 3;
+		public static final double PIVOT_LANDING_STEADY_DEG = 0.5;   // Through bore must stay inside this band to count as still
+		public static final double PIVOT_LANDING_END_ZONE_DEG = 3.0; // No corrections this close to either end of travel
 
 		// --- Preset Angles (degrees) ---
 		// 0 deg is the CAD's intake pose: the claw points up and ~33 deg past
@@ -751,6 +753,10 @@ public final class Constants {
 		// the arm stops this far short of a row that is not open.
 		public static final double ARM_CLAMP_HEIGHT_MARGIN = 0.1;   // Inches
 		public static final double ARM_CLAMP_ANGLE_MARGIN = 2.5;    // Degrees
+		// "Near the reef" (see Superstructure.setNearReefSupplier) stays true
+		// this long after the last sighting: a dropped camera frame is not
+		// clearance.
+		public static final double NEAR_REEF_RELEASE_SECONDS = 0.4;
 		// The angle the arm may hold while the carriage is still below the
 		// final-angle height. 27.5 is the MIDDLE of the 25-30 row (clear
 		// 30-51 in); 25.0 was that row's edge, and a through-bore reading of
@@ -1033,6 +1039,17 @@ public final class Constants {
 		public static final double REEF_FLUSH_DISTANCE = 0.47;    // Front bumpers flush with the reef base (L2-L4 + algae)
 		public static final double L1_SCORE_DISTANCE = 1.0;       // Standoff for L1 so the CorAl can swing to 100 deg without hitting
 		public static final double STATION_FLUSH_DISTANCE = 0.47; // Rear bumpers flush with the coral station wall (tag BEHIND the robot)
+		// L3 / L4 alignment holds this far back from flush until the scoring
+		// pose is reached (and backs out to it after the score). The claw
+		// reaches 0.29 m past the front bumper at RAISE, so 0.40 m leaves
+		// ~0.11 m to the reef face, and it is more than the 0.35 m of departure
+		// the automatic stow waits for.
+		public static final double REEF_STANDOFF_EXTRA = 0.40;    // Meters back from flush
+		// "A reef face is right in front of the bumper": a reef tag closer than
+		// this (robot center to tag, forward) and roughly ahead. Flush is 0.47;
+		// the standoff position (0.87) must read as clear.
+		public static final double NEAR_REEF_DISTANCE = 0.80;     // Meters
+		public static final double NEAR_REEF_LATERAL = 0.60;      // Meters either side
 		// TUNE both on the field (push the robot into position, copy Vision/Distance):
 		public static final double BARGE_SCORE_DISTANCE = 1.2;    // Centered on the barge tag, this far back, square - the net shot
 		public static final double PROCESSOR_DISTANCE = 0.55;     // Centered on the processor tag, front bumper just off the wall

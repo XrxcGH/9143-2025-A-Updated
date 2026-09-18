@@ -252,8 +252,13 @@ class SuperstructureClampSimTest {
         assertEquals(20.0, Superstructure.armLimitForHeight(20.0, RAISE, 33.0), 1e-9);
         // Carriage still in band A's shadow: held above the 65-70 row
         assertEquals(72.5, Superstructure.armLimitForHeight(RAISE, PivotPresetAngles.CORAL_L4.getAngle(), 20.0), 1e-9);
+        // Above the pre-top height the arm stays inside the final gate angle - the robot's rule, not the table's
+        assertEquals(SuperstructureConstants.L4_FINAL_GATE_ANGLE - SuperstructureConstants.ARM_CLAMP_ANGLE_MARGIN,
+            Superstructure.armLimitForHeight(PivotPresetAngles.CORAL_L4.getAngle(), PivotPresetAngles.CORAL_L3.getAngle(), 49.0), 1e-9);
+        assertEquals(PivotPresetAngles.CORAL_L3.getAngle(),
+            Superstructure.armLimitForHeight(PivotPresetAngles.CORAL_L4.getAngle(), PivotPresetAngles.CORAL_L3.getAngle(), 47.5), 1e-9);
         // At the top of travel the arm may not leave the L4 row
-        assertEquals(22.5, Superstructure.armLimitForHeight(PivotPresetAngles.CORAL_L4.getAngle(), RAISE,
-            PresetHeights.CORAL_L4.getHeight()), 1e-9);
+        assertEquals(SuperstructureConstants.L4_FINAL_GATE_ANGLE - SuperstructureConstants.ARM_CLAMP_ANGLE_MARGIN,
+            Superstructure.armLimitForHeight(PivotPresetAngles.CORAL_L4.getAngle(), RAISE, PresetHeights.CORAL_L4.getHeight()), 1e-9);
     }
 }

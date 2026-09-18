@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 import com.ctre.phoenix6.Utils;
@@ -156,6 +157,13 @@ public class Vision extends SubsystemBase {
 
     /** Driver-selected reef branch for L2-L4 alignment. */
     private BranchSide branchSide = BranchSide.LEFT;
+
+    /**
+     * True while an L3 / L4 alignment should hold OFF the reef: the scoring
+     * pose is not reached yet, or a finished score is waiting for room
+     * (wired in RobotContainer). See getTrackingGoal.
+     */
+    private BooleanSupplier reefStandoff = () -> false;
 
     /** Where the superstructure goal comes from (wired in RobotContainer). */
     private Supplier<Superstructure.Goal> goalSupplier = () -> Superstructure.Goal.STOW;
@@ -369,6 +377,11 @@ public class Vision extends SubsystemBase {
         return trackingEnabled;
     }
 
+    /** Wires in "hold the L3 / L4 alignment off the reef" (see getTrackingGoal). */
+    public void setReefStandoffSupplier(BooleanSupplier standoff) {
+        this.reefStandoff = standoff;
+    }
+
     /** Wires in the superstructure goal used to resolve tracking goals. */
     public void setGoalSupplier(Supplier<Superstructure.Goal> supplier) {
         this.goalSupplier = supplier;
@@ -418,7 +431,17 @@ public class Vision extends SubsystemBase {
                     case CORAL_L4:
                         double branchOffset = Tunables.reefBranchOffset();
                         double left = branchSide == BranchSide.LEFT ? -branchOffset : branchOffset;
-                        return Optional.of(new TrackingGoal(Tunables.reefFlushDistance(), left));
+                        // L3 / L4 in two stages. Getting the arm into or out
+                        // of those poses swings the claw 9-12 in past the
+                        // front bumper, so the robot lines up on the branch a
+                        // standoff back, waits there for the pose, and only
+                        // then closes to flush; after the score it backs out
+                        // to the standoff again, which is also what releases
+                        // the automatic stow. L2 never pokes out: flush at once.
+                        boolean holdOff = goalSupplier.get() != Superstructure.Goal.CORAL_L2 && reefStandoff.getAsBoolean();
+                        double forward = Tunables.reefFlushDistance()
+                            + (holdOff ? VisionConstants.REEF_STANDOFF_EXTRA : 0.0);
+                        return Optional.of(new TrackingGoal(forward, left));
                     default:
                         return Optional.of(new TrackingGoal(Tunables.reefFlushDistance(), 0.0));
                 }

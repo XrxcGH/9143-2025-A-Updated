@@ -5,21 +5,47 @@
     "data": {
       "commands": [
         {
-          "type": "path",
+          "type": "parallel",
           "data": {
-            "pathName": "Right Wall Line - Back Right Reef"
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "Right Wall Line - Back Right Reef"
+                }
+              },
+              {
+                "type": "named",
+                "data": {
+                  "name": "prepL4"
+                }
+              }
+            ]
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "scoreL4"
+            "name": "ejectCoral"
           }
         },
         {
-          "type": "path",
+          "type": "parallel",
           "data": {
-            "pathName": "Back Right Reef - Right Station"
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "Back Right Reef - Right Station"
+                }
+              },
+              {
+                "type": "named",
+                "data": {
+                  "name": "stowAfterBackingOff"
+                }
+              }
+            ]
           }
         },
         {
@@ -29,21 +55,47 @@
           }
         },
         {
-          "type": "path",
+          "type": "parallel",
           "data": {
-            "pathName": "Right Station - Front Right Reef"
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "Right Station - Front Right Reef"
+                }
+              },
+              {
+                "type": "named",
+                "data": {
+                  "name": "prepL4"
+                }
+              }
+            ]
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "scoreL4"
+            "name": "ejectCoral"
           }
         },
         {
-          "type": "path",
+          "type": "parallel",
           "data": {
-            "pathName": "Front Right Reef - Right Station"
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "Front Right Reef - Right Station"
+                }
+              },
+              {
+                "type": "named",
+                "data": {
+                  "name": "stowAfterBackingOff"
+                }
+              }
+            ]
           }
         },
         {
@@ -53,15 +105,28 @@
           }
         },
         {
-          "type": "path",
+          "type": "parallel",
           "data": {
-            "pathName": "Right Station - Front Mid Reef"
+            "commands": [
+              {
+                "type": "path",
+                "data": {
+                  "pathName": "Right Station - Front Mid Reef"
+                }
+              },
+              {
+                "type": "named",
+                "data": {
+                  "name": "prepL4"
+                }
+              }
+            ]
           }
         },
         {
           "type": "named",
           "data": {
-            "name": "scoreL4"
+            "name": "ejectCoral"
           }
         }
       ]

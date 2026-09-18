@@ -385,6 +385,48 @@ class SuperstructureSequenceSimTest {
         writeMetrics("sequence_metrics_score.csv");
     }
 
+    /**
+     * Reef safety: with a reef face right in front of the bumper, a move into or out of L3 / L4
+     * (the claw swings past the bumper) holds both mechanisms where they are and starts by itself
+     * once the robot is clear. L3 <-> L4 and the low poses are never held.
+     */
+    @Test
+    void movesThatSwingTheArmOutWaitForTheReefToBeClear() {
+        build(1.0, 1.0, 0.0);
+        boolean[] near = {false};
+        superstructure.setNearReefSupplier(() -> near[0]);
+        List<Pose> all = poses();
+        Pose base = all.get(0);
+        Pose l2 = all.get(2);
+        Pose l3 = all.get(3);
+        Pose l4 = all.get(4);
+
+        run("reef: BASE->L4 clear", l4.go.get(), l4, 12.0, 0.0, false);
+        near[0] = true;
+        // L4 -> L3 turns in place: not held
+        run("reef: L4->L3 at the reef", l3.go.get(), l3, 12.0, 0.0, false);
+        // L3 -> BASE swings out: held
+        Command stow = base.go.get();
+        CommandScheduler.getInstance().schedule(stow);
+        for (int i = 0; i < 100; i++) {
+            loop("reef: held stow", 0.0);
+        }
+        assertTrue(superstructure.isWaitingForReefClearance(), "the stow should be waiting for the reef to be clear");
+        assertTrue(Math.abs(carriage.axis.position - l3.height) < 0.3 && Math.abs(arm.axis.position - l3.angle) < 1.5,
+            "held at the reef, the mechanisms must not move");
+        near[0] = false; // the driver backs away
+        double elapsed = 0.0;
+        while (stow.isScheduled() && elapsed < 12.0) {
+            loop("reef: released stow", 0.0);
+            elapsed += DT * PHYSICS_PER_LOOP;
+        }
+        assertTrue(!stow.isScheduled() && Math.abs(carriage.axis.position - base.height) < 0.3,
+            "the stow should run by itself once the reef is clear");
+        // Low poses never poke out: not held
+        near[0] = true;
+        run("reef: BASE->L2 at the reef", l2.go.get(), l2, 12.0, 0.0, false);
+    }
+
     /** A second button mid-move: the new plan starts from wherever the mechanisms are, moving. */
     @Test
     void secondButtonMidMove() throws IOException {

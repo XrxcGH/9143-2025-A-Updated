@@ -3,6 +3,7 @@ package frc.robot;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
@@ -93,10 +94,51 @@ public class Superstructure {
     private Goal currentGoal = Goal.STOW;
     /** True from an algae intake / hold until it is scored or the rollers are run by hand: picks what "home" means. */
     private boolean algaeHeld = false;
+    /** "A reef face is right in front of the bumper", raw (wired to vision in RobotContainer; false = never). */
+    private BooleanSupplier nearReef = () -> false;
+    /** FPGA time the raw reading was last true: "clear" has to persist, so a dropped camera frame does not release a swing. */
+    private double lastNearReefTime = Double.NEGATIVE_INFINITY;
+    /** True while a move is being held until the robot is clear of the reef. */
+    private boolean waitingForReefClearance = false;
 
     public Superstructure(CarriageAxis elevator, ArmAxis coral) {
         this.elevator = elevator;
         this.coral = coral;
+    }
+
+    /**
+     * Wires in "a reef face is right in front of the bumper". Every move into
+     * or out of L3 / L4 swings the claw through 75-100 deg, where it reaches
+     * 9-12 in PAST the front bumper (CAD) at the height of the reef's
+     * branches - so with the robot against the reef that swing goes through
+     * them. While this reads true such a move waits, holding both mechanisms
+     * where they are, and starts by itself once the robot has backed away.
+     * L3 <-> L4 (the arm stays at 20-25 deg), the low poses and the algae
+     * poses (which reach into the reef by design) are not held. Manual
+     * take-over (operator LB) is never held.
+     */
+    public void setNearReefSupplier(BooleanSupplier nearReef) {
+        this.nearReef = nearReef;
+    }
+
+    /** "A reef face is right in front of the bumper" as the moves see it. Read every loop by the Dashboard, which also keeps its debounce fed. */
+    public boolean isNearReef() {
+        double now = Timer.getFPGATimestamp();
+        if (nearReef.getAsBoolean()) {
+            lastNearReefTime = now;
+        }
+        return now - lastNearReefTime < SuperstructureConstants.NEAR_REEF_RELEASE_SECONDS;
+    }
+
+    /** True while a move is being held until the robot has backed away from the reef (drives the driver's rumble). */
+    public boolean isWaitingForReefClearance() {
+        return waitingForReefClearance;
+    }
+
+    private Command waitForReefClearance() {
+        return Commands.waitUntil(() -> !isNearReef())
+            .beforeStarting(() -> waitingForReefClearance = isNearReef())
+            .finallyDo(() -> waitingForReefClearance = false);
     }
 
     /** The most recently commanded pose family. */
@@ -763,6 +805,17 @@ public class Superstructure {
         if (Double.isNaN(fromLo) || Double.isNaN(toLo)) {
             return NO_BAND; // one of the poses is not in a corridor at all
         }
+        // Both poses in the UPPER corridor, which is what this is for. The
+        // 70-75 deg row is one band from the base to 39 in, so a second
+        // button that caught the arm at 72 deg on its way down "overlapped"
+        // the base pose: the transfer was chosen with a turn height of 8 in,
+        // the arm (never re-commanded until the turn) carried on to its old
+        // target, and the carriage, clamped above the floor that put in its
+        // way, never got down to the turn - each waiting for the other.
+        // Found by SuperstructureSequenceSimTest.
+        if (fromLo <= SuperstructureConstants.LOW_BOX_ROOF || toLo <= SuperstructureConstants.LOW_BOX_ROOF) {
+            return NO_BAND;
+        }
         double lo = Math.max(fromLo, toLo) + SuperstructureConstants.RATCHET_MARGIN;
         double hi = Math.min(bandCeiling(fromAngle, fromHeight), bandCeiling(toAngle, target))
             - SuperstructureConstants.RATCHET_MARGIN;
@@ -873,7 +926,14 @@ public class Superstructure {
         if (!Double.isNaN(rotateAt)) {
             return directTransfer(h0, rotateAt, target, targetAngle);
         }
-        return lowerFirst.andThen(escapeToSafe(target)).andThen(approach(target, targetAngle));
+        // Into or out of an upper scoring pose: the arm swings out past the
+        // front bumper on the way, so not while a reef face is right there.
+        boolean leavesUpperPose = h0 > SuperstructureConstants.LOW_BOX_ROOF
+            && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE;
+        boolean entersUpperPose = target > SuperstructureConstants.LOW_BOX_ROOF
+            && targetAngle < SuperstructureConstants.BAND_PASS_MIN_ANGLE;
+        Command clearOfReef = leavesUpperPose || entersUpperPose ? waitForReefClearance() : Commands.none();
+        return clearOfReef.andThen(lowerFirst).andThen(escapeToSafe(target)).andThen(approach(target, targetAngle));
     }
 
     /**
@@ -910,9 +970,13 @@ public class Superstructure {
         DoubleSupplier carriageTarget = () ->
             gated && !armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
                 ? SuperstructureConstants.L4_PRE_TOP_HEIGHT : target;
+        // The arm turns under the arm-side clamp like every other sweep. It
+        // used to be sent straight to the target once the gate opened - and a
+        // second press that caught the carriage just under 48 in on its way
+        // UP opened the gate at once: the arm left the L4 angle while the
+        // carriage coasted to 50 in. Found by SuperstructureSequenceSimTest.
         Command armWork = reachTurn
-            .andThen(armTo(targetAngle))
-            .andThen(armArrived());
+            .andThen(armWithCarriage(targetAngle, () -> Double.NaN));
         return Commands.deadline(armWork, travelWithArm(carriageTarget, () -> targetAngle))
             // Last leg once the arm has arrived (see above) - but never past
             // the pre-top height unless the arm is really inside its gate.
@@ -977,18 +1041,34 @@ public class Superstructure {
         if (from < 0 || to < 0 || !rowHolds(rows[from], height, 0.0)) {
             return angle;
         }
+        // The rule the ROBOT wrote, which the table does not contain: above
+        // the pre-top height the arm stays inside the final gate angle (the
+        // table says 25 deg is clear to 51 in; at 25 deg above 48 in the claw
+        // met the top bar). The carriage side has always enforced it; an arm
+        // leaving L4 has to as well.
+        double gate = SuperstructureConstants.L4_FINAL_GATE_ANGLE;
+        boolean aboveGate = height > SuperstructureConstants.L4_PRE_TOP_HEIGHT
+            && angle < SuperstructureConstants.BAND_PASS_MIN_ANGLE;
+        if (aboveGate && angle > gate) {
+            return angle; // already outside it up here: hold, the carriage has to come down
+        }
+        // (A margin inside the gate, like every other arm limit: the arm is
+        // never sent to sit ON a boundary it must not cross.)
+        double capped = aboveGate
+            ? Math.min(target, gate - SuperstructureConstants.ARM_CLAMP_ANGLE_MARGIN) : target;
         int step = to < from ? -1 : 1;
         for (int j = from; j != to;) {
             j += step;
             if (!rowHolds(rows[j], height, SuperstructureConstants.ARM_CLAMP_HEIGHT_MARGIN)) {
                 // The near edge of the blocked row: its upper bound going
                 // down, the previous row's upper bound going up.
-                return step < 0
+                double limit = step < 0
                     ? rows[j][0] + SuperstructureConstants.ARM_CLAMP_ANGLE_MARGIN
                     : rows[j - 1][0] - SuperstructureConstants.ARM_CLAMP_ANGLE_MARGIN;
+                return step > 0 ? Math.min(limit, capped) : limit;
             }
         }
-        return target;
+        return capped;
     }
 
     /**
@@ -1005,7 +1085,12 @@ public class Superstructure {
         double[] finalSince = {Double.NaN};
         return Commands.run(() -> {
             double angle = coral.getPivotAngle();
-            double limit = armLimitForHeight(angle, targetAngle, elevator.getCurrentPosition());
+            // Where the carriage is AND where it comes to rest: a carriage
+            // still coasting upward is about to be somewhere else, and the
+            // arm must be legal there too. The tighter of the two.
+            double here = armLimitForHeight(angle, targetAngle, elevator.getCurrentPosition());
+            double there = armLimitForHeight(angle, targetAngle, stoppingPoint());
+            double limit = targetAngle < angle ? Math.max(here, there) : Math.min(here, there);
             double extra = extraLimit.getAsDouble();
             if (!Double.isNaN(extra)) {
                 limit = targetAngle < angle ? Math.max(limit, extra) : Math.min(limit, extra);

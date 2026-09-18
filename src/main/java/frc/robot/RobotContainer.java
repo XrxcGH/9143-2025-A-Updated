@@ -222,6 +222,21 @@ public class RobotContainer {
 
         // Vision alignment goals depend on what the superstructure is doing
         // (L1 standoff vs. flush scoring vs. algae) - wire that in.
+        // Reef safety (see Superstructure.setNearReefSupplier and
+        // Vision.getTrackingGoal): moves into / out of L3 and L4 wait while a
+        // reef tag is right in front of the bumper, and the L3 / L4 alignment
+        // holds a standoff back until the pose is reached and backs out to it
+        // after the score. (The Superstructure holds "near" for 0.4 s after
+        // the last sighting, so one dropped camera frame does not release a
+        // swing at the reef.)
+        superstructure.setNearReefSupplier(() -> swerve.getVision().getBestVisibleTarget()
+            .map(t -> t.tagClass == Constants.VisionConstants.TagClass.REEF
+                && t.robotFrame.getX() < Constants.VisionConstants.NEAR_REEF_DISTANCE
+                && Math.abs(t.robotFrame.getY()) < Constants.VisionConstants.NEAR_REEF_LATERAL)
+            .orElse(false));
+        swerve.getVision().setReefStandoffSupplier(
+            () -> !superstructure.readyToScore() || superstructure.isWaitingForBackOff());
+
         // ...and with a coral in the claw but no level pressed yet (goal still
         // STOW) the next stop is the reef, not a station: without this the
         // aligner only accepted station tags and just sat still at the reef.
@@ -407,7 +422,7 @@ public class RobotContainer {
         ready.and(() -> swerve.isVisionTrackingEnabled() && swerve.isAligned())
             .whileTrue(driverRumble.whileActive(0.5));
         // Scored at L3/L4, exit is waiting for room: driver, slow pulse -> back away.
-        new Trigger(superstructure::isWaitingForBackOff)
+        new Trigger(() -> superstructure.isWaitingForBackOff() || superstructure.isWaitingForReefClearance())
             .whileTrue(driverRumble.pulses(2, 0.6, 0.15, 0.35).repeatedly());
         // Score pulled with nothing to score from: operator, one tick.
         operator_controller.rightTrigger().and(auto).and(() -> !superstructure.isScoringGoal())

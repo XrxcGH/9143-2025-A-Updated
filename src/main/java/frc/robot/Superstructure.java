@@ -230,15 +230,27 @@ public class Superstructure {
         return elevator.isAtTargetPosition() && coral.isAtTargetAngle();
     }
 
+    /** True when both mechanisms have stopped moving, wherever they ended up. */
+    private boolean bothStopped() {
+        return Math.abs(elevator.getVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_ELEVATOR_IN_S
+            && Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S;
+    }
+
     /**
-     * Final settle wait for a planned move, with a timeout so a mechanism
-     * that stalls just outside its at-target tolerance cannot deadlock the
-     * command (and with it the operator's default manual controls). Timing
-     * out is safe: the latched closed-loop setpoints keep holding position.
-     * Intermediate SAFETY gates deliberately do not get this treatment.
+     * Final settle wait for a planned move. It ends when both mechanisms are
+     * inside their at-target tolerances OR both have stopped moving,
+     * whichever comes first, with a timeout as a backstop so a mechanism
+     * that stalls cannot deadlock the command (and with it the operator's
+     * default manual controls). Ending on "stopped" is what lets the
+     * tolerances be tight: once motion has ceased the closed loops are
+     * holding their latched setpoints and waiting longer cannot improve the
+     * pose. A short minimum dwell keeps "stopped" from firing before the
+     * mechanisms have started. Intermediate SAFETY gates deliberately do
+     * not get this treatment.
      */
     private Command settle() {
-        return Commands.waitUntil(this::atTargets)
+        return Commands.waitSeconds(SuperstructureConstants.SETTLE_MIN_SECONDS)
+            .andThen(Commands.waitUntil(() -> atTargets() || bothStopped()))
             .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS);
     }
 

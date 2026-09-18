@@ -115,23 +115,28 @@ public final class Constants {
 		// --- MAXMotion Profile (inches, seconds) - tunable defaults ---
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.733 = ~69 in/s
 		// theoretical top speed through 15:1. Cruise is 58% of that: kV x 40 =
-		// ~6.9 V, plus kG, kS and kA x 300 = ~1.2 V during the acceleration
+		// ~6.9 V, plus kG, kS and kA x 200 = ~0.8 V during the acceleration
 		// ramp, so a full-speed climb peaks near 9 V and keeps ~3 V of headroom
 		// for the position loop on a sagging battery. Full 52 in of travel
-		// takes ~1.4 s. (These were 50 / 400 while the Tunables clamps were
+		// takes ~1.5 s. (These were 50 / 400 while the Tunables clamps were
 		// 40 / 300, so the robot never actually ran the documented numbers;
 		// the clamps are now 60 / 500 and these defaults are what runs.)
-		// 300 in/s^2 (~0.8 g) is a comfort limit on the chain, the cascade
-		// cable and the arm riding on the carriage - and the deceleration is
-		// what the staged L3/L4 sequences see when the carriage stops at a
-		// station, so do not raise it casually.
+		// Acceleration is the mast's comfort limit, not the motors': the
+		// trapezoidal profile changes commanded acceleration in a step at the
+		// end of every move (MAXMotion has no S-curve in REVLib 2026, so there
+		// is no jerk limit to soften it) and the structure rings at whatever
+		// that step is. 300 in/s^2 visibly shook the elevator as it stopped;
+		// 200 in/s^2 cuts the stopping force from ~173 N to ~116 N at the
+		// carriage and costs only ~0.07 s on a full-travel move. It is also
+		// the deceleration the staged L3/L4 sequences see when the carriage
+		// stops at a station, so do not raise it casually.
 		// The profile always decelerates INTO the setpoint, so the carriage
 		// settles rather than hitting the target. Adjust on the Testing tab
 		// ("Elevator - Cruise Velocity" / "Max Acceleration"). The
 		// Superstructure's staged sequences are gated on MEASURED state, so
 		// they stay safe at any speed - only their duration changes.
 		public static final double ELEVATOR_MAX_VELOCITY = 40.0;      // Cruise velocity (in/s)
-		public static final double ELEVATOR_MAX_ACCELERATION = 300.0; // Acceleration (in/s^2)
+		public static final double ELEVATOR_MAX_ACCELERATION = 200.0; // Acceleration (in/s^2)
 		// How far the carriage may stray from the MAXMotion profile before the
 		// controller regenerates the profile from the current position and the
 		// measured velocity. NOT a settling tolerance. With kA carrying the
@@ -179,7 +184,7 @@ public final class Constants {
 		// MAXMotion modes only). Without it the position loop has to supply
 		// the whole acceleration force out of tracking error: at 15:1 the
 		// carriage plus arm plus the reflected rotor inertia is ~23 kg
-		// effective, so 300 in/s^2 needs ~1.2 V, which at the old kP of 0.1
+		// effective, so 300 in/s^2 needed ~1.2 V, which at the old kP of 0.1
 		// meant a FULL INCH of lag on the way up and an inch of LEAD on the
 		// way down - the carriage sailed past every target and the profile
 		// regenerated around it. 0.0040 = 12 V / 105 A x (0.733 in/rot /2pi x
@@ -228,7 +233,19 @@ public final class Constants {
 		public static final double ELEVATOR_MAX_POSITION = 53.0; // Forward soft limit
 
 		// --- Tolerances (inches) ---
-		public static final double ELEVATOR_ALLOWED_ERROR = 0.1; // "At target" threshold
+		// "At target": what the Superstructure waits for before it calls a
+		// pose reached, and what the dashboard's At Target light shows. The
+		// hall encoder resolves 0.0175 in and the tuned loop rests within
+		// ~0.02 in of the setpoint (friction over 12 x kP), so 0.05 in is
+		// about three counts and still reachable. If a pose ever sits waiting,
+		// the loop is resting outside this window - fix kG (Elevator/Hold
+		// Volts) or raise kP rather than loosening this.
+		public static final double ELEVATOR_ALLOWED_ERROR = 0.05;
+		// Left-vs-right travel disagreement that raises the out-of-sync alert.
+		// Both sides drive the same hex shaft, so this is a slip detector, not
+		// a precision figure: one skipped #25 tooth is 0.25 in of chain = 0.5
+		// in of carriage, and each encoder quantises at 0.0175 in.
+		public static final double ELEVATOR_SIDE_SYNC_TOLERANCE = 0.25;
 		// The encoder must read within this of the hard-stop height for a
 		// calibration edit (travel ratio / hard-stop height) to be applied:
 		// the carriage is then on its hard stop and is re-referenced there.
@@ -367,7 +384,14 @@ public final class Constants {
 		public static final double CORAL_PIVOT_MAX_ANGLE = 160.0; // Forward soft limit
 
 		// --- Tolerances (degrees) ---
-		public static final double CORAL_PIVOT_ALLOWED_ERROR = 2.0; // "At target" threshold
+		// "At target" is measured on the THROUGH BORE (the real arm angle),
+		// while the closed loop runs on the motor sensor, so this window has
+		// to cover the chain's backlash and stretch as well as the loop's own
+		// error. 1.0 deg is 0.27 in at the claw (0.54 in at the old 2.0).
+		// The Superstructure's settle also releases once both mechanisms have
+		// STOPPED, so a tight window here costs precision-chasing time only
+		// when the arm is genuinely still moving.
+		public static final double CORAL_PIVOT_ALLOWED_ERROR = 1.0;
 
 		// --- Manual Control (unitless stick values) ---
 		public static final double CORAL_MANUAL_CONTROL_DEADBAND = 0.2; // Stick deadband
@@ -614,6 +638,16 @@ public final class Constants {
 		public static final double SAFE_ANGLE_TOLERANCE = 3.0; // Degrees
 		// Final settle wait per planned move. Safety gates never time out.
 		public static final double SETTLE_TIMEOUT_SECONDS = 3.0;
+		// A settle also ends when both mechanisms have stopped: the closed
+		// loops hold their latched setpoints, so once motion has ceased,
+		// waiting longer cannot improve the pose - it only burns match time
+		// when something (chain backlash, a mis-set kG) leaves a mechanism
+		// resting just outside its at-target window.
+		public static final double SETTLE_STOPPED_ELEVATOR_IN_S = 0.5;  // in/s
+		public static final double SETTLE_STOPPED_PIVOT_DEG_S = 3.0;    // deg/s
+		// Minimum settle dwell, so "stopped" cannot fire before the mechanisms
+		// have started moving.
+		public static final double SETTLE_MIN_SECONDS = 0.2;
 	}
 
 	// CANdle disabled (Sept 2026): there is no CANdle on the robot, so the LED

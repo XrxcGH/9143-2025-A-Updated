@@ -410,7 +410,7 @@ public class Elevator extends SubsystemBase {
     public boolean sidesInSync() {
         double leftTravel = Math.abs(leftEncoder.getPosition() - appliedZeroHeight);
         double rightTravel = Math.abs(rightEncoder.getPosition() - appliedZeroHeight);
-        return Math.abs(leftTravel - rightTravel) <= ElevatorConstants.ELEVATOR_ALLOWED_ERROR;
+        return Math.abs(leftTravel - rightTravel) <= ElevatorConstants.ELEVATOR_SIDE_SYNC_TOLERANCE;
     }
 
     /** True when the carriage is (by the encoder) resting on its hard stop. */

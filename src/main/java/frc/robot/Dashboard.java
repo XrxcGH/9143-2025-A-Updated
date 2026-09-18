@@ -375,6 +375,7 @@ public class Dashboard {
         SmartDashboard.putNumber("CorAl/Target", coral.getTargetAngle());
         SmartDashboard.putNumber("CorAl/Motor Angle", coral.getMotorAngle());
         SmartDashboard.putBoolean("CorAl/At Target", coral.isAtTargetAngle());
+        SmartDashboard.putNumber("CorAl/Pivot Velocity", coral.getPivotVelocity());
         SmartDashboard.putBoolean("CorAl/Game Piece", coral.isGamePieceDetected());
         SmartDashboard.putBoolean("CorAl/Through Bore OK", coral.isThroughBoreConnected());
         SmartDashboard.putNumber("CorAl/CANrange Distance", coral.getCANRangeDistance());

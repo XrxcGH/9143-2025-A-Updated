@@ -412,6 +412,11 @@ public class CorAl extends SubsystemBase {
         return getThroughBoreAngle();
     }
 
+    /** Pivot angular velocity in degrees per second (motor sensor). */
+    public double getPivotVelocity() {
+        return pivotMotor.getVelocity().getValueAsDouble() * 360.0;
+    }
+
     /**
      * Checks if the pivot is at the target angle within allowed error.
      */

@@ -80,6 +80,10 @@ public class CorAl extends SubsystemBase {
     private double appliedDetectHysteresis;
     /** True = a piece reads CLOSER than the threshold; false = FARTHER. */
     private boolean appliedDetectWhenCloser;
+    /** Minimum return strength for a measurement to count at all. */
+    private double appliedMinSignalStrength;
+    /** Master switch: false reports "nothing held" whatever the sensor says. */
+    private boolean appliedDetectionEnabled;
     private double commandedIntakeSpeed = 0; // Last commanded roller speed (+ = coral intake direction)
 
     // Position Tracking
@@ -260,13 +264,17 @@ public class CorAl extends SubsystemBase {
         appliedDetectThreshold = Tunables.coralDetectDistance();
         appliedDetectHysteresis = Tunables.coralDetectHysteresis();
         appliedDetectWhenCloser = Tunables.coralDetectWhenCloser();
+        appliedMinSignalStrength = Tunables.coralMinSignalStrength();
+        appliedDetectionEnabled = Tunables.coralDetectionEnabled();
     }
 
     /** True if a detection tunable differs from what is applied to the sensor. */
     private boolean detectTunablesChanged() {
         return Tunables.coralDetectDistance() != appliedDetectThreshold
             || Tunables.coralDetectHysteresis() != appliedDetectHysteresis
-            || Tunables.coralDetectWhenCloser() != appliedDetectWhenCloser;
+            || Tunables.coralDetectWhenCloser() != appliedDetectWhenCloser
+            || Tunables.coralMinSignalStrength() != appliedMinSignalStrength
+            || Tunables.coralDetectionEnabled() != appliedDetectionEnabled;
     }
 
     /**
@@ -280,7 +288,7 @@ public class CorAl extends SubsystemBase {
         return new ProximityParamsConfigs()
             .withProximityThreshold(appliedDetectThreshold)
             .withProximityHysteresis(appliedDetectHysteresis)
-            .withMinSignalStrengthForValidMeasurement(CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH);
+            .withMinSignalStrengthForValidMeasurement(appliedMinSignalStrength);
     }
 
     /**
@@ -474,8 +482,12 @@ public class CorAl extends SubsystemBase {
      * the coral moves the reading.
      */
     private boolean readDetection() {
+        if (!appliedDetectionEnabled) {
+            detectLatch = false;
+            return false;
+        }
         boolean valid = canRangeSensor.getMeasurementHealth().getValue() != MeasurementHealthValue.Bad
-            && canRangeSensor.getSignalStrength().getValueAsDouble() >= CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH;
+            && canRangeSensor.getSignalStrength().getValueAsDouble() >= appliedMinSignalStrength;
         if (!valid) {
             detectLatch = false;
             return false;
@@ -517,6 +529,16 @@ public class CorAl extends SubsystemBase {
     /** True while "detected" means closer than the threshold, false while it means farther. */
     public boolean isDetectWhenCloser() {
         return appliedDetectWhenCloser;
+    }
+
+    /** Minimum return strength currently required for a measurement to count. */
+    public double getMinSignalStrength() {
+        return appliedMinSignalStrength;
+    }
+
+    /** False while game-piece detection is switched off (the intake then runs on the button alone). */
+    public boolean isDetectionEnabled() {
+        return appliedDetectionEnabled;
     }
 
     /** Proximity threshold (meters) currently applied to the CANrange. */

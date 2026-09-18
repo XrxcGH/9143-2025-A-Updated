@@ -175,7 +175,7 @@ public class Dashboard {
         // Staged-sequence stations (CAD-derived constants; fixed at compile
         // time) and a one-time audit of the presets against the CAD free
         // corridors - published once, they never change at runtime.
-        SmartDashboard.putString("Superstructure/Motion", Superstructure.motionSummary());
+        SmartDashboard.putString("Superstructure/Handoffs", Superstructure.stationSummary());
         String audit = Superstructure.presetAuditMessage();
         presetAuditAlert.setText(audit.isEmpty() ? "" : audit);
         presetAuditAlert.set(!audit.isEmpty());
@@ -386,8 +386,10 @@ public class Dashboard {
         SmartDashboard.putString("CorAl/CANrange Health", coral.getCANRangeHealth());
         SmartDashboard.putBoolean("CorAl/CANrange Raw Detect", coral.isCANRangeRawDetected());
         SmartDashboard.putNumber("CorAl/CANrange Threshold", coral.getDetectThreshold());
+        SmartDashboard.putNumber("CorAl/CANrange Min Signal Strength", coral.getMinSignalStrength());
         SmartDashboard.putString("CorAl/CANrange Detect When",
             coral.isDetectWhenCloser() ? "closer than threshold" : "farther than threshold");
+        SmartDashboard.putBoolean("CorAl/CANrange Detection Enabled", coral.isDetectionEnabled());
         SmartDashboard.putNumber("CorAl/Pivot Current", coral.getPivotCurrent());
         SmartDashboard.putNumber("CorAl/Intake Current", coral.getIntakeCurrent());
         SmartDashboard.putNumber("CorAl/Pivot Output", coral.getPivotOutput());

@@ -59,6 +59,8 @@ public final class Tunables {
     private static final String CORAL_DETECT_DISTANCE = "CorAl - Coral Detect Distance (m)";
     private static final String CORAL_DETECT_HYSTERESIS = "CorAl - Coral Detect Hysteresis (m)";
     private static final String CORAL_DETECT_WHEN_CLOSER = "CorAl - Coral Detect When Closer (1) Or Farther (0)";
+    private static final String CORAL_MIN_SIGNAL_STRENGTH = "CorAl - Coral Min Signal Strength";
+    private static final String CORAL_DETECTION_ENABLED = "CorAl - Coral Detection Enabled (1) Or Off (0)";
     private static final String REEF_FLUSH_DISTANCE = "Vision - Reef Flush Distance (m)";
     private static final String STATION_FLUSH_DISTANCE = "Vision - Station Flush Distance (m)";
     private static final String L1_SCORE_DISTANCE = "Vision - L1 Score Distance (m)";
@@ -88,7 +90,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 11; // 11: CANrange detect polarity tunable; hard-stop height 1.000 in (Sept 17 2026)
+    private static final int DEFAULTS_VERSION = 12; // 12: CANrange signal-strength threshold and detection master switch (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -120,6 +122,9 @@ public final class Tunables {
         Preferences.initDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
         Preferences.initDouble(CORAL_DETECT_WHEN_CLOSER,
             CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER ? 1.0 : 0.0);
+        Preferences.initDouble(CORAL_MIN_SIGNAL_STRENGTH, CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH);
+        Preferences.initDouble(CORAL_DETECTION_ENABLED,
+            CorAlConstants.GAME_PIECE_DETECTION_ENABLED ? 1.0 : 0.0);
         Preferences.initDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.initDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.initDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -152,6 +157,9 @@ public final class Tunables {
         Preferences.setDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
         Preferences.setDouble(CORAL_DETECT_WHEN_CLOSER,
             CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER ? 1.0 : 0.0);
+        Preferences.setDouble(CORAL_MIN_SIGNAL_STRENGTH, CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH);
+        Preferences.setDouble(CORAL_DETECTION_ENABLED,
+            CorAlConstants.GAME_PIECE_DETECTION_ENABLED ? 1.0 : 0.0);
         Preferences.setDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.setDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.setDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -298,6 +306,28 @@ public final class Tunables {
     public static boolean coralDetectWhenCloser() {
         return Preferences.getDouble(CORAL_DETECT_WHEN_CLOSER,
             CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER ? 1.0 : 0.0) >= 0.5;
+    }
+
+    /**
+     * Minimum CANrange return strength for a measurement to count at all.
+     * When the sensor looks into open air with nothing held, the return is
+     * weak and this alone separates "holding" from "empty" (CTRE's tuning
+     * guide, scenario 1) - read CorAl/CANrange Signal Strength empty and
+     * holding a coral and split the two.
+     */
+    public static double coralMinSignalStrength() {
+        return clamped(CORAL_MIN_SIGNAL_STRENGTH, CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH, 0.0, 30000.0);
+    }
+
+    /**
+     * Master switch for game-piece detection. Set it to 0 while the
+     * thresholds are still being found: the intake then runs on the
+     * operator's button alone instead of skipping itself because the sensor
+     * claims a coral is already held.
+     */
+    public static boolean coralDetectionEnabled() {
+        return Preferences.getDouble(CORAL_DETECTION_ENABLED,
+            CorAlConstants.GAME_PIECE_DETECTION_ENABLED ? 1.0 : 0.0) >= 0.5;
     }
 
     /** CANrange proximity hysteresis, meters, applied on both sides of the threshold. */

@@ -29,6 +29,7 @@ import edu.wpi.first.wpilibj.util.Color;
 import edu.wpi.first.wpilibj.util.Color8Bit;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
+import frc.robot.Constants.ElevatorConstants;
 import frc.robot.Constants.LoggingConstants;
 import frc.robot.Constants.VisionConstants;
 import frc.robot.subsystems.CorAl;
@@ -356,6 +357,11 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Left Current", elevator.getLeftCurrent());
         SmartDashboard.putNumber("Elevator/Right Current", elevator.getRightCurrent());
         SmartDashboard.putNumber("Elevator/Left Output", elevator.getLeftOutput());
+        // Voltage the leader is applying (output is voltage-compensated to
+        // 12 V). Holding still, this IS kG + whatever the position loop is
+        // adding, so it is how kG gets measured on the robot.
+        SmartDashboard.putNumber("Elevator/Hold Volts",
+            elevator.getLeftOutput() * ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE);
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
         // Calibration in effect on the controllers (the tunables may still be pending)
         SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());

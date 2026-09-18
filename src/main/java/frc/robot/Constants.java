@@ -53,6 +53,16 @@ public final class Constants {
 		// --- Current Limits (amps) ---
 		public static final int ELEVATOR_CURRENT_LIMIT = 50; // Spark MAX smart current limit per NEO
 
+		// --- Encoder Velocity Filtering (NEO hall sensor) ---
+		// The Spark MAX defaults to a 32 ms measurement period averaged over 8
+		// samples, which is ~130 ms of lag - fine for a dashboard readout, far
+		// too slow for anything the control loop reacts to (MAXMotion restarts
+		// its profile from the MEASURED state, so a stale velocity there
+		// restarts the profile at a speed the carriage no longer has). 16 ms
+		// over 2 samples is ~24 ms of lag and still quiet enough to read.
+		public static final int ELEVATOR_VELOCITY_PERIOD_MS = 16; // 8-64 ms
+		public static final int ELEVATOR_VELOCITY_AVG_DEPTH = 2;  // 1, 2, 4 or 8
+
 		// --- Mechanism Gearing ---
 		// Power path: NEO -> 15:1 MAXPlanetary (5:1 x 3:1 cartridges; the
 		// second 3:1 was removed in Sept 2026 for speed) -> 90-degree gearbox
@@ -104,49 +114,58 @@ public final class Constants {
 
 		// --- MAXMotion Profile (inches, seconds) - tunable defaults ---
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.733 = ~69 in/s
-		// theoretical top speed through 15:1. Cruise stays at ~72% of that
-		// so the profile remains achievable under load: kV x 50 = ~8.7 V
-		// plus kS/kG, leaving ~2.5 V for the position loop on a sagging
-		// battery. Full 52 in of travel takes ~1.2 s (cruise reached in
-		// 0.125 s over 3.1 in). 400 in/s^2 (~1 g) costs the motors only
-		// ~0.6 V against the reflected inertia; it is a comfort limit on the
-		// chain, the cascade cable and the arm riding on the carriage - and
-		// the deceleration is what the staged L3/L4 sequences see when the
-		// carriage stops at a station, so do not raise it casually.
+		// theoretical top speed through 15:1. Cruise is 58% of that: kV x 40 =
+		// ~6.9 V, plus kG, kS and kA x 300 = ~1.2 V during the acceleration
+		// ramp, so a full-speed climb peaks near 9 V and keeps ~3 V of headroom
+		// for the position loop on a sagging battery. Full 52 in of travel
+		// takes ~1.4 s. (These were 50 / 400 while the Tunables clamps were
+		// 40 / 300, so the robot never actually ran the documented numbers;
+		// the clamps are now 60 / 500 and these defaults are what runs.)
+		// 300 in/s^2 (~0.8 g) is a comfort limit on the chain, the cascade
+		// cable and the arm riding on the carriage - and the deceleration is
+		// what the staged L3/L4 sequences see when the carriage stops at a
+		// station, so do not raise it casually.
 		// The profile always decelerates INTO the setpoint, so the carriage
 		// settles rather than hitting the target. Adjust on the Testing tab
 		// ("Elevator - Cruise Velocity" / "Max Acceleration"). The
 		// Superstructure's staged sequences are gated on MEASURED state, so
 		// they stay safe at any speed - only their duration changes.
-		public static final double ELEVATOR_MAX_VELOCITY = 50.0;      // Cruise velocity (in/s)
-		public static final double ELEVATOR_MAX_ACCELERATION = 400.0; // Acceleration (in/s^2)
-		// How far the carriage may stray from the MAXMotion profile before
-		// the controller regenerates the profile from the current position
-		// and velocity. NOT a settling tolerance. REV's starting point is
-		// about one motor rotation; 0.3 in is ~0.4 rotation through 15:1.
-		public static final double ELEVATOR_ALLOWED_PROFILE_ERROR = 0.3;
+		public static final double ELEVATOR_MAX_VELOCITY = 40.0;      // Cruise velocity (in/s)
+		public static final double ELEVATOR_MAX_ACCELERATION = 300.0; // Acceleration (in/s^2)
+		// How far the carriage may stray from the MAXMotion profile before the
+		// controller regenerates the profile from the current position and the
+		// measured velocity. NOT a settling tolerance. With kA carrying the
+		// acceleration the carriage tracks the profile within ~0.1 in, so 0.5
+		// in only fires on a real disturbance (a stall or a collision) instead
+		// of firing on every acceleration ramp, which is what turned a normal
+		// move into a series of regenerated profiles.
+		public static final double ELEVATOR_ALLOWED_PROFILE_ERROR = 0.5;
 
 		// --- Closed-Loop Gains (Spark MAX slot 0; error in inches) - tunable defaults ---
-		// kP, kS, the kV scale, kG, and the profile above are all editable on
-		// the Testing tab and re-applied to both controllers the next time
+		// kP, kS, the kV scale, kA, kG, and the profile above are all editable
+		// on the Testing tab and re-applied to both controllers the next time
 		// the robot is disabled - no redeploy, no REV Hardware Client.
 		// TUNE - first power-on procedure:
 		//   1. Calibrate the height reading against a tape measure (README:
 		//      "Calibrating the elevator height").
-		//   2. Raise kG until the carriage just holds its height at rest.
-		//   3. Command a preset and raise kP until tracking is crisp;
-		//      add kD only if it oscillates.
-		// kP sanity: REV's MAXMotion starting point is 0.01 duty per motor
-		// ROTATION; through 15:1 one inch is only ~1.4 rotations, so that is
-		// ~0.014 duty/in and 0.1 is ~7x it - the same multiple the 45:1
-		// gearing ran happily at (0.3 duty/in there). The loop only tracks
-		// the profiled setpoint (kV/kG carry the motion) and the NEO's
-		// back-EMF damping keeps a P-only loop overdamped, so this is firm
-		// without ringing; its job is to shrink the friction-induced rest
-		// error (rest error = friction volts / (12 x kP) inches).
-		// Symptoms: rests short of target -> raise kP or kS; buzz/hunt at
-		// rest -> lower kP; overshoots -> lower the kV scale, then kS (REV).
-		public static final double ELEVATOR_kP = 0.1; // Duty cycle per inch of position error
+		//   2. Set kG from the holding voltage: hold a height, read
+		//      "Elevator/Hold Volts", and set kG to it (the constant-force
+		//      springs carry part of the weight, so it is lower than the
+		//      no-help model).
+		//   3. Command a preset and check the carriage tracks without lagging
+		//      on the ramps (that is kA) or resting short (that is kP or kG).
+		// kP sizing: the position loop must supply whatever the feedforward
+		// does not, and at 15:1 one inch of error is only 1.4 motor rotations,
+		// so a given duty-per-inch is 3x weaker at the carriage than the same
+		// number was at 45:1. 0.5 duty/in gives ~880 N per inch of error -
+		// still softer than the 45:1 setup ran (0.3 duty/in there was ~1580
+		// N/in) but firm enough that friction and a mis-set kG leave under
+		// 0.1 in of rest error, and the NEO back-EMF keeps the loop damped
+		// (damping ratio ~0.55 with the CAD mass estimate).
+		// Symptoms: rests short of target -> raise kP, or fix kG (step 2);
+		// buzzes or hunts at rest -> lower kP; overshoots on the way INTO a
+		// target -> lower kA; lags behind on the ramps -> raise kA.
+		public static final double ELEVATOR_kP = 0.5; // Duty cycle per inch of position error
 		public static final double ELEVATOR_kI = 0.0; // Leave 0 - kG handles gravity sag
 		public static final double ELEVATOR_kD = 0.0; // Duty cycle per in/s of error derivative
 
@@ -158,6 +177,17 @@ public final class Constants {
 		// builds, it lurches free - "stutters and slows down"). Through
 		// 15:1 this is a small torque, so it cannot cause a runaway.
 		public static final double ELEVATOR_kS = 0.2;
+		// kA: volts per in/s^2 of PROFILE acceleration (REVLib applies it in
+		// MAXMotion modes only). Without it the position loop has to supply
+		// the whole acceleration force out of tracking error: at 15:1 the
+		// carriage plus arm plus the reflected rotor inertia is ~23 kg
+		// effective, so 300 in/s^2 needs ~1.2 V, which at the old kP of 0.1
+		// meant a FULL INCH of lag on the way up and an inch of LEAD on the
+		// way down - the carriage sailed past every target and the profile
+		// regenerated around it. 0.0040 = 12 V / 105 A x (0.733 in/rot /2pi x
+		// 0.0254) / (2 x 0.0248 Nm/A) x 23 kg x 0.0254. Raise it if the
+		// carriage lags on the ramps, lower it if it leads.
+		public static final double ELEVATOR_kA = 0.0040;
 		// kV is NOT a stored constant. It is the NEO back-EMF model,
 		// 12 V / (free speed in in/s), and free speed in inches depends on
 		// the travel ratio - so the Elevator derives it from the live ratio
@@ -165,12 +195,12 @@ public final class Constants {
 		// scale multiplies that model (REV: overshoot -> reduce kV).
 		public static final double NEO_FREE_SPEED_RPM = 5676.0;
 		public static final double ELEVATOR_kV_SCALE = 1.0;
-		// kG: carriage + arm weight through the 2:1 cascade and 15:1 works
-		// out to ~0.7 V per motor without help - but the CAD shows
-		// constant-force springs on the carriage rigging, which carry an
-		// unknown share of that. 0.6 is the no-help estimate less a little;
-		// tune it down until the carriage just holds (TUNE step 2).
-		public static final double ELEVATOR_kG = 0.6;
+		// kG: carriage + arm + half the middle stage is ~145 N without help,
+		// which is ~0.99 V through 15:1; the CAD's two constant-force springs
+		// on the middle stage carry part of it, so the shipped value assumes
+		// roughly a third of the weight is sprung. MEASURE it on the robot:
+		// hold a height and read "Elevator/Hold Volts" (TUNE step 2).
+		public static final double ELEVATOR_kG = 0.65;
 
 		/** NEO back-EMF velocity feedforward (volts per in/s) for a given carriage travel per motor rotation. */
 		public static double modelKv(double inchesPerRotation) {

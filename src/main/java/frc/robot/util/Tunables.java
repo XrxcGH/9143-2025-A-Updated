@@ -48,6 +48,7 @@ public final class Tunables {
     private static final String ELEVATOR_KP = "Elevator - kP (duty per in)";
     private static final String ELEVATOR_KS = "Elevator - kS (V)";
     private static final String ELEVATOR_KV_SCALE = "Elevator - kV Scale (x free-speed model)";
+    private static final String ELEVATOR_KA = "Elevator - kA (V per in/s^2)";
     private static final String ELEVATOR_KG = "Elevator - kG (V)";
     private static final String ELEVATOR_CRUISE_VELOCITY = "Elevator - Cruise Velocity (in/s)";
     private static final String ELEVATOR_MAX_ACCELERATION = "Elevator - Max Acceleration (in/s^2)";
@@ -86,7 +87,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 7; // 7: vision goal distances re-defined in the robot frame (Sept 17 2026)
+    private static final int DEFAULTS_VERSION = 8; // 8: elevator retuned for 15:1 - kA added, kP 0.5, 40 in/s / 300 in/s^2 (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -106,6 +107,7 @@ public final class Tunables {
         Preferences.initDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
         Preferences.initDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
         Preferences.initDouble(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE);
+        Preferences.initDouble(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA);
         Preferences.initDouble(ELEVATOR_KG, ElevatorConstants.ELEVATOR_kG);
         Preferences.initDouble(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY);
         Preferences.initDouble(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
@@ -135,6 +137,7 @@ public final class Tunables {
         Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
         Preferences.setDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
         Preferences.setDouble(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE);
+        Preferences.setDouble(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA);
         Preferences.setDouble(ELEVATOR_KG, ElevatorConstants.ELEVATOR_kG);
         Preferences.setDouble(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY);
         Preferences.setDouble(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION);
@@ -221,6 +224,15 @@ public final class Tunables {
         return clamped(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE, 0.0, 2.0);
     }
 
+    /**
+     * Acceleration feedforward, volts per in/s^2 of profile acceleration.
+     * Clamped to twice the no-spring model: more than that would mean the
+     * carriage weighs far more than the CAD says.
+     */
+    public static double elevatorKa() {
+        return clamped(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA, 0.0, 0.012);
+    }
+
     /** Gravity feedforward, volts, applied at all times under position control. */
     public static double elevatorKg() {
         return clamped(ELEVATOR_KG, ElevatorConstants.ELEVATOR_kG, 0.0, 3.0);
@@ -228,12 +240,12 @@ public final class Tunables {
 
     /** MAXMotion cruise velocity, inches per second. */
     public static double elevatorCruiseVelocity() {
-        return clamped(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY, 0.5, 40.0);
+        return clamped(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY, 0.5, 60.0);
     }
 
     /** MAXMotion acceleration, inches per second squared. */
     public static double elevatorMaxAcceleration() {
-        return clamped(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION, 1.0, 300.0);
+        return clamped(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION, 1.0, 500.0);
     }
 
     /** Deviation from the MAXMotion profile (inches) that triggers a profile regeneration. */

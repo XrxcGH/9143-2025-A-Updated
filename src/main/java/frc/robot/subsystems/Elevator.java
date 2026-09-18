@@ -86,6 +86,7 @@ public class Elevator extends SubsystemBase {
     private double appliedKp;
     private double appliedKs;
     private double appliedKvScale;
+    private double appliedKa;
     private double appliedKg;
     private double appliedCruiseVelocity;
     private double appliedMaxAcceleration;
@@ -149,6 +150,7 @@ public class Elevator extends SubsystemBase {
         appliedKp = Tunables.elevatorKp();
         appliedKs = Tunables.elevatorKs();
         appliedKvScale = Tunables.elevatorKvScale();
+        appliedKa = Tunables.elevatorKa();
         appliedKg = Tunables.elevatorKg();
         appliedCruiseVelocity = Tunables.elevatorCruiseVelocity();
         appliedMaxAcceleration = Tunables.elevatorMaxAcceleration();
@@ -160,6 +162,7 @@ public class Elevator extends SubsystemBase {
         return Tunables.elevatorKp() != appliedKp
             || Tunables.elevatorKs() != appliedKs
             || Tunables.elevatorKvScale() != appliedKvScale
+            || Tunables.elevatorKa() != appliedKa
             || Tunables.elevatorKg() != appliedKg
             || Tunables.elevatorCruiseVelocity() != appliedCruiseVelocity
             || Tunables.elevatorMaxAcceleration() != appliedMaxAcceleration
@@ -195,7 +198,13 @@ public class Elevator extends SubsystemBase {
         // inches per second (native units are motor rotations and RPM).
         leaderConfig.encoder
             .positionConversionFactor(inchesPerRotation)
-            .velocityConversionFactor(inchesPerRotation / 60.0);
+            .velocityConversionFactor(inchesPerRotation / 60.0)
+            // Faster velocity measurement than the 32 ms x 8 default: the
+            // controller restarts a MAXMotion profile from the measured
+            // state, and ~130 ms of velocity lag there restarts it at a
+            // speed the carriage no longer has.
+            .uvwMeasurementPeriod(ElevatorConstants.ELEVATOR_VELOCITY_PERIOD_MS)
+            .uvwAverageDepth(ElevatorConstants.ELEVATOR_VELOCITY_AVG_DEPTH);
 
         // Closed-loop PID gains (slot 0). Error units are inches after the
         // conversion factors above; output is duty cycle.
@@ -210,9 +219,14 @@ public class Elevator extends SubsystemBase {
         // gravity compensation - the same kS/kV/kG model as WPILib's
         // ElevatorFeedforward, evaluated by the Spark MAX every cycle so the
         // carriage tracks the MAXMotion profile and holds height at rest.
+        // kA is applied in MAXMotion modes only (REVLib FeedForwardConfig)
+        // and is what keeps the carriage on the profile through the
+        // acceleration and deceleration ramps instead of buying that force
+        // with position error.
         leaderConfig.closedLoop.feedForward
             .kS(appliedKs)
             .kV(kV)
+            .kA(appliedKa)
             .kG(appliedKg);
 
         // MAXMotion profile parameters (inches, inches per second). The
@@ -441,6 +455,11 @@ public class Elevator extends SubsystemBase {
     /** Carriage travel (inches) per motor rotation currently applied to the controllers. */
     public double inchesPerRotation() {
         return ElevatorConstants.ELEVATOR_MODELED_INCHES_PER_ROTATION * appliedTravelRatio;
+    }
+
+    /** Acceleration feedforward (volts per in/s^2) currently applied. */
+    public double accelerationFeedforward() {
+        return appliedKa;
     }
 
     /** MAXMotion cruise velocity (in/s) currently applied - the planner derives handoffs from it. */

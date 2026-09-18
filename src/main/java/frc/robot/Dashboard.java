@@ -425,6 +425,7 @@ public class Dashboard {
         }
         SmartDashboard.putString("Vision/Branch Side", vision.getBranchSide().name());
         SmartDashboard.putNumber("Vision/Latched Tag", vision.getLatchedTagId());
+        SmartDashboard.putNumber("Vision/Heading Offset", vision.getLatchedHeadingOffsetDegrees());
         SmartDashboard.putBoolean("Vision/Heading Seed Fresh", vision.hasFreshHeadingSeed());
         SmartDashboard.putBoolean("Vision/Reseeding Heading", vision.isReseedingHeading());
         SmartDashboard.putBoolean("Vision/Auto Kept Heading", swerve.lastAutoResetKeptHeading());

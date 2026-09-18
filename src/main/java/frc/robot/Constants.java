@@ -997,6 +997,13 @@ public final class Constants {
 			public static final double TARGET_FILTER_ALPHA = 0.3;
 			public static final double TARGET_OUTLIER_METERS = 0.25;
 			public static final int TARGET_OUTLIER_FRAMES = 3;
+			// Same idea for the offset between the field-true heading (from
+			// each frame's MegaTag1 solve) and the pose estimator's heading.
+			// Slower, with a wider gate that must persist longer: a single-tag
+			// solve's heading is noisier than its position and can flip.
+			public static final double HEADING_FILTER_ALPHA = 0.2;
+			public static final double HEADING_OUTLIER_DEGREES = 12.0;
+			public static final int HEADING_OUTLIER_FRAMES = 5;
 
 			// Flush means the bumper is ON the reef or the wall, and a
 			// closed-loop velocity command into a wall is a stalled drivetrain

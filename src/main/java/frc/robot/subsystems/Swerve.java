@@ -61,8 +61,11 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	private static final Rotation2d kBlueAlliancePerspectiveRotation = Rotation2d.kZero;
 	// Red alliance sees forward as 180 degrees (toward blue alliance wall)
 	private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.k180deg;
-	// Keep track if we've ever applied the operator perspective before or not
-	private boolean m_hasAppliedOperatorPerspective = false;
+	// The DRIVER's forward direction, held in the RAW gyro frame (the one
+	// thing vision corrections and pose resets never touch). See periodic().
+	private Rotation2d m_driverForwardRaw = null;
+	private Alliance m_driverForwardAlliance = null;
+	private boolean m_rederiveDriverForward = false;
 
 	// Swerve request to apply during robot-centric path following.
 	// Closed-loop velocity is required for accurate path tracking: each
@@ -632,6 +635,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	public void resetPoseForAuto(Pose2d nominalStart) {
 		Rotation2d current = getStateCopy().Pose.getRotation();
 		double disagreementDeg = Math.abs(current.minus(nominalStart.getRotation()).getDegrees());
+		// Either way the pose heading is now the field's: the driver's forward
+		// is re-derived from it (alliance forward), next loop, once the reset
+		// shows in the state.
+		m_rederiveDriverForward = true;
 		if (vision.hasStrongHeadingSeed()
 				&& disagreementDeg <= VisionConstants.HEADING_SEED_MAX_DISAGREEMENT_DEGREES) {
 			resetTranslation(nominalStart.getTranslation());
@@ -669,23 +676,63 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 		return m_alignHeadingErrorDeg;
 	}
 
+	private static Rotation2d allianceForward(Alliance alliance) {
+		return alliance == Alliance.Red ? kRedAlliancePerspectiveRotation : kBlueAlliancePerspectiveRotation;
+	}
+
+	/**
+	 * Driver heading zero: the way the robot faces NOW is "forward" on the
+	 * driver's stick (robot pointing away from the driver - the same on
+	 * either alliance). It does not touch the pose estimator, so it is safe
+	 * mid-match: MegaTag2 and the autos keep the heading they had.
+	 *
+	 * @param resetPoseHeading also reset the POSE heading to the alliance's
+	 *     forward direction - a field-heading seed for when no tag can supply
+	 *     one (robot squared up by hand, no tags in view).
+	 */
+	public void zeroDriverHeading(boolean resetPoseHeading) {
+		m_driverForwardRaw = getStateCopy().RawHeading;
+		m_rederiveDriverForward = false;
+		if (resetPoseHeading) {
+			resetRotation(allianceForward(DriverStation.getAlliance().orElse(Alliance.Blue)));
+		}
+	}
+
 	@Override
 	public void periodic() {
+		var state = getStateCopy();
+
 		// Track when the robot last spun fast, for vision-measurement rejection
-		if (Math.abs(getState().Speeds.omegaRadiansPerSecond) > kVisionMaxOmegaRadPerSec) {
+		if (Math.abs(state.Speeds.omegaRadiansPerSecond) > kVisionMaxOmegaRadPerSec) {
 			m_lastFastRotationTime = Timer.getFPGATimestamp();
 		}
 
-		// Apply operator perspective if not already applied
-		if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
-			DriverStation.getAlliance().ifPresent(allianceColor -> {
-				setOperatorPerspectiveForward(
-					allianceColor == Alliance.Red
-						? kRedAlliancePerspectiveRotation
-						: kBlueAlliancePerspectiveRotation
-				);
-				m_hasAppliedOperatorPerspective = true;
-			});
+		// ---- The driver's field-centric frame is glued to the GYRO ----
+		// Field-centric requests steer relative to the POSE heading plus the
+		// "operator perspective". The pose heading is vision's to correct:
+		// MegaTag1 re-seeds it whenever the robot sits disabled looking at a
+		// tag (and in a re-seed window). That used to drag the driver's frame
+		// with it - align on a tag, disable in front of it, re-enable, and
+		// "forward" on the stick had moved: the robot drove the wrong way.
+		// So the driver's forward is kept as a direction in the RAW gyro
+		// frame, which nothing but the gyro moves, and the operator
+		// perspective is recomputed every loop to cancel whatever vision or a
+		// pose reset did to the pose heading. It changes only when the driver
+		// zeroes it (zeroDriverHeading), when an auto resets the pose to the
+		// field's frame, or when the alliance changes; until the first of
+		// those it is the alliance's forward direction, as before.
+		Rotation2d poseMinusRaw = state.Pose.getRotation().minus(state.RawHeading);
+		Optional<Alliance> alliance = DriverStation.getAlliance();
+		if (alliance.isPresent()) {
+			boolean changed = m_driverForwardAlliance != null && alliance.get() != m_driverForwardAlliance;
+			if (m_driverForwardRaw == null || changed || m_rederiveDriverForward) {
+				m_driverForwardRaw = allianceForward(alliance.get()).minus(poseMinusRaw);
+				m_rederiveDriverForward = false;
+			}
+			m_driverForwardAlliance = alliance.get();
+		}
+		if (m_driverForwardRaw != null) {
+			setOperatorPerspectiveForward(m_driverForwardRaw.plus(poseMinusRaw));
 		}
 	}
 

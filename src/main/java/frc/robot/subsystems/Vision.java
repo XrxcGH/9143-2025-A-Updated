@@ -64,6 +64,18 @@ import frc.robot.util.Tunables;
  * leaves the camera's view (the rear camera loses the station tag before
  * the bumpers are flush).
  *
+ * The heading the tracker squares up to is handled the same way, and for
+ * the same reason it must not depend on the pose estimator's heading being
+ * FIELD-TRUE. The tag's square heading comes from the field layout, but the
+ * pose heading is whatever frame the gyro was last zeroed in (a driver
+ * re-zero, a boot orientation, a half-converged seed) - compare the two
+ * directly and the robot squares up to the wrong direction, i.e. turns AWAY
+ * from the tag. So each frame's MegaTag1 solve (which carries a field-true
+ * heading from the tag geometry alone) is compared with the pose heading at
+ * capture, the difference is filtered, and the square heading is handed to
+ * the tracker already converted into the pose estimator's own frame.
+ * Nothing here ever WRITES the pose heading.
+ *
  * Dashboard note: this subsystem publishes nothing itself. All telemetry is
  * read through the public getters by the central {@link frc.robot.Dashboard}
  * class, which owns every NetworkTables/Elastic publication for the robot.
@@ -164,6 +176,9 @@ public class Vision extends SubsystemBase {
     private long latchedSampleStamp = Long.MIN_VALUE;
     /** Consecutive samples that disagreed with the filter by more than the outlier distance. */
     private int latchedOutlierCount = 0;
+    /** Filtered (field-true heading - pose estimator heading) while latched; null until the first MegaTag1 sample. */
+    private Rotation2d latchedHeadingOffset = null;
+    private int latchedHeadingOutlierCount = 0;
 
     // Precomputed "limelight-<name>" NT table names (avoids per-loop string
     // concatenation in the hot paths)
@@ -433,14 +448,17 @@ public class Vision extends SubsystemBase {
         return tagClass == TagClass.REEF;
     }
 
-    private void latch(AprilTagTarget target, long sampleStamp, double captureTime, Pose2d robotPose) {
+    private void latch(AprilTagTarget target, long sampleStamp, double captureTime, double fieldTrueYawDegrees,
+            Pose2d robotPose) {
         latchedTagId = target.id;
         latchedTagClass = target.tagClass;
         latchedSquareHeading = target.squareHeading;
         latchedTagFieldPosition = null;
         latchedSampleStamp = Long.MIN_VALUE;
         latchedOutlierCount = 0;
-        updateLatchedEstimate(target, sampleStamp, captureTime, robotPose);
+        latchedHeadingOffset = null;
+        latchedHeadingOutlierCount = 0;
+        updateLatchedEstimate(target, sampleStamp, captureTime, fieldTrueYawDegrees, robotPose);
         for (String tableName : limelightTableNames) {
             LimelightHelpers.setPriorityTagID(tableName, target.id);
         }
@@ -454,13 +472,15 @@ public class Vision extends SubsystemBase {
      * the estimate is ignored unless it persists - one bad solve must not
      * yank the goal, but a real change (a pose reset) is followed.
      */
-    private void updateLatchedEstimate(AprilTagTarget target, long sampleStamp, double captureTime, Pose2d robotPose) {
+    private void updateLatchedEstimate(AprilTagTarget target, long sampleStamp, double captureTime,
+            double fieldTrueYawDegrees, Pose2d robotPose) {
         latchedLastSeenTime = Timer.getFPGATimestamp();
         if (sampleStamp == latchedSampleStamp) {
             return;
         }
         latchedSampleStamp = sampleStamp;
         Pose2d poseAtCapture = swerve.samplePoseAt(Utils.fpgaToCurrentTime(captureTime)).orElse(robotPose);
+        updateHeadingOffset(fieldTrueYawDegrees, poseAtCapture.getRotation());
         Translation2d measured = robotFrameToField(poseAtCapture, target.robotFrame);
         if (latchedTagFieldPosition == null) {
             latchedTagFieldPosition = measured;
@@ -476,12 +496,57 @@ public class Vision extends SubsystemBase {
         latchedOutlierCount = 0;
     }
 
+    /**
+     * Folds one frame's field-true heading (MegaTag1, NaN when that frame
+     * had no solve) into the filtered offset between the field-true heading
+     * and the pose estimator's. A single-tag solve can flip (pose
+     * ambiguity), so a sample far from the estimate only counts once it
+     * persists.
+     */
+    private void updateHeadingOffset(double fieldTrueYawDegrees, Rotation2d poseHeadingAtCapture) {
+        if (Double.isNaN(fieldTrueYawDegrees)) {
+            return;
+        }
+        Rotation2d measured = Rotation2d.fromDegrees(fieldTrueYawDegrees).minus(poseHeadingAtCapture);
+        if (latchedHeadingOffset == null) {
+            latchedHeadingOffset = measured;
+            return;
+        }
+        Rotation2d innovation = measured.minus(latchedHeadingOffset);
+        if (Math.abs(innovation.getDegrees()) > VisionConstants.TrackingGains.HEADING_OUTLIER_DEGREES
+                && ++latchedHeadingOutlierCount < VisionConstants.TrackingGains.HEADING_OUTLIER_FRAMES) {
+            return;
+        }
+        latchedHeadingOffset = latchedHeadingOutlierCount > 0
+            ? measured
+            : latchedHeadingOffset.plus(innovation.times(VisionConstants.TrackingGains.HEADING_FILTER_ALPHA));
+        latchedHeadingOutlierCount = 0;
+    }
+
+    /**
+     * The latched tag's square heading in the POSE ESTIMATOR's frame (what
+     * the tracker compares with the pose heading). Falls back to the layout
+     * heading as it is until a MegaTag1 sample has arrived.
+     */
+    private Optional<Rotation2d> squareHeadingInPoseFrame() {
+        if (latchedHeadingOffset == null) {
+            return latchedSquareHeading;
+        }
+        return latchedSquareHeading.map(square -> square.minus(latchedHeadingOffset));
+    }
+
+    /** Field-true minus pose-estimator heading while latched, degrees (0 when unknown) - for the dashboard. */
+    public double getLatchedHeadingOffsetDegrees() {
+        return latchedHeadingOffset == null ? 0.0 : latchedHeadingOffset.getDegrees();
+    }
+
     private void releaseLatch() {
         if (latchedTagId < 0) {
             return;
         }
         latchedTagId = -1;
         latchedTagFieldPosition = null;
+        latchedHeadingOffset = null;
         for (String tableName : limelightTableNames) {
             LimelightHelpers.setPriorityTagID(tableName, -1);
         }
@@ -497,10 +562,10 @@ public class Vision extends SubsystemBase {
         Translation2d inRobot = fieldToRobotFrame(robotPose, latchedTagFieldPosition);
         if (live == null) {
             return new AprilTagTarget(latchedTagId, latchedTagClass, "memory", -1,
-                0.0, 0.0, 0.0, 0.0, 0.0, inRobot, latchedSquareHeading, true);
+                0.0, 0.0, 0.0, 0.0, 0.0, inRobot, squareHeadingInPoseFrame(), true);
         }
         return new AprilTagTarget(live.id, live.tagClass, live.limelightName, live.cameraIndex,
-            live.tx, live.ty, live.cameraX, live.cameraY, live.cameraZ, inRobot, live.squareHeading, false);
+            live.tx, live.ty, live.cameraX, live.cameraY, live.cameraZ, inRobot, squareHeadingInPoseFrame(), false);
     }
 
     /**
@@ -519,6 +584,7 @@ public class Vision extends SubsystemBase {
         double bestGoalDistance = Double.MAX_VALUE;
         long bestGoalStamp = 0;
         double bestGoalCaptureTime = now;
+        double bestGoalFieldTrueYaw = Double.NaN;
         boolean latchedSeen = false;
 
         for (int i = 0; i < limelightTableNames.length; i++) {
@@ -574,6 +640,13 @@ public class Vision extends SubsystemBase {
                 bestGoalCaptureTime = sample.timestamp / 1e6
                     - (LimelightHelpers.getLatency_Pipeline(limelightName)
                         + LimelightHelpers.getLatency_Capture(limelightName)) / 1000.0;
+                // MegaTag1 robot pose for the same frame: [x, y, z, roll,
+                // pitch, YAW, latency, TAG COUNT, ...], blue origin, degrees.
+                // Its yaw is field-true from the tag geometry alone. Only a
+                // camera with a measured mounting pose can supply it.
+                double[] mt1 = LimelightHelpers.getLimelightDoubleArrayEntry(limelightName, "botpose_wpiblue").get();
+                bestGoalFieldTrueYaw = VisionConstants.LIMELIGHT_POSES[i].measured && mt1.length >= 8 && mt1[7] >= 1
+                    ? mt1[5] : Double.NaN;
             }
         }
 
@@ -591,10 +664,10 @@ public class Vision extends SubsystemBase {
         }
         if (latchedTagId < 0) {
             if (bestForGoal != null) {
-                latch(bestForGoal, bestGoalStamp, bestGoalCaptureTime, robotPose);
+                latch(bestForGoal, bestGoalStamp, bestGoalCaptureTime, bestGoalFieldTrueYaw, robotPose);
             }
         } else if (latchedSeen) {
-            updateLatchedEstimate(bestForGoal, bestGoalStamp, bestGoalCaptureTime, robotPose);
+            updateLatchedEstimate(bestForGoal, bestGoalStamp, bestGoalCaptureTime, bestGoalFieldTrueYaw, robotPose);
         } else if (now - latchedLastSeenTime > VisionConstants.TrackingGains.TARGET_MEMORY_SECONDS) {
             releaseLatch();
         }

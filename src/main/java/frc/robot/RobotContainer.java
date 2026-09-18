@@ -58,7 +58,7 @@ import frc.robot.util.Tunables;
  *   Left trigger        - align on the LEFT reef branch (L2-L4 tracking)
  *   Right trigger       - align on the RIGHT reef branch (L2-L4 tracking)
  *   D-pad               - slow robot-centric nudges (up/down/left/right)
- *   Left bumper         - heading fix: disabled = re-zero field-centric; enabled = re-seed from tags (back+LB forces a re-zero)
+ *   Left bumper         - driver heading zero: the way the robot faces now = stick forward (back+LB also re-seeds the pose heading)
  *   Back/Start + X/Y    - SysId characterization routines (test setup only)
  *
  * OPERATOR (port 1):
@@ -275,27 +275,22 @@ public class RobotContainer {
         driver_controller.start().and(driver_controller.y()).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
         driver_controller.start().and(driver_controller.x()).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
 
-        // Heading fix on left bumper. While DISABLED it re-zeroes field-centric
-        // to the alliance-forward direction (the classic gyro reset, for a
-        // field without tags in view; MegaTag1 corrects it if a tag is
-        // visible). While ENABLED it must NOT do that: MegaTag2 trusts the
-        // pose heading absolutely and nothing corrects the heading during a
-        // period, so a re-zero mid-match would silently bias every fused
-        // pose for the rest of it. Instead it opens a short MegaTag1
-        // re-seed window that corrects the heading from tag geometry.
-        // Back + left bumper forces the gyro re-zero while enabled
-        // (deliberate, for a no-tag practice field). No swerve requirement,
-        // so the press cannot interrupt an alignment in progress.
+        // Driver heading zero on left bumper: "the way the robot faces now is
+        // forward on my stick". It only moves the DRIVER's frame (held in the
+        // raw gyro frame - see Swerve.periodic), never the pose estimator's
+        // heading, so it is safe at any time: MegaTag2 trusts the pose
+        // heading absolutely, and vision corrections to that heading no
+        // longer move the driver's frame either. While DISABLED with no tag
+        // supplying a heading it also seeds the POSE heading to the
+        // alliance's forward direction (robot squared up by hand on a field
+        // with no tag in view); back + left bumper forces that seed at any
+        // time (a no-tag practice space). No swerve requirement, so the press
+        // cannot interrupt an alignment in progress.
         driver_controller.leftBumper().and(driver_controller.back().negate())
-            .onTrue(Commands.runOnce(() -> {
-                if (DriverStation.isDisabled()) {
-                    swerve.seedFieldCentric();
-                } else {
-                    swerve.getVision().requestHeadingReseed();
-                }
-            }).ignoringDisable(true));
+            .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(
+                DriverStation.isDisabled() && !swerve.getVision().hasFreshHeadingSeed())).ignoringDisable(true));
         driver_controller.back().and(driver_controller.leftBumper())
-            .onTrue(Commands.runOnce(swerve::seedFieldCentric));
+            .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(true)).ignoringDisable(true));
 
         // Select which reef branch vision tracking centers on for L2-L4
         // (latched; defaults to LEFT on boot)

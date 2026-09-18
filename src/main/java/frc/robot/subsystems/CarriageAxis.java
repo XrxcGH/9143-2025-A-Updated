@@ -3,7 +3,7 @@ package frc.robot.subsystems;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 
 /**
- * What the Superstructure needs from the elevator. It exists so the REAL
+ * What the Superstructure needs from the elevator. It exists so the real
  * coordinated-motion commands can be run in unit tests against a simulated
  * carriage (SuperstructureSequenceSimTest): the vendor simulators advance on
  * wall-clock time, so the real subsystems cannot be stepped deterministically.
@@ -24,7 +24,7 @@ public interface CarriageAxis extends Subsystem {
 
     boolean isAtTargetPosition();
 
-    /** Profile acceleration in effect AT THE CURRENT PACE, in/s^2 (the planner sizes braking distances from it). */
+    /** Profile acceleration in effect at the current pace, in/s^2 (the planner sizes braking distances from it). */
     double maxAcceleration();
 
     /** Profile acceleration the given pace runs at, in/s^2. */

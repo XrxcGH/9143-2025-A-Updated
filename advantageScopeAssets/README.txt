@@ -2,7 +2,7 @@ Custom AdvantageScope assets for Team 9143's robot "Leviathan".
 
   Robot_Leviathan/  Articulated 3D robot model for the 3D field view: config.json
                     and a README.md with the component order. The model binaries
-                    (.glb) are NOT in the repository - the robot's CAD is not
+                    (.glb) are not in the repository - the robot's CAD is not
                     distributed, and .glb / .step files here are git-ignored.
                     Export your own and drop them in (see the README.md inside).
 

@@ -210,7 +210,7 @@ class SuperstructureClampSimTest {
         run("L3 climb, arm at half speed", carriage(16.0, 40.0, 1.0), arm(RAISE, 0.5), l3Climb(), 6.0, 9, 0, 0, 0);
         run("L3 climb, carriage stalls at 25 in", carriage(16.0, 40.0, 1.0), arm(RAISE, 1.0), l3Climb(), 7.0,
             0.25, 1.0, 0, 0);
-        // Coming down to L3 from above the window (e.g. from the high algae pose at RAISE)
+        // Coming down to L3 from above the window (e.g., from the high algae pose at RAISE)
         run("L3 from above", carriage(37.5, 0.0, 1.0), arm(RAISE, 1.0), l3Climb(), 4.0, 9, 0, 0, 0);
     }
 

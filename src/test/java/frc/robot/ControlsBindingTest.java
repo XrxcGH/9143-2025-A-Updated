@@ -29,9 +29,9 @@ import frc.robot.subsystems.Elevator;
 
 /**
  * Binding-logic checks for the operator controller mapping (see the control
- * map at the top of RobotContainer). Nothing here
- * depends on simulated motion (REV's simulated MAXMotion runs on wall-clock
- * time): it presses simulated buttons and looks at what the scheduler did.
+ * map at the top of RobotContainer). Nothing here depends on simulated
+ * motion (REV's simulated MAXMotion runs on wall-clock time): it presses
+ * simulated buttons and looks at what the scheduler did.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ControlsBindingTest {
@@ -65,7 +65,7 @@ class ControlsBindingTest {
         CommandScheduler.getInstance().onCommandInterrupt(c -> interrupted.add(c.getName()));
     }
 
-    /** Everything released. The simulated POV reads 0 (= UP) until it is set, so centre it. */
+    /** Everything released. The simulated POV reads 0 (= UP) until it is set, so center it. */
     private void neutral() {
         for (XboxControllerSim pad : new XboxControllerSim[] {driver, operator}) {
             for (int b = 1; b <= 10; b++) {

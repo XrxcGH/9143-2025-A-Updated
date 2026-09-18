@@ -1,5 +1,5 @@
 // ============================================================================
-// CANdle LED subsystem - COMMENTED OUT (Sept 2026): there is no CANdle on the
+// CANdle LED subsystem - commented out (Sept 2026): there is no CANdle on the
 // robot, so every line below is disabled to keep the device off the CAN bus
 // and the class out of the build. To bring it back: remove the leading "// "
 // from every line of this file, uncomment LEDConstants in Constants.java, and
@@ -44,7 +44,7 @@
 //  *   5. ENDGAME         - strobing yellow (last N seconds of the match)
 //  *   6. TELEOP_IDLE     - solid alliance color
 //  *
-//  * Control requests are only re-sent when the state CHANGES, so this subsystem
+//  * Control requests are only re-sent when the state changes, so this subsystem
 //  * adds essentially zero CAN bus traffic during steady-state operation.
 //  */
 // public class LEDs extends SubsystemBase {
@@ -70,8 +70,8 @@
 //     private final CANdle candle;
 // 
 //     // State inputs from the rest of the robot
-//     private final BooleanSupplier hasGamePiece;    // e.g. CorAl CANrange detection
-//     private final BooleanSupplier visionTracking;  // e.g. Swerve AprilTag tracking enabled
+//     private final BooleanSupplier hasGamePiece;    // e.g., CorAl CANrange detection
+//     private final BooleanSupplier visionTracking;  // e.g., Swerve AprilTag tracking enabled
 // 
 //     // Reusable control requests (allocated once; sent only on state change).
 //     // Index range covers the CANdle's 8 onboard LEDs plus the attached strip.
@@ -104,7 +104,7 @@
 //         candle = new CANdle(LEDConstants.CANDLE_ID);
 // 
 //         // Configure the strip type and global brightness. GRB is the byte
-//         // order used by common WS2812/Neopixel strips - change if colors
+//         // order used by common WS2812/NeoPixel strips - change if colors
 //         // appear swapped on the actual hardware.
 //         CANdleConfiguration config = new CANdleConfiguration();
 //         config.LED.StripType = StripTypeValue.GRB;
@@ -188,7 +188,7 @@
 //         RGBWColor alliance = allianceColor();
 // 
 //         // Re-apply when the state changes, or when an alliance-colored state
-//         // is showing and the reported alliance changes (e.g. the Driver
+//         // is showing and the reported alliance changes (e.g., the Driver
 //         // Station connected after startup). Reference comparison is safe
 //         // because allianceColor() returns shared constants.
 //         boolean allianceChanged =

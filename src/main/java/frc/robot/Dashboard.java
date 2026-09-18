@@ -40,7 +40,7 @@ import frc.robot.util.Elastic;
 import frc.robot.util.Tunables;
 
 /**
- * Central dashboard manager - the ONLY place in the robot code that publishes
+ * Central dashboard manager - the only place in the robot code that publishes
  * data for the Elastic dashboard.
  *
  * How the Elastic integration works (Elastic does not support the
@@ -57,7 +57,7 @@ import frc.robot.util.Tunables;
  *  4. Persistent problems surface through WPILib Alerts (Elastic's Alerts
  *     widget); sudden mid-match failures additionally fire an Elastic toast
  *     notification so they are impossible to miss.
- *  5. The Testing tab drives each mechanism INDEPENDENTLY: setpoint sliders
+ *  5. The Testing tab drives each mechanism independently: setpoint sliders
  *     (values flow dashboard -> robot, so update() never overwrites them)
  *     plus Go/Run/Stop command buttons that move one mechanism and leave
  *     the other alone (see Superstructure.test*). Tunable "magic numbers"
@@ -74,14 +74,14 @@ public class Dashboard {
     private final Superstructure superstructure;
 
 
-    // Dashboard-editable test setpoints (Testing tab). These are READ by the
+    // Dashboard-editable test setpoints (Testing tab). These are read by the
     // robot, never written in update() - a periodic put would clobber the
     // operator's slider the instant they moved it.
     private final NetworkTableEntry testElevatorSetpoint;
     private final NetworkTableEntry testPivotSetpoint;
     private final NetworkTableEntry testIntakeSpeed;
 
-    /** Field widget data: robot pose (and any objects added later, e.g. trajectories). */
+    /** Field widget data: robot pose (and any objects added later, e.g., trajectories). */
     private final Field2d field = new Field2d();
 
     /** Raw NT table backing Elastic's SwerveDrive widget (needs a ".type" marker). */
@@ -201,7 +201,7 @@ public class Dashboard {
 
         // Go/Run/Stop buttons: each moves exactly one mechanism (the
         // Superstructure refuses - with a toast - any single-mechanism move
-        // the collision model says is unsafe from the CURRENT pose).
+        // the collision model says is unsafe from the current pose).
         SmartDashboard.putData("Testing/Elevator Go",
             superstructure.testElevatorTo(() -> testElevatorSetpoint.getDouble(0.0))
                 .withName("Elevator Go"));
@@ -241,7 +241,7 @@ public class Dashboard {
 
         // --- Pre-match utility buttons (Command widgets on the Setup tab) ---
         // ignoringDisable lets the pit crew zero mechanisms without enabling -
-        // and ONLY without enabling: zeroing under a latched closed-loop
+        // and only without enabling: zeroing under a latched closed-loop
         // setpoint shifts its frame and drives the mechanism hard, so both
         // buttons do nothing while the robot is enabled (the same rule as the
         // operator's Back / Start zeroing bindings).
@@ -373,7 +373,7 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Right Current", elevator.getRightCurrent());
         SmartDashboard.putNumber("Elevator/Left Output", elevator.getLeftOutput());
         // Voltage the leader is applying (output is voltage-compensated to
-        // 12 V) MINUS kS. The Spark MAX adds +kS whenever the profile is at
+        // 12 V) minus kS. The Spark MAX adds +kS whenever the profile is at
         // rest (REVLib 2026 - measured in REV's own sim: it does not follow
         // the sign of the error), so the raw output holding still is
         // kG + kS + kP x error. With kS taken off, what is left estimates
@@ -384,7 +384,7 @@ public class Dashboard {
             elevator.getLeftOutput() * ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE - elevator.staticFeedforward());
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
         // Diagnostic: new setpoints sent to the Spark MAX since boot. While the
-        // carriage is just HOLDING this must not move; if the elevator ever
+        // carriage is only holding this must not move; if the elevator ever
         // rumbles in place, a climbing count means the code is re-commanding
         // it, a steady count means the loop or the mechanism is doing it.
         SmartDashboard.putNumber("Elevator/Setpoint Count", elevator.getSetpointCount());
@@ -398,7 +398,7 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());
         SmartDashboard.putNumber("Elevator/Height At Hard Stop", elevator.zeroHeight());
         // Follower encoder, raw sign: expected to track Height in magnitude
-        // (and read NEGATIVE while raised, since the follower spins opposite)
+        // (and read negative while raised, since the follower spins opposite)
         SmartDashboard.putNumber("Elevator/Follower Height", elevator.getFollowerPosition());
 
         // --- CorAl ---
@@ -428,9 +428,9 @@ public class Dashboard {
         SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
 
         // --- Vision ---
-        // What the cameras SEE, unfiltered - the same tags their streams
+        // What the cameras see, unfiltered - the same tags their streams
         // draw: the closest one ("Best Tag"), which camera has it, and every
-        // ID per camera. These deliberately do NOT come from the alignment
+        // ID per camera. These deliberately do not come from the alignment
         // cache below: that cache skips a camera whose lens pose is
         // unmeasured, every tag outside a camera's alignment class and any
         // frame without a 3D solve, so a readout built on it can sit still
@@ -444,8 +444,8 @@ public class Dashboard {
         // The closest tag a camera may ALIGN on (its class, lens pose
         // measured), ignoring the goal filter and the latch so the readouts
         // work with the robot pushed into position while disabled; positions
-        // are in the ROBOT frame. TX, Distance, Lateral and Square Heading
-        // below describe THIS tag, not Best Tag. -1 while Best Tag shows an
+        // are in the robot frame. TX, Distance, Lateral and Square Heading
+        // below describe this tag, not Best Tag. -1 while Best Tag shows an
         // ID = that tag is seen but is not one its camera may align on.
         var bestTarget = vision.getBestVisibleTarget();
         SmartDashboard.putNumber("Vision/Alignment Tag",

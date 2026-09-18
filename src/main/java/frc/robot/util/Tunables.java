@@ -10,11 +10,11 @@ import frc.robot.Constants.VisionConstants;
 /**
  * Live-tunable "magic numbers", backed by WPILib {@link Preferences}.
  *
- * Every value here can be edited from the dashboard WITHOUT changing or
+ * Every value here can be edited from the dashboard without changing or
  * redeploying code: Preferences live in NetworkTables under /Preferences,
  * Elastic's "Robot Preferences" widget (Testing tab) edits them in place, and
  * the roboRIO persists them to /home/lvuser/networktables.json - so an edit
- * survives reboots, power cycles, AND future code deploys (a deploy never
+ * survives reboots, power cycles, and future code deploys (a deploy never
  * touches that file). The values in Constants are only the factory defaults,
  * seeded the first time the code runs (or after "Reset Tunables").
  *
@@ -26,7 +26,7 @@ import frc.robot.Constants.VisionConstants;
  * feedforward, and the CANrange coral-detection thresholds. The Elevator
  * and the CorAl re-apply theirs to the hardware whenever the robot is
  * disabled.
- * What does NOT belong here: the measured mechanism contact geometry (tuck
+ * What does not belong here: the measured mechanism contact geometry (tuck
  * / low-box limits) - those are physical facts, not tuning knobs - and the
  * CorAl pivot's Phoenix closed-loop gains, which are applied at boot and
  * tuned live in Phoenix Tuner X.
@@ -78,13 +78,13 @@ public final class Tunables {
 
     /**
      * Version stamp of the factory defaults in Constants. Stored values
-     * survive deploys, so changing a default in Constants does NOTHING on a
+     * survive deploys, so changing a default in Constants does nothing on a
      * robot that already has the key stored - unless this number is bumped.
      * On the first boot after a bump, init() does one of two things:
      *   - if it has a targeted migration block for the stored version, it
-     *     overwrites ONLY the keys named there and keeps everything else
+     *     overwrites only the keys named there and keeps everything else
      *     the team has tuned on the dashboard;
-     *   - otherwise it overwrites EVERY tunable with the new defaults.
+     *   - otherwise it overwrites every tunable with the new defaults.
      * Bump it when a default changes and must take effect on the robot
      * (and add a migration block when only a few defaults moved); leave it
      * alone to preserve values tuned on the dashboard.
@@ -100,15 +100,15 @@ public final class Tunables {
      * {@link #DEFAULTS_VERSION} has been bumped since the last boot it
      * instead runs the targeted migration for the stored version or, if
      * there is none, overwrites every key. Call once at robot startup,
-     * BEFORE the subsystems are constructed.
+     * before the subsystems are constructed.
      */
     public static void init() {
-        // 14 -> 15 is a TARGETED migration: only the keys whose defaults
+        // 14 -> 15 is a targeted migration: only the keys whose defaults
         // changed are overwritten (elevator kP 0.4, kS 0, profile error
         // 1.0 in - the values that stop the carriage ringing as it settles
         // on a setpoint), so everything else the team has tuned on the
         // dashboard (vision distances, speed scale, ...) survives. A bump
-        // otherwise resets EVERY tunable; add a block like this one whenever
+        // otherwise resets every tunable; add a block like this one whenever
         // only a few defaults move.
         if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) == 14) {
             Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
@@ -312,7 +312,7 @@ public final class Tunables {
     }
 
     /**
-     * Pivot gravity feedforward, volts with the claw HORIZONTAL (the most
+     * Pivot gravity feedforward, volts with the claw horizontal (the most
      * gravity the arm ever sees). Not yet measured: the default is 0 (no
      * gravity feedforward) - see the procedure at CORAL_PIVOT_kG in
      * Constants. Clamped to about three times the CAD estimate (~0.3 V).
@@ -347,7 +347,7 @@ public final class Tunables {
 
     /**
      * Which way a coral moves the CANrange reading: 1 = a piece reads
-     * CLOSER than the detect distance, 0 = a piece reads FARTHER. Set it
+     * closer than the detect distance, 0 = a piece reads farther. Set it
      * from the dashboard by reading CorAl/CANrange Distance with the claw
      * empty and with a coral held.
      */
@@ -384,7 +384,7 @@ public final class Tunables {
     }
 
     // ------------------------------------------------------------------
-    // Vision alignment goals (meters, ROBOT frame: where the tag sits relative to the robot center)
+    // Vision alignment goals (meters, robot frame: where the tag sits relative to the robot center)
     // ------------------------------------------------------------------
 
     /** Forward distance from the robot center to a reef tag with the front bumpers flush on the reef base. */

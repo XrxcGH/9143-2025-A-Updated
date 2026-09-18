@@ -94,7 +94,7 @@ public class Robot extends LoggedRobot {
 		// Seed the dashboard-editable tunables (vision distances and tracking
 		// gains, elevator calibration/gains, pivot motion limits, coral
 		// detection, teleop speed scale) with their Constants defaults if not
-		// already stored on the roboRIO - BEFORE the subsystems are built,
+		// already stored on the roboRIO - before the subsystems are built,
 		// since the mechanisms configure their controllers from them.
 		Tunables.init();
 

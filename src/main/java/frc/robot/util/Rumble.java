@@ -9,7 +9,7 @@ import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 
 /**
  * Haptic feedback for one controller. It is a subsystem only so that rumble
- * commands REQUIRE it: a new cue pre-empts the one in progress, and the
+ * commands require it: a new cue pre-empts the one in progress, and the
  * interrupted command's end() is what switches the motor off, so a cue can
  * never be left buzzing. None of these run while disabled, which means the
  * scheduler cancels them (and end() zeroes the rumble) the moment the robot

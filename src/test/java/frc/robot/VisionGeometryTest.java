@@ -37,7 +37,7 @@ class VisionGeometryTest {
 
     @Test
     void reefCameraOffsetYawAndPitchArePlacedOnTheRobot() {
-        // reef: 11.04 in forward, 11.25 in LEFT, pitched 20 deg down, yawed 30 deg to the right
+        // reef: 11.04 in forward, 11.25 in left, pitched 20 deg down, yawed 30 deg to the right
         CameraPose cam = VisionConstants.LIMELIGHT_POSES[2];
         // A tag on the optical axis 2 m away lies 2 cos(20) along the camera heading
         double along = 2.0 * Math.cos(Math.toRadians(20.0));
@@ -94,7 +94,7 @@ class VisionGeometryTest {
         // After the robot drives 0.4 m forward, the remembered tag is 0.6 m ahead
         Pose2d moved = new Pose2d(1.0, 2.4, Rotation2d.fromDegrees(90.0));
         assertEquals(0.6, Vision.fieldToRobotFrame(moved, onField).getX(), EPS);
-        // A tag to the robot's LEFT (+Y) when facing +Y is at smaller field X
+        // A tag to the robot's left (+Y) when facing +Y is at smaller field X
         Translation2d leftOnField = Vision.robotFrameToField(robot, new Translation2d(0.0, 0.5));
         assertEquals(0.5, leftOnField.getX(), EPS);
         assertEquals(2.0, leftOnField.getY(), EPS);
@@ -122,13 +122,13 @@ class VisionGeometryTest {
     }
 
     /**
-     * The dashboard's "Best Tag" is the closest tag ANY camera reports - whatever its class, whichever
+     * The dashboard's "Best Tag" is the closest tag any camera reports - whatever its class, whichever
      * camera, measured pose or not - so it agrees with the camera streams. (The alignment cache filters
      * on all of those, so it cannot feed this readout: a stream would show a tag the widget ignores.)
      */
     @Test
     void bestTagIsTheClosestTagAnyCameraSees() {
-        // funnel sees a REEF tag (not a class it aligns on), the unmeasured barge camera a barge tag
+        // funnel sees a reef tag (not a class it aligns on), the unmeasured barge camera a barge tag
         double[][] seen = {rawTag(18, 1.0, 3.0), rawTag(14, 4.0, 1.5), concat(rawTag(7, 2.0, 2.0), rawTag(8, 0.5, 4.0))};
         Vision.SeenTag best = Vision.closestSeenTag(seen).orElseThrow();
         assertEquals(14, best.id);

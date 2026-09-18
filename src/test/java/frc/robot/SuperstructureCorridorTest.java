@@ -188,9 +188,9 @@ class SuperstructureCorridorTest {
     }
 
     /**
-     * The resting L3 pose reads a little UNDER 25 deg on the through bore
+     * The resting L3 pose reads a little under 25 deg on the through bore
      * (chain slack), which is the 20-25 row, blocked at 30.5 in. Lookups
-     * from there must snap the reading into the neighbouring clear row:
+     * from there must snap the reading into the neighboring clear row:
      * otherwise the L3 -> L4 shortcut is never chosen and the sweep helpers
      * have no row to answer from.
      */
@@ -208,7 +208,7 @@ class SuperstructureCorridorTest {
             assertTrue(ceiling >= SuperstructureConstants.L4_PRE_TOP_HEIGHT && ceiling <= 51.0,
                 "climb ceiling from a sagged L3 was " + ceiling);
         }
-        // A pose that is really outside the table is NOT nudged in
+        // A pose that is genuinely outside the table is not nudged in
         assertTrue(Double.isNaN(Superstructure.directTransferHeight(l3, 15.0, l4, a4)));
     }
 
@@ -226,14 +226,14 @@ class SuperstructureCorridorTest {
         // ...but the legitimate unlock still works: 20 deg only opens above 35.5 in, just ahead
         assertEquals(36.0, Superstructure.ceilingForSweep(raise, a4, 33.0), 1e-9);
         // L4 exit: the 25-30 row does not hold 51.5 in, and descending is what unlocks it. The arm
-        // rests ON the 20 deg row edge, so the tighter of the two rows it may be read in applies
+        // rests on the 20 deg row edge, so the tighter of the two rows it may be read in applies
         // (37.5 in for 15-20 deg, 35.5 for 20-25) - constant whichever side the reading falls
         assertEquals(37.5, Superstructure.floorForSweep(a4, raise, l4), 1e-9);
         assertEquals(37.5, Superstructure.floorForSweep(a4 - 0.4, raise, l4), 1e-9);
         assertEquals(37.5, Superstructure.floorForSweep(a4 + 0.4, raise, l4), 1e-9);
         assertEquals(35.5, Superstructure.floorForSweep(a4 + 2.0, raise, l4), 1e-9);
         // A carriage passing 20 in on its way up, arm parked at RAISE: the 65-70 row's gap far along
-        // the sweep is NOT a reason to brake - the arm is gated on height before it gets there
+        // the sweep is not a reason to brake - the arm is gated on height before it gets there
         assertEquals(36.0, Superstructure.ceilingForSweep(98.0, a4, 20.0), 1e-9);
         // Coming down to the L4 station with the arm parked at RAISE is unrestricted
         assertEquals(BASE, Superstructure.floorForSweep(raise, raise, 45.0), 1e-9);

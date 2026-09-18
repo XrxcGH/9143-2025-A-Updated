@@ -32,7 +32,7 @@ import frc.robot.util.Elastic;
  * {@link SuperstructureConstants} for the map and how it was validated
  * against the contacts measured on the robot. Every position command in
  * the robot goes through this class, whose planner moves through that
- * region in STATE-GATED steps: every handover is triggered by a measured
+ * region in state-gated steps: every handover is triggered by a measured
  * height or angle, never a timer, so the sequences stay safe at any
  * elevator or pivot speed (only their duration changes).
  *
@@ -46,7 +46,7 @@ import frc.robot.util.Elastic;
  *   - Mid scoring pose (L3): the carriage climbs with the arm at RAISE;
  *     the arm is released as the carriage passes ARM_RELEASE_MIN_HEIGHT
  *     and sweeps to the scoring angle during the rest of the climb.
- *     Leaving: the carriage LIFTS to MID_POSE_RETURN_LIFT_HEIGHT while the
+ *     Leaving: the carriage lifts to MID_POSE_RETURN_LIFT_HEIGHT while the
  *     arm swings up, and descends only once the arm has passed
  *     BAND_PASS_MIN_ANGLE (climbs on only once it is at RAISE) - descending
  *     any earlier sweeps the claw into the middle-stage top tube.
@@ -56,7 +56,7 @@ import frc.robot.util.Elastic;
  *     down while the carriage climbs behind it; it is held at
  *     L4_STAGE_ANGLE until the carriage is above L4_FINAL_ANGLE_MIN_HEIGHT,
  *     and the carriage is held at L4_PRE_TOP_HEIGHT until the arm is inside
- *     L4_FINAL_GATE_ANGLE. Leaving L4 is the mirror: the carriage DROPS
+ *     L4_FINAL_GATE_ANGLE. Leaving L4 is the mirror: the carriage drops
  *     first at the L4 angle, the arm starts back toward RAISE once the
  *     carriage is below L4_RETURN_ROTATE_MAX_HEIGHT, and the carriage
  *     waits at L4_RETURN_DROP_HEIGHT and then at L4_STATION_HEIGHT until
@@ -74,11 +74,11 @@ import frc.robot.util.Elastic;
  *     still has to sweep ({@link #ceilingForSweep} / {@link #floorForSweep}),
  *     and the arm is given its final angle clamped to the rows the
  *     carriage's height has opened ({@link #armLimitForHeight}). Each
- *     mechanism is limited by the other's MEASURED position, so the pair
+ *     mechanism is limited by the other's measured position, so the pair
  *     stays inside the corridors at any relative speed, including one of
  *     them stalling.
  *   - A setpoint latch (commandCarriage) sends the carriage a new setpoint
- *     only when its clamp has really moved, because every new setpoint
+ *     only when its clamp has actually moved, because every new setpoint
  *     restarts the MAXMotion profile.
  *   - A {@link Pace} per move runs the carriage no faster than the arm can
  *     open the way, so the two travel together and arrive together.
@@ -88,7 +88,7 @@ import frc.robot.util.Elastic;
  * (see {@link #setNearReefSupplier}), and a finished L3 / L4 score waits
  * for the drivetrain to back off before it homes (see {@link #score}).
  *
- * NOTE: the operator's manual take-over ({@link #manualOverride}) bypasses
+ * The operator's manual take-over ({@link #manualOverride}) bypasses
  * these interlocks - the sticks command the subsystems directly and rely on
  * the operator watching the mechanism.
  */
@@ -96,7 +96,7 @@ public class Superstructure {
 
     /**
      * The pose family most recently commanded. Consumed by the vision
-     * tracker to pick the right AprilTag alignment goal (e.g. at the reef:
+     * tracker to pick the right AprilTag alignment goal (e.g., at the reef:
      * a standoff for L1, flush on a branch for L2, and for L3 / L4 a
      * standoff until the pose is reached, then flush).
      */
@@ -126,11 +126,11 @@ public class Superstructure {
     // full pace the carriage reaches each clearance limit before the arm has
     // opened it, brakes, and is released again. Chosen with
     // SuperstructureSequenceSimTest.pacesCompared (build/sim/paces.csv) as
-    // the FASTEST pace at which the carriage never has to slow for the arm.
+    // the fastest pace at which the carriage never has to slow for the arm.
     // Package-private and not final only so that test can vary them.
     // ------------------------------------------------------------------
     // L4 climb: BRISK. With the arm's 0.2 s release lead the sim runs it hitch-free even at FULL
-    // (1.66 s), but only just - the carriage reaches its 35.5 in clamp as the arm opens it - and a
+    // (1.66 s), but barely - the carriage reaches its 35.5 in clamp as the arm opens it - and a
     // real arm lags its profile; BRISK (1.96 s) has ~0.15 s in hand and never drops below cruise.
     static Pace climbToL4Pace = Pace.BRISK;
     // L3 climb: FULL - the carriage has no clamp to wait at once the roof has opened.
@@ -164,7 +164,7 @@ public class Superstructure {
     /**
      * Wires in "a reef face is right in front of the bumper". Every move into
      * or out of L3 / L4 swings the claw through 75-100 deg, where it reaches
-     * 9-12 in PAST the front bumper (CAD) at the height of the reef's
+     * 9-12 in past the front bumper (CAD) at the height of the reef's
      * branches - so with the robot against the reef that swing goes through
      * them. While this reads true such a move waits, holding both mechanisms
      * where they are, and starts by itself once the robot has backed away.
@@ -310,7 +310,7 @@ public class Superstructure {
     }
 
     /**
-     * Strict form of {@link #armAtMost}, for a gate that is a CLEARANCE
+     * Strict form of {@link #armAtMost}, for a gate that is a clearance
      * limit rather than a "close enough to carry on" check. The tolerant
      * form accepts SAFE_ANGLE_TOLERANCE past the gate, which for the L4
      * pre-top gate (22.5 deg) would mean it opens at 25.5 - an angle at
@@ -370,7 +370,7 @@ public class Superstructure {
      * tolerances be tight: once motion has ceased the closed loops are
      * holding their latched setpoints and waiting longer cannot improve the
      * pose. A short minimum dwell keeps "stopped" from firing before the
-     * mechanisms have started. Intermediate SAFETY gates deliberately do
+     * mechanisms have started. Intermediate safety gates deliberately do
      * not get this treatment.
      */
     private Command settle() {
@@ -384,7 +384,7 @@ public class Superstructure {
 
     /**
      * Highest carriage height that is clear with the arm at the given
-     * MEASURED angle while it swings up toward RAISE (used for the climbing
+     * measured angle while it swings up toward RAISE (used for the climbing
      * head start). No tolerance on the clear angle: the tuck zone is real.
      */
     private static double climbCeiling(double armAngle) {
@@ -406,10 +406,10 @@ public class Superstructure {
     // Continuous carriage targets ("ratchets")
     // ==================================================================
     // The sequences below are safe because every handover waits on
-    // MEASURED state. Parking the carriage at each intermediate height
+    // measured state. Parking the carriage at each intermediate height
     // while the arm works would make every move a stop-start routine. These
     // helpers avoid those stops without touching the handover logic: the
-    // carriage is given the FINAL height every loop, clamped to what the
+    // carriage is given the final height every loop, clamped to what the
     // corridors allow for the angles the arm still has to sweep, so it
     // climbs (or descends) continuously as the arm unlocks travel.
     //
@@ -461,17 +461,17 @@ public class Superstructure {
      * and {@code to} - the angles the arm still has to pass through - so the
      * carriage never climbs into a height the arm is about to block.
      *
-     * FAILS CLOSED. The walk stops at the first angle whose band does not
+     * Fails closed. The walk stops at the first angle whose band does not
      * contain this height. That is legitimate when moving on is what
-     * unlocks that angle - its NEAREST band is ahead of the carriage (the
+     * unlocks that angle - its nearest band is ahead of the carriage (the
      * L4 climb: 20 deg only opens above 35.5 in, ahead of a carriage that
-     * is still climbing toward it). It is NOT legitimate when the arm is
-     * about to ENTER that angle (it is within IMMINENT_SWEEP of where the
-     * arm is now) and the row's nearest band is BEHIND the carriage - it
+     * is still climbing toward it). It is not legitimate when the arm is
+     * about to enter that angle (it is within IMMINENT_SWEEP of where the
+     * arm is now) and the row's nearest band is behind the carriage - it
      * overshot that row's ceiling - or when the current pose is outside
      * the table altogether. Both of those return the current height (hold):
      * "no limit" there would release the carriage exactly when it should
-     * hold. A blocked row far along the sweep is just the end of the walk:
+     * hold. A blocked row far along the sweep is the end of the walk:
      * the arm is gated on the carriage's height before it gets there.
      */
     public static double ceilingForSweep(double from, double to, double height) {
@@ -599,7 +599,7 @@ public class Superstructure {
     }
 
     /**
-     * True if the band of this angle's row NEAREST to {@code height} lies on
+     * True if the band of this angle's row nearest to {@code height} lies on
      * the travel side of it (above when climbing): carrying on is what
      * unlocks that angle. False when the nearest band is behind - the
      * carriage has overshot it - or the row has no band at all.
@@ -630,12 +630,12 @@ public class Superstructure {
     // ------------------------------------------------------------------
     // Carriage setpoint latch
     // ------------------------------------------------------------------
-    // MAXMotion restarts its profile from the MEASURED position and a
+    // MAXMotion restarts its profile from the measured position and a
     // lagged measured velocity every time the setpoint changes. A ratchet
     // that sent max(clamp, measuredHeight) every loop would change the
     // setpoint every 20 ms at a clamp and restart the profile fifty times a
     // second, which shows up as the carriage hunting. The latch sends a new
-    // setpoint only when the clamp has really moved, and holds off small
+    // setpoint only when the clamp has actually moved, and holds off small
     // steps while the carriage is still far from needing them.
 
     /** raiseArm puts the carriage back only if an exit moved it at least this far (never a zero-length move). */
@@ -656,11 +656,11 @@ public class Superstructure {
     /** Below this speed the carriage is waiting on the arm: any real advance is sent, so it keeps moving. */
     private static final double LATCH_CRAWL_SPEED = 3.0;   // in/s
     private static final double LATCH_CRAWL_MIN_STEP = 0.5; // inches
-    /** A clamp that moves BACK by less than this is ignored (arm-angle chatter at a gate). */
+    /** A clamp that moves back by less than this is ignored (arm-angle chatter at a gate). */
     private static final double LATCH_RETREAT_MIN = 0.25; // inches
     /**
-     * A carriage that is past its clamp by no more than this comes BACK to
-     * the clamp; further than that it just stops. Coming back matters: the
+     * A carriage that is past its clamp by no more than this comes back to
+     * the clamp; further than that it stops. Coming back matters: the
      * arm-side clamp only opens a row once the carriage is inside it, so a
      * carriage that arrived half an inch high and held there would leave
      * each mechanism waiting for the other.
@@ -672,7 +672,7 @@ public class Superstructure {
         return stoppingPoint(Pace.FULL);
     }
 
-    /** ...at the acceleration of the pace the stopping setpoint will be SENT with (not the one in force now). */
+    /** ...at the acceleration of the pace the stopping setpoint will be sent with (not the one in force now). */
     private double stoppingPoint(Pace pace) {
         double v = elevator.getVelocity();
         return elevator.getCurrentPosition()
@@ -711,7 +711,7 @@ public class Superstructure {
             return;
         }
         if (Double.isNaN(latch[0])) {
-            // A carriage AT REST does not set off on a short run to a clamp:
+            // A carriage at rest does not set off on a short run to a clamp:
             // it would accelerate, brake for the clamp, and be re-released
             // when the arm opens it - a hitch, for nothing, because the arm is
             // the long pole and the clamp will have opened by the time a
@@ -779,14 +779,14 @@ public class Superstructure {
         // A target the corridor allows is commanded as it is - the scoring
         // poses sit near the top of their band by design, so subtracting a
         // margin from those would leave the carriage permanently low. Only
-        // a target the corridor does NOT allow is clamped, and then it stops
+        // a target the corridor does not allow is clamped, and then it stops
         // a margin short of the limit rather than exactly on it, so the
         // tracking error of a carriage decelerating into its clamp stays
         // inside the corridor.
         return target <= raw ? target : raw - SuperstructureConstants.RATCHET_MARGIN;
     }
 
-    /** Mirror of {@link #climbGoal}: a legal target as it is, an illegal one a margin ABOVE the floor. */
+    /** Mirror of {@link #climbGoal}: a legal target as it is, an illegal one a margin above the floor. */
     private double descentGoal(double target, double armAngle, double armDestination) {
         double raw = sweepFloor(armAngle, armDestination, elevator.getCurrentPosition());
         if (Double.isNaN(raw)) {
@@ -811,11 +811,11 @@ public class Superstructure {
         double[] arrival = {Double.NaN, 0.0};
         return Commands.run(() -> {
             double target = targetSupplier.getAsDouble();
-            // Direction from the last COMMANDED height once there is one, so
+            // Direction from the last commanded height once there is one, so
             // a carriage resting a hair either side of its setpoint does not
-            // flip the ratchet back and forth. A target EQUAL to what is
+            // flip the ratchet back and forth. A target equal to what is
             // already commanded keeps the direction it had: a plain
-            // "target >= reference" would read a finished DESCENT (latch ==
+            // "target >= reference" would read a finished descent (latch ==
             // target) as a climb, and the ratchet would flip direction every
             // loop - alternating "go to 39 in" with "hold where you are"
             // every 20 ms, which shakes the elevator on the L4 exit and
@@ -848,17 +848,17 @@ public class Superstructure {
      * {@code toAngle} on the way between two poses, or NaN when no such
      * height exists and the move has to go round by RAISE.
      *
-     * Two poses whose corridor bands OVERLAP do not need the RAISE
+     * Two poses whose corridor bands overlap do not need the RAISE
      * excursion. L3 (25 deg, clear 30-51 in) and L4 (20 deg, clear
      * 35.5-52.5 in) overlap over 35.5-51 in, so anywhere in there the arm
-     * simply turns the five degrees between them; the general plan would
+     * turns the five degrees between them; the general plan would
      * rotate 75 deg out to RAISE and 80 back to avoid those five.
      *
      * Checked against every ordered pair of operator poses, this is the only
      * pair it changes, and that is geometry rather than luck:
      *   - BASE/L2 to L3/L4 - the low box (up to ~20 in) and the upper
      *     corridor (from ~30 in) do not overlap at any low angle, because
-     *     the middle-stage top tube sits between them. The arm HAS to come
+     *     the middle-stage top tube sits between them. The arm has to come
      *     up to 75-100 deg to cross, so the excursion is the move.
      *   - anything to L1, the algae poses, or from them - those poses are at
      *     or beyond RAISE already, so there is no excursion to remove; the
@@ -882,7 +882,7 @@ public class Superstructure {
                 || toAngle >= SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
             return NO_BAND;
         }
-        // The MEASURED start angle, nudged onto the row that holds this
+        // The measured start angle, nudged onto the row that holds this
         // height: a resting L3 reads 24.x deg, a hair under its own row.
         fromAngle = snapIntoTable(fromAngle, fromHeight);
         double fromLo = bandFloor(fromAngle, fromHeight);
@@ -890,7 +890,7 @@ public class Superstructure {
         if (Double.isNaN(fromLo) || Double.isNaN(toLo)) {
             return NO_BAND; // one of the poses is not in a corridor at all
         }
-        // Both poses in the UPPER corridor, which is what this is for. The
+        // Both poses in the upper corridor, which is what this is for. The
         // 70-75 deg row is one band from the base to 39 in, so a second
         // button press that catches the arm at 72 deg on its way down would
         // otherwise "overlap" the base pose: the transfer would be chosen
@@ -924,7 +924,7 @@ public class Superstructure {
 
     /**
      * Returns a command that moves to the given pose safely and as fast as
-     * the free corridors allow. Deferred so the plan is built from the REAL
+     * the free corridors allow. Deferred so the plan is built from the real
      * mechanism state at the moment the command starts.
      */
     private Command moveTo(PresetHeights height, PivotPresetAngles angle) {
@@ -939,7 +939,7 @@ public class Superstructure {
         double target = Math.max(targetHeight, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
 
         // ---- Moves that never leave the low box need no RAISE excursion ----
-        // "Starts low" means it will STILL be low once it has stopped: a
+        // "Starts low" means it will still be low once it has stopped: a
         // second press can catch the carriage at 15 in climbing at 40 in/s,
         // and that carriage coasts four inches through the low box roof.
         double v0 = elevator.getVelocity();
@@ -953,7 +953,7 @@ public class Superstructure {
                 // box is clear at any angle from ARM_CLEAR_MIN_ANGLE up),
                 // tuck once below the tuck limit. From the base pose this is
                 // (almost) a no-op instead of a 0 -> 100 -> 0 round trip.
-                // A tucked arm ABOVE the tuck limit is a manual-control-only
+                // A tucked arm above the tuck limit is a manual-control-only
                 // state: swing it clear first, in place.
                 Command clearFirst = (!armStartsClear && h0 > SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)
                     ? armTo(SuperstructureConstants.ARM_CLEAR_MIN_ANGLE + TOL)
@@ -967,7 +967,7 @@ public class Superstructure {
                     .andThen(settle());
             }
             // Low pose (L2, L1): arm first if it starts tucked (it only has
-            // to clear ~8 degrees before the carriage may leave the base),
+            // to clear ~8 deg before the carriage may leave the base),
             // then both together.
             return armTo(targetAngle)
                 .andThen(Commands.waitUntil(() -> coral.getPivotAngle()
@@ -993,7 +993,7 @@ public class Superstructure {
             if (targetAngle < SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE) {
                 // Heading for a scoring pose: no higher than the top of the
                 // window the arm is released in. Sending the carriage to the
-                // FINAL height (51.5 in for L4) while the arm comes back to
+                // final height (51.5 in for L4) while the arm comes back to
                 // RAISE would only have the approach bring it all the way
                 // back down into that window: a yo-yo.
                 lowerTo = Math.min(lowerTo,
@@ -1035,13 +1035,13 @@ public class Superstructure {
      * height it still waits for the arm's final gate - the one limit the
      * robot, rather than the table, put there.
      *
-     * The last leg is commanded once the arm has ARRIVED, because a pose
+     * The last leg is commanded once the arm has arrived, because a pose
      * whose band floor is a row boundary (L3 at exactly 25 deg) is only
      * reachable with the arm at its angle; the ratchet alone would hold the
      * carriage at the previous row's floor.
      */
     private Command directTransfer(double startHeight, double rotateAt, double target, double targetAngle) {
-        // The turn starts when the carriage REACHES the turn height from the
+        // The turn starts when the carriage reaches the turn height from the
         // side it started on - not within a window around it. The turn
         // height sits inside the overlap of the two bands with the ratchet
         // margin to spare, but a window around it does not: a symmetric one
@@ -1054,7 +1054,7 @@ public class Superstructure {
         // never open it (the gate has no timeout), and even when it did
         // open the carriage would have stopped first. Instead the carriage
         // travels toward the real target behind the ratchet from the first
-        // loop, and the turn height is only the threshold the ARM waits for
+        // loop, and the turn height is only the threshold the arm waits for
         // as the carriage goes past.
         Command reachTurn = rotateAt >= startHeight
             ? Commands.waitUntil(() -> heightAtLeast(rotateAt))
@@ -1066,14 +1066,14 @@ public class Superstructure {
         // The arm turns under the arm-side clamp like every other sweep,
         // rather than being sent straight to the target once the gate opens:
         // a second press that catches the carriage just under 48 in on its
-        // way UP opens the gate at once, and an unclamped arm would leave
+        // way up opens the gate at once, and an unclamped arm would leave
         // the L4 angle while the carriage coasts on to 50 in. Covered by
         // SuperstructureSequenceSimTest.secondButtonMidMove.
         Command armWork = reachTurn
             .andThen(armWithCarriage(targetAngle, () -> Double.NaN));
         return Commands.deadline(armWork, travelWithArm(carriageTarget, () -> targetAngle))
             // Last leg once the arm has arrived (see above) - but never past
-            // the pre-top height unless the arm is really inside its gate.
+            // the pre-top height unless the arm is actually inside its gate.
             .andThen(Commands.either(elevatorTo(target), Commands.none(),
                 () -> !gated || armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)))
             .andThen(settle());
@@ -1082,16 +1082,16 @@ public class Superstructure {
     // ==================================================================
     // Arm-side clamp ("the other half of the ratchet")
     // ==================================================================
-    // The carriage is clamped by where the ARM is (ceilingForSweep /
-    // floorForSweep). An arm that was merely GATED - parked at RAISE until
+    // The carriage is clamped by where the arm is (ceilingForSweep /
+    // floorForSweep). An arm that was merely gated - parked at RAISE until
     // the carriage reached a window where its whole sweep was clear at once
     // (31-36 in) - would have the carriage arrive at its 35.5 in clamp with
     // the arm barely moving and stop there, and would make the L3 rotation
     // wait for the carriage to finish. So the arm is clamped by where the
-    // CARRIAGE is - the mirror image, one walk of the same table per loop:
-    // it can start as soon as its first rows are clear and is simply held at
+    // carriage is - the mirror image, one walk of the same table per loop:
+    // it can start as soon as its first rows are clear and is held at
     // the edge of any row the carriage has not opened yet. Each mechanism is
-    // limited by the other's MEASURED position, so the pair stays inside the
+    // limited by the other's measured position, so the pair stays inside the
     // corridors at any relative speed, including one of them stalling.
 
     private static int rowIndex(double angle) {
@@ -1134,7 +1134,7 @@ public class Superstructure {
         if (from < 0 || to < 0 || !rowHolds(rows[from], height, 0.0, 0.0)) {
             return angle;
         }
-        // A rule measured on the ROBOT, which the table does not contain:
+        // A rule measured on the robot, which the table does not contain:
         // above the pre-top height the arm stays inside the final gate angle
         // (the table says 25 deg is clear to 51 in; on the robot the claw
         // meets the top bar at 25 deg above 48 in). The carriage side
@@ -1152,10 +1152,10 @@ public class Superstructure {
         int step = to < from ? -1 : 1;
         for (int j = from; j != to;) {
             j += step;
-            // Sweeping UP (leaving L4) the arm runs INTO the ceilings - the
+            // Sweeping up (leaving L4) the arm runs into the ceilings - the
             // claw's rear against the middle-stage top tube - which is where
             // the table has proved optimistic, so it keeps a real margin under
-            // them. Sweeping DOWN it runs away from them, and the margin must
+            // them. Sweeping down it runs away from them, and the margin must
             // stay inside the carriage's own (RATCHET_MARGIN) or the two
             // clamps would wait on each other.
             // (Rows above the L4 gate angle only: the L4 pose itself sits an
@@ -1194,7 +1194,7 @@ public class Superstructure {
         double[] finalSince = {Double.NaN};
         return Commands.run(() -> {
             double angle = coral.getPivotAngle();
-            // Where the carriage is AND where it comes to rest: a carriage
+            // Where the carriage is and where it comes to rest: a carriage
             // still coasting upward is about to be somewhere else, and the
             // arm must be legal there too. The tighter of the two.
             double here = armLimitForHeight(angle, targetAngle, elevator.getCurrentPosition());
@@ -1233,7 +1233,7 @@ public class Superstructure {
      * The window is measured on the through bore while the loop closes on
      * the rotor, so with chain slack the arm can rest a degree or two
      * outside it for good - and a wait on the window alone would then park
-     * BOTH mechanisms for the whole 3 s timeout. Once the arm has stopped,
+     * both mechanisms for the whole 3 s timeout. Once the arm has stopped,
      * waiting longer cannot improve the angle.
      */
     private Command armArrived() {
@@ -1285,7 +1285,7 @@ public class Superstructure {
         }
         if (h0 > SuperstructureConstants.LOW_BOX_ROOF) {
             // Arm between the band-pass and safe-travel angles above the low
-            // box (e.g. 90 deg at 38 in after manual control): rotating on
+            // box (e.g., 90 deg at 38 in after manual control): rotating on
             // toward RAISE moves the claw's rear away from the tube. The
             // carriage travels toward the target underneath it rather than
             // waiting, clamped to what the arm's measured angle allows.
@@ -1296,7 +1296,7 @@ public class Superstructure {
         }
 
         // In the low box. Swing to RAISE, and travel toward the target the
-        // whole time: up as far as the arm's MEASURED angle allows,
+        // whole time: up as far as the arm's measured angle allows,
         // re-evaluated every loop so the ceiling ratchets up as the arm
         // swings (tuck limit -> low box roof -> mid corridor -> anything),
         // or down behind the falling floor. The setpoint latch keeps the
@@ -1334,7 +1334,7 @@ public class Superstructure {
         // the descent are one motion rather than two.
         Command armWork = armTo(SAFE_ANGLE)
             .andThen(Commands.waitUntil(() -> armAtLeast(release)));
-        // Once band A is cleared the carriage heads for the REAL target, up
+        // Once band A is cleared the carriage heads for the real target, up
         // or down - never for the hard stop regardless, or a move up from L3
         // (and raiseArm / holdAlgae) would dive toward the base first.
         return Commands.deadline(armWork,
@@ -1360,7 +1360,7 @@ public class Superstructure {
         // drop height until the arm has passed 40 deg, the station until it
         // has passed 75, then the real target). One continuous drop instead
         // of drop-rotate-drop.
-        // The arm heads for RAISE in ONE go, clamped every loop by the
+        // The arm heads for RAISE in one go, clamped every loop by the
         // carriage's height (45-50 deg is open at 43 in, 70 at 39, RAISE
         // below 35). Staging it at 45 deg first would put a velocity trough
         // in the middle of the swing, and a second leg sent on from there
@@ -1372,7 +1372,7 @@ public class Superstructure {
         // only once the arm has cleared band A.
         // One command owns the carriage for the whole exit, so there is no
         // loop in which it sits on a stale setpoint between steps. Below the
-        // station it heads for the REAL target, not the hard stop (the next
+        // station it heads for the real target, not the hard stop (the next
         // pose may be above).
         Command gatedArmWork = Commands.waitUntil(
                 () -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT))
@@ -1380,7 +1380,7 @@ public class Superstructure {
         return Commands.deadline(gatedArmWork,
             travelWithArm(() -> {
                 if (armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)) {
-                    // Band A cleared: on DOWN to the target. A target ABOVE the
+                    // Band A cleared: on down to the target. A target above the
                     // station waits there until the arm is at RAISE (the approach
                     // takes it up): climbing toward a ceiling while the arm is still
                     // sweeping up under its own, larger, margin to the same ceiling
@@ -1423,7 +1423,7 @@ public class Superstructure {
                 .andThen(armTo(targetAngle))
                 .andThen(settle());
         }
-        // Free-zone target (RAISE .. stage angle, e.g. L1, algae score): together
+        // Free-zone target (RAISE .. stage angle, e.g., L1, algae score): together
         if (targetAngle >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE
                 && targetAngle <= SuperstructureConstants.HIGH_ANGLE_STAGE) {
             return both(targetHeight, targetAngle).andThen(settle());
@@ -1453,8 +1453,8 @@ public class Superstructure {
         // coming from above, drops into the window) and sweeps to the scoring
         // angle under the arm-side clamp, which holds it at the edge of any
         // row the carriage has not opened yet - it does not wait for a height
-        // where the WHOLE sweep is clear at once.
-        // Released with a LEAD: the arm takes ~0.2 s to move its first few
+        // where the whole sweep is clear at once.
+        // Released with a lead: the arm takes ~0.2 s to move its first few
         // degrees, so it is let go that long before the carriage will reach
         // the release height - and until the carriage is actually there, the
         // clamp below holds it at ARM_EARLY_HOLD_ANGLE, a few degrees off
@@ -1493,7 +1493,7 @@ public class Superstructure {
                     : heightAtLeast(SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT)
                         ? Double.NaN : SuperstructureConstants.L4_STAGE_ANGLE,
                 committed));
-        // The last few inches still wait for the arm to REACH the scoring
+        // The last few inches still wait for the arm to reach the scoring
         // angle. The corridor table says 25 deg is clear to 51 in, but the
         // robot says otherwise up there - the claw meets the top bar if the
         // carriage climbs past the pre-top height with the arm still at
@@ -1501,20 +1501,20 @@ public class Superstructure {
         // is inside its final gate. Everything below that is continuous.
         //
         // The carriage is not parked at the 33 in station and re-released
-        // from there (that would be a stop, then a retarget BACKWARDS to the
+        // from there (that would be a stop, then a retarget backwards to the
         // ratchet's first clamp). One ratchet owns it from the first loop:
         // it climbs straight to the clamp the arm's sweep allows (35.5 in
         // while the arm is at RAISE), the arm is released as the carriage
         // passes the release height, and the clamp opens as the arm comes
         // down - the earlier the release, the less the carriage has to slow
-        // for that first clamp. Only a carriage that starts ABOVE the
+        // for that first clamp. Only a carriage that starts above the
         // release window comes down into it first.
         return Commands.deadline(armWork,
                 travelWithArm(() -> {
                     if (!released[0]) {
                         // Arm still parked at RAISE: head for the top of the
                         // release window, from below or from above. (A carriage
-                        // coming DOWN into the window stops there rather than going
+                        // coming down into the window stops there rather than going
                         // on to the 33 in station and climbing back the 2.5 in;
                         // the arm is released as it arrives.)
                         return SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT - SuperstructureConstants.RATCHET_MARGIN;
@@ -1522,23 +1522,23 @@ public class Superstructure {
                     return armStrictlyAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
                         ? targetHeight : SuperstructureConstants.L4_PRE_TOP_HEIGHT;
                 },
-                // Until the release the arm is PARKED at RAISE, not sweeping.
+                // Until the release the arm is parked at RAISE, not sweeping.
                 // Clamping the carriage for a sweep that has not started is
-                // wrong below 17.5 in, where every row's LOW band holds the
+                // wrong below 17.5 in, where every row's low band holds the
                 // carriage and the sweep's ceiling is the low-box roof: a
                 // carriage that is still down there when the arm reaches
                 // RAISE (a slow elevator, or L2 -> L4) would stop at 17 in
                 // while the arm waits for it to reach the release height.
                 // Covered by SuperstructureClampSimTest.
-                // ...and from the release on, for the sweep the arm is COMMITTED
+                // ...and from the release on, for the sweep the arm is committed
                 // to - the limit it has actually been sent to - plus a
                 // lookahead, not the whole sweep to the scoring angle. With
                 // the early release the carriage can still be at 17 in, where
                 // walking all the way to the scoring angle finds every row's
-                // LOW band and pulls the carriage back to the low-box roof.
+                // low band and pulls the carriage back to the low-box roof.
                 // The lookahead is what keeps the two clamps from waiting on
                 // each other: the carriage must already respect the rows the
-                // arm is ABOUT to be allowed into, or it parks half an inch
+                // arm is about to be allowed into, or it parks half an inch
                 // above the height that would open them.
                 () -> released[0]
                     ? Math.max(targetAngle, committed[0] - SuperstructureConstants.ARM_COMMIT_LOOKAHEAD)
@@ -1570,10 +1570,10 @@ public class Superstructure {
             // The staged exits move the carriage (L4 drops to its station);
             // at RAISE every height is clear, so put it back where it was.
             double stay = elevator.getCurrentPosition();
-            // ...but ONLY if an exit actually moved it. From every other pose
+            // ...but only if an exit actually moved it. From every other pose
             // (the algae intakes above all - this is the algae hold) the
             // carriage never leaves its setpoint, and re-commanding it to its
-            // own MEASURED height would ask the Spark MAX for a zero-length
+            // own measured height would ask the Spark MAX for a zero-length
             // MAXMotion profile - something no other pose ever requests
             // (every other pose is a real move to a preset), and which can
             // leave the elevator rumbling in place. The carriage keeps the
@@ -1601,7 +1601,7 @@ public class Superstructure {
     /**
      * Roller-only intake at the current pose: run until the CANrange
      * confirms a game piece, then stop. Skipped if a piece is already held.
-     * Autos put a timeout on THIS (after their own stow) - a timeout
+     * Autos put a timeout on this (after their own stow) - a timeout
      * around the whole intakeCoral would race the stow's settle timeout and
      * could expire before the rollers ever start.
      */
@@ -1610,8 +1610,8 @@ public class Superstructure {
             Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.CORAL_INTAKE_SPEED), coral),
             Commands.waitUntil(coral::isGamePieceDetected),
             // Explicit stop: the subsystem's auto-stop only fires on the
-            // RISING edge of detection - if the coral was already latched
-            // by the time the rollers started (e.g. it arrived during the
+            // rising edge of detection - if the coral was already latched
+            // by the time the rollers started (e.g., it arrived during the
             // stow phase), no edge ever comes and the rollers would run
             // forever without this.
             Commands.runOnce(coral::stopIntake, coral)
@@ -1619,25 +1619,25 @@ public class Superstructure {
             .unless(coral::isGamePieceDetected);
     }
 
-    /** Moves to the L1 scoring pose (base height, 100 degrees). */
+    /** Moves to the L1 scoring pose (base height, 100 deg). */
     public Command goToCoralL1() {
         return setGoal(Goal.CORAL_L1)
             .andThen(moveTo(PresetHeights.CORAL_L1, PivotPresetAngles.CORAL_L1));
     }
 
-    /** Moves to the L2 scoring pose (12 in, 12.5 degrees). */
+    /** Moves to the L2 scoring pose (12 in, 12.5 deg). */
     public Command goToCoralL2() {
         return setGoal(Goal.CORAL_L2)
             .andThen(moveTo(PresetHeights.CORAL_L2, PivotPresetAngles.CORAL_L2));
     }
 
-    /** Moves to the L3 scoring pose (30.5 in, 25 degrees): climb at RAISE, arm released as the carriage passes 24 in. */
+    /** Moves to the L3 scoring pose (30.5 in, 25 deg): climb at RAISE, arm released as the carriage passes 24 in. */
     public Command goToCoralL3() {
         return setGoal(Goal.CORAL_L3)
             .andThen(moveTo(PresetHeights.CORAL_L3, PivotPresetAngles.CORAL_L3));
     }
 
-    /** Moves to the L4 scoring pose (51.5 in, 20 degrees): arm released as the carriage passes 24 in, pre-top gated. */
+    /** Moves to the L4 scoring pose (51.5 in, 20 deg): arm released as the carriage passes 24 in, pre-top gated. */
     public Command goToCoralL4() {
         return setGoal(Goal.CORAL_L4)
             .andThen(moveTo(PresetHeights.CORAL_L4, PivotPresetAngles.CORAL_L4));
@@ -1645,7 +1645,7 @@ public class Superstructure {
 
     /**
      * The roller duty that releases what is held at the given goal. L2 - L4
-     * push the coral on THROUGH the claw (the intake's direction, faster);
+     * push the coral on through the claw (the intake's direction, faster);
      * L1 sends it back out the way it came in, so its sign is the opposite
      * of both the intake's and the other levels'. Algae leave the way the
      * L2 - L4 coral do.
@@ -1685,7 +1685,7 @@ public class Superstructure {
     // Algae
     // ==================================================================
 
-    /** Moves to the low algae intake pose (20.5 in, 160 degrees) and runs the rollers inward. */
+    /** Moves to the low algae intake pose (20.5 in, 160 deg) and runs the rollers inward. */
     public Command intakeAlgaeLow() {
         return setGoal(Goal.ALGAE_LOW)
             .andThen(Commands.runOnce(() -> algaeHeld = true))
@@ -1693,7 +1693,7 @@ public class Superstructure {
             .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), coral));
     }
 
-    /** Moves to the high algae intake pose (37.5 in, 160 degrees) and runs the rollers inward. */
+    /** Moves to the high algae intake pose (37.5 in, 160 deg) and runs the rollers inward. */
     public Command intakeAlgaeHigh() {
         return setGoal(Goal.ALGAE_HIGH)
             .andThen(Commands.runOnce(() -> algaeHeld = true))
@@ -1703,7 +1703,7 @@ public class Superstructure {
 
     /**
      * Holds an algae: light inward roller pressure and the arm at the hold
-     * angle (RAISE = 100 degrees, the safe travel angle, so the elevator
+     * angle (RAISE = 100 deg, the safe travel angle, so the elevator
      * stays free to move anywhere). The elevator is left where it is.
      */
     public Command holdAlgae() {
@@ -1715,7 +1715,7 @@ public class Superstructure {
     }
 
     /**
-     * Moves to the algae scoring pose (52 in, 105 degrees), ejects for
+     * Moves to the algae scoring pose (52 in, 105 deg), ejects for
      * half a second, then stops the rollers (mirroring ejectCoral - without
      * the stop they would spin at 50% duty until another roller command).
      * A one-shot for autos or custom bindings; the operator's barge flow is
@@ -1737,7 +1737,7 @@ public class Superstructure {
     // Operator workflow: gated score, auto-home, manual take-over
     // ==================================================================
 
-    /** How close to the preset the MEASURED pose must be before a score is released. */
+    /** How close to the preset the measured pose must be before a score is released. */
     private static final double SCORE_READY_HEIGHT_TOL = 0.75;   // in
     private static final double SCORE_READY_ANGLE_TOL = 3.0;     // deg
     /**
@@ -1793,9 +1793,9 @@ public class Superstructure {
     }
 
     /**
-     * True when the mechanisms are MEASURED at the last commanded scoring
+     * True when the mechanisms are measured at the last commanded scoring
      * pose and have stopped. This is the gate on the score trigger: an early
-     * pull simply waits for it, so it can never interrupt a staged move.
+     * pull waits for it, so it can never interrupt a staged move.
      */
     public boolean readyToScore() {
         double[] preset = scoringPreset(currentGoal);
@@ -1824,7 +1824,7 @@ public class Superstructure {
      * Releases the game piece at the current scoring pose, then goes home by
      * itself. Bind it behind {@link #readyToScore()}.
      *   - Coral: rollers out for at least 0.5 s and until the CANrange says
-     *     the coral has left (capped at 1.5 s). If it is STILL detected the
+     *     the coral has left (capped at 1.5 s). If it is still detected the
      *     command ends without stowing, so the pose is kept for a second try.
      *   - L3 / L4: the exit waits until the drivetrain has backed away
      *     REEF_BACKOFF_METERS from where it ejected (see the constant).
@@ -1861,7 +1861,7 @@ public class Superstructure {
     /**
      * For autos: stow once the drivetrain has moved REEF_BACKOFF_METERS from
      * where this command started. Leaving L3 / L4 swings the claw 9-12 in
-     * past the front bumper, so a stow IN PLACE against the reef swings it
+     * past the front bumper, so a stow in place against the reef swings it
      * into the reef; run this alongside the departing path instead (an
      * event marker at its start, or a parallel group).
      */
@@ -1927,7 +1927,7 @@ public class Superstructure {
                 if (Math.abs(speed) > ElevatorConstants.ELEVATOR_MANUAL_CONTROL_DEADBAND) {
                     elevator.manualControl(speed);
                 } else if (elevator.isInManualMode()) {
-                    // Stick released: hold where the carriage can actually STOP.
+                    // Stick released: hold where the carriage can actually stop.
                     // "Hold the measured height" hands the profile a target that
                     // is already behind a moving carriage - it overshoots and
                     // drives back, a bounce at the end of every jog.
@@ -1944,7 +1944,7 @@ public class Superstructure {
     }
 
     /**
-     * Rollers at a fixed duty while held, at ANY pose. Deliberately has no
+     * Rollers at a fixed duty while held, at any pose. Deliberately has no
      * subsystem requirement so it can run inside the manual take-over
      * without cancelling it.
      */
@@ -1958,11 +1958,11 @@ public class Superstructure {
     // ==================================================================
     // Independent mechanism testing (Elastic Testing tab)
     // ==================================================================
-    // These commands move ONE mechanism and leave the other exactly where
+    // These commands move one mechanism and leave the other exactly where
     // it is, so each can be tuned and exercised on its own from the
     // dashboard. They consult the same CAD corridors as the planner - but
     // instead of moving the other mechanism out of the way, an unsafe
-    // request is simply REFUSED with a dashboard notification explaining
+    // request is refused with a dashboard notification explaining
     // why. Every command requires only the mechanism it moves, so a test
     // of one never interrupts a test of the other.
 

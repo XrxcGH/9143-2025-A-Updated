@@ -5,7 +5,7 @@ import edu.wpi.first.wpilibj2.command.Subsystem;
 /**
  * What the Superstructure needs from the CorAl (pivot + rollers) - see
  * {@link CarriageAxis} for why this is an interface. Angles in degrees as
- * MEASURED on the real arm (the through bore), velocity in degrees per second.
+ * measured on the real arm (the through bore), velocity in degrees per second.
  */
 public interface ArmAxis extends Subsystem {
     double getPivotAngle();
@@ -34,7 +34,7 @@ public interface ArmAxis extends Subsystem {
 
     void setIntakeSpeed(double dutyCycle);
 
-    /** Runs the rollers to RELEASE a piece: as setIntakeSpeed, but never stopped by the arrival auto-stop. */
+    /** Runs the rollers to release a piece: as setIntakeSpeed, but never stopped by the arrival auto-stop. */
     void ejectRollers(double dutyCycle);
 
     void stopIntake();

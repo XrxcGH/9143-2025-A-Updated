@@ -15,10 +15,10 @@ indices in `Constants.LoggingConstants`:
 `config.json` holds the model name ("Leviathan - 9143A"), the glTF-to-field
 rotation and each component's zeroed position / rotation.
 
-**The `.glb` files are not in the repository** - the robot's CAD is not
+The `.glb` files are not in the repository: the robot's CAD is not
 distributed, and `.glb` / `.step` files under `advantageScopeAssets` are
 git-ignored. Export the four parts above from the CAD as glTF binaries (for
-example STEP -> glTF with CAD Assistant or Blender), name them as in the
+example STEP to glTF with CAD Assistant or Blender), name them as in the
 table and put them in this folder.
 
 To use the model, point AdvantageScope at the parent `advantageScopeAssets`

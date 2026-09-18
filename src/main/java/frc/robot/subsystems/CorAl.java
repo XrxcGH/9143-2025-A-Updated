@@ -40,7 +40,7 @@ import frc.robot.util.Tunables;
  * - The TalonFX rotor sensor is scaled by the pivot gear ratio, so the motor's
  *   position feedback is in mechanism rotations (degrees = rotations * 360).
  * - The REV Through Bore encoder is the absolute reference. The motor sensor
- *   is seeded from it at startup and re-synced whenever the arm is NOT in the
+ *   is seeded from it at startup and re-synced whenever the arm is not in the
  *   middle of a closed-loop move (re-seeding mid-move shifts the reference
  *   frame and makes the arm land off target).
  * - Motion Magic runs the profile on the motor controller and holds the angle
@@ -55,18 +55,18 @@ import frc.robot.util.Tunables;
  * class, which owns every NetworkTables/Elastic publication for the robot.
  */
 public class CorAl extends SubsystemBase implements ArmAxis {
-    // Hardware Components
+    // Hardware components
     private final TalonFX pivotMotor;             // Motor controlling the pivot mechanism
     private final TalonFX intakeMotor;            // Motor controlling the intake rollers
     private final DigitalInput throughBoreInput;  // Input for the through bore encoder
     private final DutyCycle throughBore;          // Duty cycle reader for the through bore encoder
     private final CANrange canRangeSensor;        // Distance sensor for game piece detection
 
-    // Motor Control Objects (created once and reused)
+    // Motor control objects (created once and reused)
     private final MotionMagicVoltage positionRequest = new MotionMagicVoltage(0).withSlot(0);
     private final DutyCycleOut percentRequest = new DutyCycleOut(0);
 
-    // Game Piece Detection
+    // Game piece detection
     // Both edges are debounced: a detection must persist to count as a
     // coral, and a loss must persist to count as gone, so a chattering
     // proximity bit cannot latch either way.
@@ -81,17 +81,17 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     // Applied CANrange detection tunables (re-applied while disabled; see periodic())
     private double appliedDetectThreshold;
     private double appliedDetectHysteresis;
-    /** True = a piece reads CLOSER than the threshold; false = FARTHER. */
+    /** True = a piece reads closer than the threshold; false = farther. */
     private boolean appliedDetectWhenCloser;
     /** Minimum return strength for a measurement to count at all. */
     private double appliedMinSignalStrength;
     /** Master switch: false reports "nothing held" whatever the sensor says. */
     private boolean appliedDetectionEnabled;
     private double commandedIntakeSpeed = 0; // Last commanded roller speed (+ = coral intake direction)
-    /** True while the rollers were started to take a coral IN: a confirmed arrival stops them (see periodic). */
+    /** True while the rollers were started to take a coral in: a confirmed arrival stops them (see periodic). */
     private boolean arrivalStopArmed = false;
 
-    // Position Tracking
+    // Position tracking
     private double currentTargetAngle = 0;         // Current target angle for position control (degrees)
     private boolean positionControlActive = false; // True while holding/moving to a closed-loop target
     private boolean manualControlActive = false;   // True while the operator stick is deflected
@@ -105,7 +105,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     private double landingReferenceAngle = 0.0;
 
     // ------------------------------------------------------------------
-    // The through bore is an ABSOLUTE encoder and is used as one. Taking
+    // The through bore is an absolute encoder and is used as one. Taking
     // "wherever the arm is now" as zero at every code start would mean a
     // restart with the arm raised (a brownout, a code crash, a redeploy
     // mid-practice) shifts every Superstructure gate and both soft limits
@@ -141,7 +141,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     // Desktop simulation (only constructed when running off-robot). The
     // physics model exists purely so the mechanism moves in the sim GUI /
     // AdvantageScope; the values below affect simulation fidelity only.
-    // Gravity is NOT simulated: SingleJointedArmSim takes 0 rad as
+    // Gravity is not simulated: SingleJointedArmSim takes 0 rad as
     // horizontal, which this arm's zero is not, and the real config ships
     // with kG = 0 until it has been measured (CORAL_PIVOT_kG). Enable
     // simulated gravity, with the angle frame shifted by the balance angle,
@@ -352,9 +352,9 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      * Runs the pivot's profile at a fraction of its tuned speed, so a sweep
      * that would finish long before the carriage gets there can take its
      * time instead (the Superstructure paces the two mechanisms to travel
-     * together). Only the Motion Magic group is sent, with a ZERO timeout -
+     * together). Only the Motion Magic group is sent, with a zero timeout -
      * fire and forget, this runs on the main loop - and only when the scale
-     * actually changes. If the write were ever lost the arm would simply run
+     * actually changes. If the write were ever lost the arm would run
      * the previous profile: smoothness, not safety - the clearance clamps
      * read measured positions.
      */
@@ -391,7 +391,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         config.FovParams.FOVRangeX = CorAlConstants.GAME_PIECE_FOV_DEGREES;
         config.FovParams.FOVRangeY = CorAlConstants.GAME_PIECE_FOV_DEGREES;
         // Short-range mode at 100 Hz: the coral sits centimeters away, and
-        // short range is the more robust mode at that distance.
+        // short range is the more reliable mode at that distance.
         config.ToFParams.UpdateMode = UpdateModeValue.ShortRange100Hz;
         sensor.getConfigurator().apply(config);
     }
@@ -454,13 +454,13 @@ public class CorAl extends SubsystemBase implements ArmAxis {
 
         // Seed the motor sensor from the absolute encoder before starting the
         // move, so the profile targets the true mechanism angle with no
-        // residual offset - but ONLY from rest. The Superstructure retargets
+        // residual offset - but only from rest. The Superstructure retargets
         // the arm mid-sweep (45 -> 100, 27.5 -> 20) at up to 300 deg/s, and
         // a seed taken there is stale by the DIO + CAN latency: 300 deg/s x
         // ~10 ms = 3 deg of step in the closed loop's feedback, in the
         // direction of travel, on top of the chain slack that separates the
         // two sensors under load - the arm visibly jumps. Zero timeout: the
-        // default setPosition overload BLOCKS the main loop waiting for the
+        // default setPosition overload blocks the main loop waiting for the
         // device ack (up to 100 ms).
         if (isThroughBoreConnected()
                 && Math.abs(getPivotVelocity()) <= CorAlConstants.PIVOT_RESEED_MAX_VELOCITY) {
@@ -474,7 +474,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      * Landing correction: see PIVOT_LANDING_* in CorAlConstants. The rotor is
      * where it was told to be and the real arm, through the chain's slack, is
      * not - re-seed the rotor from the through bore and re-issue the same
-     * target, so the closed loop drives the REAL arm onto it.
+     * target, so the closed loop drives the real arm onto it.
      */
     private void correctLanding() {
         if (!positionControlActive || !DriverStation.isEnabled() || !isThroughBoreConnected()) {
@@ -482,7 +482,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
             return;
         }
         double actual = getThroughBoreAngle();
-        // "Still" means the rotor AND the real arm: while the carriage is
+        // "Still" means the rotor and the real arm: while the carriage is
         // accelerating the arm swings in its chain slack with the rotor dead
         // still, and a correction taken off a swinging reading is a twitch.
         if (Math.abs(getPivotVelocity()) > CorAlConstants.PIVOT_LANDING_STILL_DEG_S
@@ -495,7 +495,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
                 || landingCorrections >= CorAlConstants.PIVOT_LANDING_MAX_CORRECTIONS) {
             return;
         }
-        // Not against either end of travel: at 0 deg the arm is ON its hard
+        // Not against either end of travel: at 0 deg the arm is on its hard
         // stop and at the forward soft limit the controller will not push
         // further, so a "correction" there only winds the rotor into the stop.
         if (currentTargetAngle < CorAlConstants.CORAL_PIVOT_MIN_ANGLE + CorAlConstants.PIVOT_LANDING_END_ZONE_DEG
@@ -554,7 +554,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     }
 
     /**
-     * Runs the rollers to release a piece. The L2 - L4 coral eject and the
+     * Runs the rollers to release a piece. The L2-L4 coral eject and the
      * algae eject run in the coral-intake direction, so without this the
      * arrival auto-stop in periodic() would cut an eject short if the
      * CANrange confirmed a detection part-way through it.
@@ -588,8 +588,8 @@ public class CorAl extends SubsystemBase implements ArmAxis {
             double speed = stickInput * CorAlConstants.CORAL_MANUAL_SPEED_LIMIT;
             pivotMotor.setControl(percentRequest.withOutput(speed));
         } else if (manualControlActive) {
-            // Stick just released - hold where the arm can actually STOP, in
-            // the ROTOR's frame (the one the loop closes in; the two sensors
+            // Stick just released - hold where the arm can actually stop, in
+            // the rotor's frame (the one the loop closes in; the two sensors
             // differ by the chain slack and are not re-synced during manual
             // control). Holding the measured angle instead would hand Motion
             // Magic a target already behind a moving arm: it overshoots and
@@ -679,7 +679,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      */
     public boolean isMotorFeedbackValid() {
         if (!isThroughBoreConnected()) {
-            return true; // Assume valid if the Through Bore Encoder is disconnected
+            return true; // Assume valid if the through bore encoder is disconnected
         }
         double discrepancy = Math.abs(getMotorAngle() - getThroughBoreAngle());
         return discrepancy <= CorAlConstants.THROUGH_BORE_ALLOWED_DISCREPANCY;
@@ -697,14 +697,14 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      *
      * The CANrange's own proximity bit is fixed to "distance below the
      * threshold". That is only the right question when a game piece is the
-     * NEAREST thing the sensor can see; if the sensor looks across an empty
-     * claw at structure a few centimetres away, an empty claw reads closer
+     * nearest thing the sensor can see; if the sensor looks across an empty
+     * claw at structure a few centimeters away, an empty claw reads closer
      * than the threshold and the bit is stuck on - "detected" with nothing in
      * the claw. So the verdict is formed here instead, with the polarity as
      * a tunable:
      *
-     *   detect-when-closer  : a piece is CLOSER than the threshold
-     *   detect-when-farther : a piece is FARTHER than the threshold (it
+     *   detect-when-closer  : a piece is closer than the threshold
+     *   detect-when-farther : a piece is farther than the threshold (it
      *                         pushes the reflection away, or blocks a near
      *                         return the empty claw shows)
      *
@@ -853,7 +853,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     @Override
     public void periodic() {
         // Game piece detection: see readDetection() - the verdict is formed
-        // from the measured DISTANCE here rather than from the sensor's own
+        // from the measured distance here rather than from the sensor's own
         // proximity bit, because that bit can only mean "closer than the
         // threshold" and which side of the threshold a coral puts the
         // reading on depends on where the sensor looks. Then debounced on
@@ -871,8 +871,8 @@ public class CorAl extends SubsystemBase implements ArmAxis {
 
         // Absolute zero: once per start, as soon as the encoder is reporting,
         // while disabled (never move the frame under a live setpoint) - or,
-        // when the code comes up ALREADY ENABLED (a restart mid-match, the
-        // very case the stored zero exists for), as long as nothing is
+        // when the code comes up already enabled (a restart mid-match, the
+        // case the stored zero exists for), as long as nothing is
         // closed-loop on the frame yet.
         if (!bootReferenceResolved && isThroughBoreConnected()
                 && (DriverStation.isDisabled() || (!positionControlActive && !manualControlActive))) {
@@ -889,7 +889,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         }
 
         // Re-apply an edited Motion Magic profile or gravity feedforward
-        // (Testing-tab tunables) only while DISABLED - a config apply
+        // (Testing-tab tunables) only while disabled - a config apply
         // mid-move would stutter the arm - polled twice a second. Only the
         // MotionMagic group is sent, plus Slot 0 when kG or the balance
         // angle changed, so limits and the sensor ratio are untouched.

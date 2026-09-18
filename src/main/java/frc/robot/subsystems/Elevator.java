@@ -28,7 +28,7 @@ import frc.robot.util.Tunables;
 /**
  * Elevator subsystem driven by two NEO brushless motors on Spark MAX
  * controllers, each through a 15:1 MAXPlanetary reduction (5:1 x 3:1
- * cartridges) and a 90-degree gearbox to the 22T sprocket shaft.
+ * cartridges) and a 90 deg gearbox to the 22T sprocket shaft.
  *
  * Control architecture:
  *  - The left Spark MAX is the leader; the right is configured as a hardware
@@ -39,9 +39,9 @@ import frc.robot.util.Tunables;
  *    The inches-per-rotation figure is the gearing model times the
  *    "Elevator - Travel Ratio" tunable (confirmed 1.0 on the robot).
  *  - Heights are in the preset frame: top of the base-stage 2x1 to the
- *    bottom of the carriage 2x1. On its hard stop the carriage sits ABOVE
+ *    bottom of the carriage 2x1. On its hard stop the carriage sits above
  *    that reference by "Elevator - Height At Hard Stop" (1.000 in, the
- *    middle-stage tube), so the encoder is zeroed TO that value, not to 0,
+ *    middle-stage tube), so the encoder is zeroed to that value, not to 0,
  *    and the reverse soft limit sits there (README: "Calibrating the
  *    elevator height").
  *  - Height moves use MAXMotion (trapezoidal profiling on the controller)
@@ -88,7 +88,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     // applied to the controllers. See periodic().
     // ------------------------------------------------------------------
     private double appliedTravelRatio;
-    /** Height (preset frame, inches) of the carriage on its hard stop; the encoder is zeroed TO this. */
+    /** Height (preset frame, inches) of the carriage on its hard stop; the encoder is zeroed to this. */
     private double appliedZeroHeight;
     private double appliedKp;
     private double appliedKs;
@@ -100,7 +100,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     private double appliedProfileError;
     /** True while an edited travel ratio / hard-stop height is waiting for the carriage to be at its base. */
     private boolean travelRatioChangePending = false;
-    /** New setpoints sent to the controller since boot (a diagnostic: it must NOT climb while the carriage is just holding). */
+    /** New setpoints sent to the controller since boot (a diagnostic: it must not climb while the carriage is holding still). */
     private int setpointCount = 0;
     /** Filtered applied volts at steady cruise, up and down (NaN until seen); see sampleCruiseVolts(). */
     private double cruiseVoltsUp = Double.NaN;
@@ -139,7 +139,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
 
         if (RobotBase.isSimulation()) {
             leftMotorSim = new SparkMaxSim(leftMotor, DCMotor.getNEO(1));
-            // Effective drum radius derived from the SAME conversion the real
+            // Effective drum radius derived from the same conversion the real
             // controller uses (carriage inches per motor rotation x gear
             // ratio = inches per drum rotation), so the sim cannot drift
             // from the calibrated mechanism scaling.
@@ -193,7 +193,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
      */
     private void configureMotors(ResetMode resetMode) {
         double inchesPerRotation = inchesPerRotation();
-        // Velocity feedforward is the NEO back-EMF model in the CURRENT
+        // Velocity feedforward is the NEO back-EMF model in the current
         // encoder units, so it follows the travel ratio automatically.
         double kV = ElevatorConstants.modelKv(inchesPerRotation) * appliedKvScale;
 
@@ -224,7 +224,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         leaderConfig.closedLoop
             .feedbackSensor(FeedbackSensor.kPrimaryEncoder);
 
-        // One closed-loop slot per Pace: IDENTICAL gains and feedforward, and
+        // One closed-loop slot per Pace: identical gains and feedforward, and
         // MAXMotion limits scaled by the pace. The Superstructure picks the
         // pace with each setpoint so the carriage travels with the arm
         // instead of racing it to a clearance limit and braking there.
@@ -267,11 +267,11 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         // --- Follower configuration ---
         // Same current limit, brake mode, voltage compensation, and encoder
         // scaling as the leader, but it follows the leader's output and
-        // carries NO soft limits of its own. REV documents only that a
+        // carries no soft limits of its own. REV documents only that a
         // follower mirrors the leader's voltage output; whether it still
         // enforces its own soft limits is undocumented, and the follower
         // spins opposite the leader (mirrored mounting) so its encoder
-        // counts NEGATIVE as the carriage rises - leader limits copied onto
+        // counts negative as the carriage rises - leader limits copied onto
         // it would put its reverse limit at zero in force for the entire
         // climb, turning the follower into a brake the leader must drag
         // (slow, stuttering, current-limited climbs). The leader's soft
@@ -284,7 +284,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         followerConfig.follow(ElevatorConstants.ELEVATOR_LEFT_ID,
             ElevatorConstants.ELEVATOR_RIGHT_OPPOSES_LEFT);
 
-        // LEADER ONLY, and therefore after the follower copy above (a config
+        // Leader only, and therefore after the follower copy above (a config
         // keeps the shortest period ever set on it, and apply() copies it).
         // Height and velocity frames at 10 ms instead of the 20 ms default:
         // every Superstructure gate and clamp reads these on the roboRIO, and
@@ -299,8 +299,8 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
 
     /**
      * Measures kG in a way that does not depend on friction or on the
-     * configured gains: the applied voltage at steady cruise going UP is
-     * kG + kV x v + friction, going DOWN it is kG - kV x v - friction, so
+     * configured gains: the applied voltage at steady cruise going up is
+     * kG + kV x v + friction, going down it is kG - kV x v - friction, so
      * their mean is kG. (The hold voltage cannot tell you: inside the static
      * friction band it only echoes the gains already configured.) Samples
      * are taken only under position control within 5 % of the cruise
@@ -345,7 +345,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
 
     /**
      * Samples the cruise voltage every loop, then re-applies edited tunables
-     * to the controllers. The re-apply runs only while DISABLED (a
+     * to the controllers. The re-apply runs only while disabled (a
      * reconfigure mid-move would stutter the mechanism), polled twice a
      * second. Gains, feedforward, and profile limits apply right away. The
      * calibration values (travel ratio, hard-stop height) rescale or
@@ -470,8 +470,8 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
             speed = 0;
         }
         // Gravity plus the stick, in volts. Plain duty cycle has no gravity
-        // term: with about a volt needed just to hold, a small up-stick
-        // would let the carriage SINK while the operator pushed up, and full
+        // term: with about a volt needed to hold, a small up-stick
+        // would let the carriage sink while the operator pushed up, and full
         // down would run far faster than full up. With kG added, the stick
         // commands the same speed in either direction.
         speed = Math.min(Math.max(speed, -1), 1);

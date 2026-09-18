@@ -32,7 +32,7 @@ import frc.robot.subsystems.CarriageAxis;
 import frc.robot.subsystems.Pace;
 
 /**
- * Runs the REAL Superstructure commands - the same objects the operator's
+ * Runs the real Superstructure commands - the same objects the operator's
  * buttons schedule - through the real CommandScheduler on a stepped clock,
  * against a simulated carriage and arm, for every ordered pair of operator
  * poses (and for a second button pressed mid-move). Every 5 ms it requires
@@ -238,7 +238,7 @@ class SuperstructureSequenceSimTest {
             double a = arm.getPivotAngle();
             // With chain slack the resting arm reads up to `slack` outside its row - the exposure the
             // planner's own lookups allow for; without it the pose must be strictly inside the table.
-            // A scoring pose may sit ON a row edge (L3 is 25.0 deg, the edge of its row), so the arm's
+            // A scoring pose may sit on a row edge (L3 is 25.0 deg, the edge of its row), so the arm's
             // own at-target window either side of the reading counts as the same pose.
             double window = CorAlConstants.CORAL_PIVOT_ALLOWED_ERROR;
             boolean clear = Superstructure.poseClear(h, a)
@@ -515,10 +515,10 @@ class SuperstructureSequenceSimTest {
     }
 
     /**
-     * Algae hold (operator D-pad left) from an algae intake pose: the ARM comes back to RAISE and the
+     * Algae hold (operator D-pad left) from an algae intake pose: the arm comes back to RAISE and the
      * carriage is not commanded at all - re-commanding it to its own measured height asks the
      * Spark MAX for a zero-length MAXMotion profile, and the elevator rumbles in place. From L4
-     * the same raiseArm() (which the hold ends in) DOES put the carriage back, because the staged
+     * the same raiseArm() (which the hold ends in) does put the carriage back, because the staged
      * exit moves it; that move must still finish at the L4 height with the arm at RAISE.
      */
     @Test
@@ -540,7 +540,7 @@ class SuperstructureSequenceSimTest {
     }
 
     /**
-     * L1 releases the coral back out the way it came in: the rollers run AGAINST the intake
+     * L1 releases the coral back out the way it came in: the rollers run against the intake
      * direction there, and with it (faster) at every other level - score() and the autos' eject alike.
      */
     @Test

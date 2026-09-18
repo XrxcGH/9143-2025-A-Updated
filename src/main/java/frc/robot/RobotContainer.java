@@ -50,9 +50,9 @@ import frc.robot.util.Tunables;
  *
  * DRIVER (port 0):
  *   Left stick          - field-centric translation (scaled down automatically
- *                         as the carriage rises: 100 % below 16.5", 40 % at 45"+)
+ *                         as the carriage rises: 100 % below 16.5 in, 40 % at 45 in+)
  *   Right stick X       - rotation
- *   Left / right trigger (HOLD) - align on the LEFT / RIGHT reef branch; either
+ *   Left / right trigger (HOLD) - align on the left / right reef branch; either
  *                         trigger centers on the coral station when stowed
  *                         and empty, and on the barge / processor with an
  *                         algae carried or at the barge pose (those two need
@@ -63,7 +63,7 @@ import frc.robot.util.Tunables;
  *   Left bumper         - driver heading zero: the way the robot faces now =
  *                         stick forward (back+LB also re-seeds the pose heading)
  *   A (hold)            - X-lock the wheels (brake)
- *   Y                   - re-seed the POSE heading from the AprilTags in view
+ *   Y                   - re-seed the pose heading from the AprilTags in view
  *                         (MegaTag1 fused for 2 s); the driver's own "forward"
  *                         does not move
  *   D-pad               - slow robot-centric nudges, all 8 directions
@@ -72,7 +72,7 @@ import frc.robot.util.Tunables;
  * OPERATOR (port 1):
  *   A / X / B / Y       - coral L1 / L2 / L3 / L4 (a diamond under the right
  *                         thumb: bottom / left / right / top)
- *   Right trigger       - SCORE: waits until the MEASURED pose is reached, runs
+ *   Right trigger       - SCORE: waits until the measured pose is reached, runs
  *                         the rollers until the coral has left, then goes home
  *                         by itself (after L3/L4 only once the robot has backed
  *                         0.35 m away - the exit swings the claw past the bumper)
@@ -84,14 +84,14 @@ import frc.robot.util.Tunables;
  *                         LT = rollers out / in; release = hold position.
  *                         The sticks do nothing unless LB is held.
  *   Right bumper        - barge pose (RT then fires the algae)
- *   D-pad up / down     - algae HIGH / LOW intake (diagonals count)
+ *   D-pad up / down     - algae high / low intake (diagonals count)
  *   D-pad left          - algae hold in place (hold rollers, arm to 100 deg)
  *   D-pad right         - raise the arm to the safe travel angle, in place
  *   Back / Start, held 1 s, DISABLED only - zero the elevator / the pivot
  *                         (mechanism at its base)
  *
  * RUMBLE: coral acquired (both, one long) - pose reached (operator, two short)
- *   - aligned AND pose reached (driver, steady) - scored at L3/L4, back away
+ *   - aligned and pose reached (driver, steady) - scored at L3/L4, back away
  *   (driver, slow pulse) - RT with nothing to score from (operator, one tick).
  * ===========================================================================
  */
@@ -104,7 +104,7 @@ public class RobotContainer {
     // ------------------------------------------------------------------
     // Reusable swerve requests for teleop driving (allocated once)
     // ------------------------------------------------------------------
-    // NOTE: drive requests use CLOSED-LOOP velocity, not open-loop voltage:
+    // Drive requests use closed-loop velocity, not open-loop voltage:
     // every module tracks the true requested ground speed regardless of
     // battery sag, and teleop behavior matches autonomous path following.
     /**
@@ -164,11 +164,11 @@ public class RobotContainer {
         // line, the field, the import, and the Dashboard argument together:
         // leds = new LEDs(coral::isGamePieceDetected, swerve::isVisionTrackingEnabled);
 
-        // Named commands for the PathPlanner autos (registered BEFORE the
+        // Named commands for the PathPlanner autos (registered before the
         // autos are loaded by buildAutoChooser). "score*" = raise, eject,
         // stow, so the robot drives away with the mechanism tucked;
         // "intakeCoral" = stow, then run the rollers until the CANrange
-        // confirms a coral, with the timeout on the ROLLER wait only (the
+        // confirms a coral, with the timeout on the roller wait only (the
         // stow's own settle timeout is as long, so a timeout around both
         // could expire before the rollers start) so an empty station cannot
         // stall the routine. PathPlanner wraps each use, so one registration
@@ -183,11 +183,11 @@ public class RobotContainer {
             superstructure.stow().andThen(
                 superstructure.intakeRollers().withTimeout(Constants.AutoConstants.AUTO_INTAKE_TIMEOUT_SECONDS)));
         NamedCommands.registerCommand("stow", superstructure.stow());
-        // Building blocks for autos that OVERLAP the mechanism with driving
+        // Building blocks for autos that overlap the mechanism with driving
         // instead of doing everything in place at the reef: "prepL*" as an
         // event marker on the approach path (the pose is reached as the
         // robot arrives), "ejectCoral" at the reef, and "stowAfterBackingOff"
-        // at the START of the departing path - it waits until the robot has
+        // at the start of the departing path - it waits until the robot has
         // moved 0.35 m before the arm swings out, because leaving L3 / L4
         // puts the claw 9-12 in past the front bumper. The "score*" commands
         // above still do all three in place.
@@ -200,7 +200,7 @@ public class RobotContainer {
 
         // The auto chooser is populated with every auto in
         // deploy/pathplanner/autos. LoggedDashboardChooser publishes it under
-        // SmartDashboard/Auto Mode (Elastic's ComboBox Chooser widget) AND
+        // SmartDashboard/Auto Mode (Elastic's ComboBox Chooser widget) and
         // records the selection in the AdvantageKit log.
         SendableChooser<Command> chooser;
         if (AutoBuilder.isConfigured()) {
@@ -321,7 +321,7 @@ public class RobotContainer {
         driver_controller.start().and(driver_controller.y()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
         driver_controller.start().and(driver_controller.x()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
 
-        // D-pad nudges in all EIGHT directions from the POV angle, so a thumb
+        // D-pad nudges in all eight directions from the POV angle, so a thumb
         // that lands on a diagonal still moves the robot (povUp() and the
         // other cardinal triggers are true only at exactly their own angle,
         // so bindings on those alone would ignore a 45-degree press).
@@ -331,10 +331,10 @@ public class RobotContainer {
         }));
 
         // Driver heading zero on left bumper: "the way the robot faces now is
-        // forward on my stick". It only moves the DRIVER's frame (held in the
+        // forward on my stick". It only moves the driver's frame (held in the
         // raw gyro frame - see Swerve.periodic), never the pose estimator's
-        // heading, so it is safe at any time. While DISABLED with no tag
-        // supplying a heading it also seeds the POSE heading to the
+        // heading, so it is safe at any time. While disabled with no tag
+        // supplying a heading it also seeds the pose heading to the
         // alliance's forward direction; back + left bumper forces that seed.
         driver_controller.leftBumper().and(driver_controller.back().negate())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(
@@ -342,8 +342,8 @@ public class RobotContainer {
         driver_controller.back().and(driver_controller.leftBumper())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(true)).ignoringDisable(true));
 
-        // Y: correct the POSE heading from tag geometry. While enabled only
-        // MegaTag2 is fused, and MegaTag2 takes its heading FROM the pose, so
+        // Y: correct the pose heading from tag geometry. While enabled only
+        // MegaTag2 is fused, and MegaTag2 takes its heading from the pose, so
         // a heading that has drifted (a hard hit, a long match) is never
         // corrected by it; this fuses MegaTag1, whose solve carries its own
         // heading, for HEADING_RESEED_WINDOW_SECONDS. With no tag in view it
@@ -353,7 +353,7 @@ public class RobotContainer {
         driver_controller.y().and(testMode.negate())
             .onTrue(Commands.runOnce(() -> swerve.getVision().requestHeadingReseed()).ignoringDisable(true));
 
-        // HOLD a trigger to align on that side's branch; release = sticks.
+        // Hold a trigger to align on that side's branch; release = sticks.
         driver_controller.leftTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.LEFT));
         driver_controller.rightTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.RIGHT));
 
@@ -365,7 +365,7 @@ public class RobotContainer {
     // ==================================================================
     private void configureSuperstructureBindings() {
         // LB is the manual take-over. Everything automatic is gated on it
-        // being UP, so a held LB means "sticks only" with no surprises.
+        // being up, so a held LB means "sticks only" with no surprises.
         Trigger manual = operator_controller.leftBumper();
         Trigger auto = manual.negate();
         Trigger teleop = new Trigger(DriverStation::isTeleopEnabled);
@@ -381,7 +381,7 @@ public class RobotContainer {
         // HOME: stow (+ intake rollers if empty), or algae carry if one is held.
         operator_controller.leftTrigger().and(auto).onTrue(superstructure.home());
 
-        // SCORE: gated on the MEASURED pose. Pulled early it simply waits -
+        // SCORE: gated on the measured pose. Pulled early it waits -
         // the rising edge of (trigger AND ready) is what fires - so it can
         // never interrupt a staged move that is still on its way to the pose.
         Trigger ready = new Trigger(superstructure::readyToScore);
@@ -404,7 +404,7 @@ public class RobotContainer {
         operator_controller.rightBumper().and(auto).onTrue(superstructure.goToBarge()); // RT then fires it
 
         // D-pad right: swing the arm to the safe travel angle, in place. It is
-        // deliberately NOT on Back or Start: those are the disabled-only
+        // deliberately not on Back or Start: those are the disabled-only
         // encoder zeros, and a button still held from zeroing when the robot
         // enables would fire an enabled binding without a fresh press.
         operator_controller.povRight().and(auto).onTrue(superstructure.raiseArm());
@@ -419,7 +419,7 @@ public class RobotContainer {
         // the sticks are live only while LB is held) ----
         // Pressing LB cancels the running sequence and freezes both
         // mechanisms; sticks jog while it is held; releasing holds position.
-        // (AND enabled, so LB already held when the robot enables still starts
+        // (and enabled, so LB already held when the robot enables still starts
         // it - whileTrue alone waits for an edge that was dropped while
         // disabled, and with LB held every other operator input is locked out.)
         manual.and(new Trigger(DriverStation::isEnabled)).whileTrue(superstructure.manualOverride(
@@ -437,7 +437,7 @@ public class RobotContainer {
             .onTrue(driverRumble.pulse(1.0, 0.4).alongWith(operatorRumble.pulse(1.0, 0.4)));
         // Pose reached: operator, two short buzzes -> the score trigger is live.
         ready.and(teleop).onTrue(operatorRumble.pulses(2, 0.8, 0.12, 0.10));
-        // Aligned AND pose reached: driver, steady light buzz -> fire.
+        // Aligned and pose reached: driver, steady light buzz -> fire.
         ready.and(() -> swerve.isVisionTrackingEnabled() && swerve.isAligned())
             .whileTrue(driverRumble.whileActive(0.5));
         // Scored at L3/L4, exit is waiting for room: driver, slow pulse -> back away.
@@ -464,7 +464,7 @@ public class RobotContainer {
      * appears here automatically - exactly how PathPlanner autos are picked up
      * from deploy/pathplanner/autos.
      *
-     * The trajectory is followed by the SAME PathPlanner AutoBuilder holonomic
+     * The trajectory is followed by the same PathPlanner AutoBuilder holonomic
      * controller and AutoConstants gains as the PathPlanner autos: PathPlanner
      * 2026 natively loads Choreo .traj files ({@code fromChoreoTrajectory}),
      * and ChoreoLib has no 2026 release, so this keeps a single, already-tuned
@@ -506,7 +506,7 @@ public class RobotContainer {
     }
 
     /**
-     * Called from Robot.disabledExit(): HOLD both mechanisms where they are.
+     * Called from Robot.disabledExit(): hold both mechanisms where they are.
      * Disabling cuts their outputs, and nothing else commands them again
      * until the operator presses something. Without this hold, a carriage
      * that is up when the robot enables (after an auto that ended at a

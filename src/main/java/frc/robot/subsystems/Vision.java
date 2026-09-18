@@ -29,10 +29,10 @@ import frc.robot.util.Tunables;
 /**
  * Vision subsystem: multi-Limelight AprilTag targeting and pose estimation.
  *
- * Pose estimation: while ENABLED the robot's heading is sent to each
+ * Pose estimation: while enabled the robot's heading is sent to each
  * Limelight every loop and the returned MegaTag2 poses are fused into the
  * swerve pose estimator with distance/tag-count based confidence. While
- * DISABLED (and for a short window after {@link #requestHeadingReseed()}
+ * disabled (and for a short window after {@link #requestHeadingReseed()}
  * is called) MegaTag1 is fused instead, because its solve carries an absolute
  * heading from tag geometry - that is what seeds the heading MegaTag2 then
  * depends on. Every camera frame is fused at most once (the NT sample
@@ -43,7 +43,7 @@ import frc.robot.util.Tunables;
  * the heading.
  *
  * Targeting: each camera's primary tag is converted from Limelight camera
- * space into the ROBOT frame using that camera's mounting pose (lens
+ * space into the robot frame using that camera's mounting pose (lens
  * offset, yaw and pitch), so the tracking command servos on where the tag
  * is relative to the robot's center, whichever camera saw it. The tag's
  * field heading (from the AprilTag field layout) gives the heading at which
@@ -55,11 +55,11 @@ import frc.robot.util.Tunables;
  * latched so the goal cannot flip between adjacent reef faces mid-approach.
  *
  * The tracker never drives on a raw camera solve. A tag does not move, so
- * each NEW camera frame is turned into a FIELD position for the latched tag
+ * each new camera frame is turned into a field position for the latched tag
  * - using the robot's pose at the moment the image was captured, not now -
  * and low-pass filtered there; every loop the tracker then gets that field
- * position seen from the robot's CURRENT odometry pose. Filtering a static
- * point adds no lag to the control, the 50-100 ms camera latency drops out
+ * position seen from the robot's current odometry pose. Filtering a static
+ * point adds no lag to the control, the 25-100 ms camera latency drops out
  * (driven on directly, it appears as a phantom lateral error whenever the
  * robot is turning: range x the heading change during the latency),
  * single-frame solve noise does not reach the wheels, and a dropped frame
@@ -69,15 +69,15 @@ import frc.robot.util.Tunables;
  *
  * The heading the tracker squares up to is handled the same way, and for
  * the same reason it must not depend on the pose estimator's heading being
- * FIELD-TRUE. The tag's square heading comes from the field layout, but the
+ * field-true. The tag's square heading comes from the field layout, but the
  * pose heading is whatever frame the gyro was last zeroed in (a driver
  * re-zero, a boot orientation, a half-converged seed) - compare the two
- * directly and the robot squares up to the wrong direction, i.e. turns AWAY
+ * directly and the robot squares up to the wrong direction, i.e., turns away
  * from the tag. So each frame's MegaTag1 solve (which carries a field-true
  * heading from the tag geometry alone) is compared with the pose heading at
  * capture, the difference is filtered, and the square heading is handed to
  * the tracker already converted into the pose estimator's own frame.
- * Nothing here ever WRITES the pose heading.
+ * Nothing here ever writes the pose heading.
  *
  * Latch rules: the latch is released when tracking is switched off, when
  * the latched tag has been out of view for TARGET_MEMORY_SECONDS, or at
@@ -104,13 +104,13 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * A resolved alignment goal: where the tag should sit in the ROBOT frame
+     * A resolved alignment goal: where the tag should sit in the robot frame
      * (WPILib: +X forward, +Y left, meters) when the robot is in position.
      */
     public static class TrackingGoal {
         /** Desired robot-frame X of the tag; negative for a rear (backed-up) approach. */
         public final double forward;
-        /** Desired robot-frame Y of the tag (+ = tag to the robot's LEFT). */
+        /** Desired robot-frame Y of the tag (+ = tag to the robot's left). */
         public final double left;
 
         public TrackingGoal(double forward, double left) {
@@ -174,7 +174,7 @@ public class Vision extends SubsystemBase {
 
     /**
      * Inputs to the L3 / L4 reef standoff (wired in RobotContainer): the
-     * alignment holds OFF the reef while the scoring pose is not ready, or
+     * alignment holds off the reef while the scoring pose is not ready, or
      * while a finished score is waiting for room. See getTrackingGoal.
      */
     private BooleanSupplier poseReady = () -> true;
@@ -185,8 +185,8 @@ public class Vision extends SubsystemBase {
 
     // Target caches, refreshed once per periodic()
     private Optional<AprilTagTarget> cachedBestTarget = Optional.empty();   // matches the current goal (drives the tracker)
-    private Optional<AprilTagTarget> cachedBestVisible = Optional.empty();  // closest tag a camera may ALIGN on (robot frame)
-    private Optional<SeenTag> cachedClosestSeen = Optional.empty();         // closest tag ANY camera reports (dashboard)
+    private Optional<AprilTagTarget> cachedBestVisible = Optional.empty();  // closest tag a camera may align on (robot frame)
+    private Optional<SeenTag> cachedClosestSeen = Optional.empty();         // closest tag any camera reports (dashboard)
     private String cachedSeenTagsSummary = "";
 
     // Tag latch while tracking: -1 = none. The latched tag's last sighting is
@@ -195,7 +195,7 @@ public class Vision extends SubsystemBase {
     private double latchedLastSeenTime = 0.0;
     private TagClass latchedTagClass = TagClass.NONE;
     private Optional<Rotation2d> latchedSquareHeading = Optional.empty();
-    /** Filtered FIELD position of the latched tag (see the class note); null until its first sample. */
+    /** Filtered field position of the latched tag (see the class note); null until its first sample. */
     private Translation2d latchedTagFieldPosition = null;
     /** NT timestamp (microseconds) of the last camera sample folded into the filter: one update per frame. */
     private long latchedSampleStamp = Long.MIN_VALUE;
@@ -255,7 +255,7 @@ public class Vision extends SubsystemBase {
             String tableName = limelightTableNames[i];
             // Set all Limelights to the AprilTag pipeline
             LimelightHelpers.setPipelineIndex(tableName, VisionConstants.APRILTAG_PIPELINE);
-            // LEDs stay OFF permanently: AprilTags are detected in ambient
+            // LEDs stay off permanently: AprilTags are detected in ambient
             // light and gain nothing from illumination, while the LED array
             // is the camera's single largest heat source (fan noise).
             LimelightHelpers.setLEDMode_ForceOff(tableName);
@@ -356,7 +356,7 @@ public class Vision extends SubsystemBase {
      * Throttles AprilTag processing while the robot is disabled and restores
      * full rate when enabled - the cameras spend most of their powered-on
      * life disabled in the pit, where full-rate processing only makes heat.
-     * Selecting TEST mode on the Driver Station lifts the throttle without
+     * Selecting Test mode on the Driver Station lifts the throttle without
      * enabling: throttled, every vision readout on the dashboard is a second
      * or more behind the camera's own stream, too slow for checking a camera
      * on the bench.
@@ -383,7 +383,7 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * Records whether AprilTag tracking is active. Deliberately does NOT
+     * Records whether AprilTag tracking is active. Deliberately does not
      * touch the LEDs: they add nothing to AprilTag detection and are the
      * camera's largest heat source (and the cause of its fan noise).
      * Turning tracking off releases the tag latch.
@@ -432,22 +432,22 @@ public class Vision extends SubsystemBase {
     /**
      * Resolves the alignment goal for a target, combining the tag's class
      * with the superstructure's current goal and the selected branch side.
-     * Goals are in the ROBOT frame: forward = where the tag should be along
-     * +X (negative = behind the robot, i.e. a backed-up approach), left =
+     * Goals are in the robot frame: forward = where the tag should be along
+     * +X (negative = behind the robot, i.e., a backed-up approach), left =
      * where it should be along +Y.
      *
      * Reef goals:
      *  - CORAL_L1: centered, held L1_SCORE_DISTANCE away so the arm can
-     *    swing to its 100-degree pose without hitting the reef.
+     *    swing to its 100 deg pose without hitting the reef.
      *  - CORAL_L2/L3/L4: bumpers flush, robot centered on the selected
      *    branch. The LEFT branch is REEF_BRANCH_OFFSET to the robot's left
      *    of the tag, so centering on it puts the tag that far to the
-     *    robot's RIGHT (negative left). L3 / L4 hold REEF_STANDOFF_EXTRA
+     *    robot's right (negative left). L3 / L4 hold REEF_STANDOFF_EXTRA
      *    back from flush until the scoring pose is ready (see below).
      *  - Everything else (algae intakes, stow, ...): bumpers flush, centered.
      *
      * Coral station goals: rear bumpers flush with the wall, centered
-     * (approached backward, so the tag sits BEHIND the robot center).
+     * (approached backward, so the tag sits behind the robot center).
      *
      * Barge / processor goals: centered on the tag, held
      * BARGE_SCORE_DISTANCE / PROCESSOR_DISTANCE away (both first guesses,
@@ -474,7 +474,7 @@ public class Vision extends SubsystemBase {
                         // to the standoff again, which is also what releases
                         // the automatic stow. L2 never pokes out: flush at once.
                         //
-                        // The decision to close in is LATCHED per approach.
+                        // The decision to close in is latched per approach.
                         // "Pose ready" read raw goes false for a loop whenever
                         // the arm or the carriage twitches - the bumper
                         // touching the reef, the rollers ejecting - and each
@@ -516,7 +516,7 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * The closest tag a camera may ALIGN on this loop (its class is one the
+     * The closest tag a camera may align on this loop (its class is one the
      * camera is mounted for, and the camera's lens pose is measured),
      * regardless of the superstructure goal or the latch. It carries a
      * robot-frame position, so it feeds the distance / lateral readouts used
@@ -537,7 +537,7 @@ public class Vision extends SubsystemBase {
      * class, no camera role, no mounting pose, no latch. This is what the
      * camera's own stream draws, which is what a "which tag do you see"
      * readout has to agree with. The alignment caches above are a strict
-     * subset of it - a camera only ALIGNS on the classes it is mounted for,
+     * subset of it - a camera only aligns on the classes it is mounted for,
      * and only once its lens pose is measured.
      */
     public static final class SeenTag {
@@ -684,9 +684,9 @@ public class Vision extends SubsystemBase {
 
     /**
      * Folds one sighting of the latched tag into its filtered field
-     * position. Only a NEW camera frame counts (the robot loop reads the
+     * position. Only a new camera frame counts (the robot loop reads the
      * same frame several times), and the frame is placed on the field with
-     * the pose the robot had when the image was CAPTURED. A sample far from
+     * the pose the robot had when the image was captured. A sample far from
      * the estimate is ignored unless it persists - one bad solve must not
      * yank the goal, but a real change (a pose reset) is followed.
      */
@@ -742,7 +742,7 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * The latched tag's square heading in the POSE ESTIMATOR's frame (what
+     * The latched tag's square heading in the pose estimator's frame (what
      * the tracker compares with the pose heading). Falls back to the layout
      * heading as it is until a MegaTag1 sample has arrived.
      */
@@ -874,7 +874,7 @@ public class Vision extends SubsystemBase {
         // Latch management: hold the first chosen tag while tracking, fold
         // each new frame of it into the filtered field position, and drop it
         // once it has been out of view for the memory time. While latched
-        // the tracker ALWAYS gets the filtered position seen from the
+        // the tracker always gets the filtered position seen from the
         // current odometry pose - seen this loop or not.
         if (!trackingEnabled) {
             releaseLatch();
@@ -883,10 +883,10 @@ public class Vision extends SubsystemBase {
         }
         // The goal has left the latched tag's family (the score finished and
         // the Superstructure went home: STOW is a station goal, the latched
-        // tag is a reef tag). Drop it NOW rather than letting it live on in
+        // tag is a reef tag). Drop it now rather than letting it live on in
         // memory for TARGET_MEMORY_SECONDS: a remembered reef tag with a
         // non-reef goal resolves to "flush and centered", so with the align
-        // trigger still held the robot would drive back INTO the reef at the
+        // trigger still held the robot would drive back into the reef at the
         // moment the L3 / L4 exit is swinging the claw out past the bumper.
         // Nothing new is latched until the trigger is pressed again: holding
         // it through a score must not send the robot off to a coral station
@@ -921,7 +921,7 @@ public class Vision extends SubsystemBase {
      * Enables or disables MegaTag pose fusion. Useful during testing to
      * compare pure wheel odometry against vision-corrected odometry.
      *
-     * NOTE: intentionally unused (with its getter below) - fusion defaults
+     * Intentionally unused (with its getter below) - fusion defaults
      * to on; call or temporarily bind this in test sessions only.
      */
     public void enablePositionTracking(boolean enabled) {
@@ -936,7 +936,7 @@ public class Vision extends SubsystemBase {
      * Asks for the heading to be re-seeded from tag geometry: MegaTag1 (whose
      * solve carries an absolute heading) is fused for the next
      * HEADING_RESEED_WINDOW_SECONDS even though the robot is enabled. It
-     * corrects a drifted POSE heading while a tag is in view; unlike a gyro
+     * corrects a drifted pose heading while a tag is in view; unlike a gyro
      * re-zero it cannot feed MegaTag2 a made-up heading, and with no tag in
      * view it does nothing. Bound to the driver's Y button. (The driver's
      * left bumper is something else: it zeroes the driver's own heading
@@ -954,7 +954,7 @@ public class Vision extends SubsystemBase {
     /**
      * True when a MegaTag1 solve with a trusted heading (two or more tags,
      * or one close unambiguous tag) was fused within
-     * HEADING_SEED_FRESHNESS_SECONDS - i.e. the pose heading has been
+     * HEADING_SEED_FRESHNESS_SECONDS - i.e., the pose heading has been
      * pulled toward a field-referenced value recently.
      */
     public boolean hasFreshHeadingSeed() {
@@ -962,7 +962,7 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * True when the pose heading is CONVERGED on a strong seed: a
+     * True when the pose heading is converged on a strong seed: a
      * two-or-more-tag MegaTag1 solve was fused within
      * HEADING_SEED_FRESHNESS_SECONDS and the estimator's heading now agrees
      * with that solve's own heading within HEADING_SEED_AGREEMENT_DEGREES.
@@ -1025,15 +1025,15 @@ public class Vision extends SubsystemBase {
      * Swerve.addVisionMeasurement().
      *
      * Two modes:
-     *  - DISABLED (pre-match / between periods) or a driver re-seed window:
-     *    MegaTag1, whose solve includes an absolute HEADING from tag
+     *  - Disabled (pre-match / between periods) or a driver re-seed window:
+     *    MegaTag1, whose solve includes an absolute heading from tag
      *    geometry alone. Its rotation is fused so the pose heading converges
      *    to field-correct while the robot sits still - without this, the
      *    heading MegaTag2 depends on would start at whatever the gyro booted
      *    to and every fused pose would be wrong until a manual reset. Only
      *    cameras with a measured mounting pose take part: a placeholder
      *    lens pose would seed a biased heading.
-     *  - ENABLED: MegaTag2, which takes our (now-seeded) heading and returns
+     *  - Enabled: MegaTag2, which takes our (now-seeded) heading and returns
      *    a far more stable translation than single-tag solves. Its heading
      *    is our own gyro echoed back, so it gets effectively zero weight.
      *

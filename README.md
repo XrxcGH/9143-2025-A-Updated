@@ -4,6 +4,8 @@ This repository contains the code for Team 9143's 2025 FRC (Reefscape) robot, "L
 
 Everything described here has been run on the robot (September 2026) unless the text says otherwise. The items that are still unmeasured or untuned are collected in the [Pre-Competition Checklist](#pre-competition-checklist).
 
+**Latest release:** [v1.0](https://github.com/XrxcGH/9143-2025-A-Updated/releases/tag/v1.0) — release notes and source archives; all releases are on the [Releases page](https://github.com/XrxcGH/9143-2025-A-Updated/releases).
+
 ---
 
 ## Robot Overview

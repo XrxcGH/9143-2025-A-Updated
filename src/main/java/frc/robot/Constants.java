@@ -976,6 +976,37 @@ public final class Constants {
 			public static final double MAX_LINEAR_VELOCITY = 2.0;  // m/s command clamp while tracking
 			public static final double MAX_ANGULAR_VELOCITY = 1.0; // rad/s command clamp while tracking
 
+			// Commands are slew-limited: the servo's output used to STEP (0 to
+			// 2 m/s on the first loop, and to zero the instant a frame was
+			// missed), which is wheel slip and a lurch. 3 m/s^2 is gentle enough
+			// with the elevator raised; the P law itself never asks for more
+			// than kP x speed of deceleration (1.5 x 2 = 3 m/s^2), so the limit
+			// does not cause overshoot on the way in.
+			public static final double MAX_LINEAR_ACCELERATION = 3.0;  // m/s^2
+			public static final double MAX_ANGULAR_ACCELERATION = 6.0; // rad/s^2
+
+			// Once inside the deadbands the robot holds still until an error
+			// grows past deadband x this. Without the gap, an error sitting ON
+			// a deadband edge toggles the command every loop.
+			public static final double DEADBAND_EXIT_RATIO = 1.6;
+
+			// Filter on the latched tag's FIELD position (Vision class note):
+			// fraction of each new camera frame blended in. A sample further
+			// than the outlier distance from the estimate is ignored unless it
+			// persists for that many frames.
+			public static final double TARGET_FILTER_ALPHA = 0.3;
+			public static final double TARGET_OUTLIER_METERS = 0.25;
+			public static final int TARGET_OUTLIER_FRAMES = 3;
+
+			// Flush means the bumper is ON the reef or the wall, and a
+			// closed-loop velocity command into a wall is a stalled drivetrain
+			// stuttering against it. If the robot is being told to move, is not
+			// moving, is laterally in position and is within this much of the
+			// forward goal for this long, it has arrived by contact.
+			public static final double CONTACT_FORWARD_ERROR = 0.10; // Meters
+			public static final double CONTACT_MAX_SPEED = 0.04;     // m/s measured
+			public static final double CONTACT_SECONDS = 0.3;
+
 			// The tracker keeps its first tag, and while that tag is out of
 			// view carries its last sighting on odometry, for this long: the
 			// goal cannot flip between adjacent reef faces, and an approach

@@ -83,6 +83,15 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	private double m_alignForwardError = 0.0;
 	private double m_alignLateralError = 0.0;
 	private double m_alignHeadingErrorDeg = 0.0;
+	// Tracking command state: the last velocities SENT (the slew limiter works
+	// from these), the stay-stopped latches, and the contact-stall timer
+	private double m_trackVx = 0.0;
+	private double m_trackVy = 0.0;
+	private double m_trackOmega = 0.0;
+	private double m_trackLastTime = 0.0;
+	private boolean m_trackTranslationHeld = false;
+	private boolean m_trackHeadingHeld = false;
+	private double m_trackStalledSince = -1.0;
 	// Whether the last autonomous pose reset kept the vision-seeded heading
 	private boolean m_lastAutoResetKeptHeading = false;
 
@@ -383,31 +392,46 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	 * bearing to the goal point is used instead). Nothing is mirrored per
 	 * camera.
 	 *
-	 * Each axis is a P controller with a deadband and a minimum command, so
-	 * the last few centimeters are actually driven instead of being lost to
-	 * static friction; the lateral deadband is tighter than the forward one
-	 * because a coral has only ~3 cm of lateral clearance on a branch.
+	 * Translation is ONE proportional controller on the error vector (speed
+	 * from its length, with a minimum so the last centimeters are driven
+	 * rather than lost to static friction; direction along it), heading is a
+	 * second; both stop inside their deadbands and stay stopped until the
+	 * error grows past the exit ratio, and everything goes through a slew
+	 * limiter. The lateral deadband is tighter than the forward one because
+	 * a coral has only ~3 cm of lateral clearance on a branch. The tag
+	 * position it servos on is Vision's filtered, latency-free estimate, not
+	 * a raw camera solve - see the Vision class note.
 	 *
 	 * If no trackable tag is visible (or the target is lost mid-approach)
-	 * the command actively commands zero velocity - swerve requests latch,
-	 * so without this the robot would keep driving at its last commanded
-	 * speed. When the command ends for any reason (cancelled, or interrupted
+	 * the command ramps to zero velocity - swerve requests latch, so without
+	 * this the robot would keep driving at its last commanded speed. When the command ends for any reason (cancelled, or interrupted
 	 * by another swerve command), it stops the robot and clears the tracking
 	 * flag so the Y-button toggle can never desync from reality.
 	 */
 	public Command createAprilTagTrackingCommand() {
-		return run(() -> {
+		return startRun(() -> {
+			// Start the slew limiter from what the robot is actually doing, so
+			// taking over from the driver mid-motion is continuous too.
+			var speeds = getStateCopy().Speeds;
+			m_trackVx = speeds.vxMetersPerSecond;
+			m_trackVy = speeds.vyMetersPerSecond;
+			m_trackOmega = speeds.omegaRadiansPerSecond;
+			m_trackTranslationHeld = false;
+			m_trackHeadingHeld = false;
+			m_trackStalledSince = -1.0;
+		}, () -> {
 			Optional<Vision.AprilTagTarget> target =
 				isVisionTrackingEnabled ? vision.getBestTarget() : Optional.empty();
 			Optional<Vision.TrackingGoal> goal = target.flatMap(vision::getTrackingGoal);
 
 			if (target.isEmpty() || goal.isEmpty()) {
-				// No trackable target (or tracking off while still scheduled): stop.
+				// No trackable target (or tracking off while still scheduled):
+				// come to a stop - ramped, not stepped.
 				clearAlignmentTelemetry();
-				setControl(m_visionTrackRequest
-					.withVelocityX(0)
-					.withVelocityY(0)
-					.withRotationalRate(0));
+				m_trackTranslationHeld = false;
+				m_trackHeadingHeld = false;
+				m_trackStalledSince = -1.0;
+				applyTrackingCommand(0.0, 0.0, 0.0);
 				return;
 			}
 
@@ -432,20 +456,73 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			m_alignLateralError = lateralError;
 			m_alignHeadingErrorDeg = headingErrorDeg;
 
-			// Gains are live-tunable from the dashboard (Tunables -> Preferences)
-			double distanceKp = Tunables.trackingDistanceKp();
-			double vx = servo(forwardError, VisionConstants.TrackingGains.FORWARD_ERROR_DEADBAND, distanceKp,
-				VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY, VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
-			double vy = servo(lateralError, VisionConstants.TrackingGains.LATERAL_ERROR_DEADBAND, distanceKp,
-				VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY, VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
-			double omega = servo(headingErrorDeg, VisionConstants.TrackingGains.ROTATION_ERROR_DEADBAND,
-				Tunables.trackingRotationKp(), 0.0, VisionConstants.TrackingGains.MAX_ANGULAR_VELOCITY);
-			m_aligned = vx == 0.0 && vy == 0.0 && omega == 0.0;
+			// ---- Translation: ONE controller on the error VECTOR ----
+			// Each axis used to have its own deadband and its own minimum
+			// speed. As the axes crossed their deadbands at different moments
+			// the commanded velocity snapped between (0.12, 0), (0.12, 0.12)
+			// and (0, 0.12) m/s - the DIRECTION of travel jumping 45-90 deg
+			// with the robot nearly stationary, which makes every swerve
+			// module whip round to a new steering angle: the whole-robot jerk.
+			// Now the speed comes from the length of the error vector and the
+			// direction is simply along it, so it turns smoothly all the way
+			// in; the robot stops when BOTH axes are inside their deadbands
+			// and stays stopped until one grows past the exit ratio.
+			double forwardDeadband = VisionConstants.TrackingGains.FORWARD_ERROR_DEADBAND;
+			double lateralDeadband = VisionConstants.TrackingGains.LATERAL_ERROR_DEADBAND;
+			double exitRatio = VisionConstants.TrackingGains.DEADBAND_EXIT_RATIO;
+			boolean inside = Math.abs(forwardError) < forwardDeadband
+				&& Math.abs(lateralError) < lateralDeadband;
+			boolean outside = Math.abs(forwardError) > forwardDeadband * exitRatio
+				|| Math.abs(lateralError) > lateralDeadband * exitRatio;
+			if (m_trackTranslationHeld ? outside : inside) {
+				m_trackTranslationHeld = !m_trackTranslationHeld;
+			}
 
-			setControl(m_visionTrackRequest
-				.withVelocityX(vx)
-				.withVelocityY(vy)
-				.withRotationalRate(omega));
+			// Arrived by CONTACT: told to move, not moving, laterally in
+			// position and nearly there forward - the bumper is on the reef
+			// (or the wall). Pushing on would only stall the drivetrain.
+			var measured = getStateCopy().Speeds;
+			double measuredSpeed = Math.hypot(measured.vxMetersPerSecond, measured.vyMetersPerSecond);
+			double now = Timer.getFPGATimestamp();
+			boolean pushing = !m_trackTranslationHeld
+				&& Math.hypot(m_trackVx, m_trackVy) >= VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY * 0.9
+				&& measuredSpeed < VisionConstants.TrackingGains.CONTACT_MAX_SPEED
+				&& Math.abs(lateralError) < lateralDeadband * exitRatio
+				&& Math.abs(forwardError) < VisionConstants.TrackingGains.CONTACT_FORWARD_ERROR;
+			if (!pushing) {
+				m_trackStalledSince = -1.0;
+			} else if (m_trackStalledSince < 0) {
+				m_trackStalledSince = now;
+			} else if (now - m_trackStalledSince > VisionConstants.TrackingGains.CONTACT_SECONDS) {
+				m_trackTranslationHeld = true;
+			}
+
+			double vx = 0.0;
+			double vy = 0.0;
+			if (!m_trackTranslationHeld) {
+				double distance = Math.hypot(forwardError, lateralError);
+				// Gains are live-tunable from the dashboard (Tunables -> Preferences)
+				double speed = Math.min(Math.max(distance * Tunables.trackingDistanceKp(),
+					VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY), VisionConstants.TrackingGains.MAX_LINEAR_VELOCITY);
+				if (distance > 1e-6) {
+					vx = speed * forwardError / distance;
+					vy = speed * lateralError / distance;
+				}
+			}
+
+			// ---- Heading: P with the same stay-stopped hysteresis ----
+			double headingDeadband = VisionConstants.TrackingGains.ROTATION_ERROR_DEADBAND;
+			if (m_trackHeadingHeld
+					? Math.abs(headingErrorDeg) > headingDeadband * exitRatio
+					: Math.abs(headingErrorDeg) < headingDeadband) {
+				m_trackHeadingHeld = !m_trackHeadingHeld;
+			}
+			double omega = m_trackHeadingHeld ? 0.0
+				: Math.copySign(Math.min(Math.abs(headingErrorDeg) * Tunables.trackingRotationKp(),
+					VisionConstants.TrackingGains.MAX_ANGULAR_VELOCITY), headingErrorDeg);
+
+			m_aligned = m_trackTranslationHeld && m_trackHeadingHeld;
+			applyTrackingCommand(vx, vy, omega);
 		}).finallyDo(() -> {
 			// Runs on cancel AND on interruption by any other swerve command
 			// (brake, point, D-pad nudges, SysId): stop the robot and drop
@@ -453,6 +530,9 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			isVisionTrackingEnabled = false;
 			vision.toggleTracking(false);
 			clearAlignmentTelemetry();
+			m_trackVx = 0.0;
+			m_trackVy = 0.0;
+			m_trackOmega = 0.0;
 			setControl(m_visionTrackRequest
 				.withVelocityX(0)
 				.withVelocityY(0)
@@ -470,15 +550,31 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	}
 
 	/**
-	 * One alignment axis: zero inside the deadband, otherwise a proportional
-	 * command of at least the minimum magnitude, clamped to the maximum.
+	 * Output stage of the tracking command: slew-limits the commanded
+	 * velocity VECTOR (so its direction turns as well as its length ramps)
+	 * and the rotation rate, then sends them. Nothing the servo decides can
+	 * reach the modules as a step.
 	 */
-	private static double servo(double error, double deadband, double kP, double minCommand, double maxCommand) {
-		if (Math.abs(error) < deadband) {
-			return 0.0;
-		}
-		double magnitude = Math.min(Math.max(Math.abs(error) * kP, minCommand), maxCommand);
-		return Math.copySign(magnitude, error);
+	private void applyTrackingCommand(double vx, double vy, double omega) {
+		double now = Timer.getFPGATimestamp();
+		double dt = Math.min(Math.max(now - m_trackLastTime, 0.005), 0.05);
+		m_trackLastTime = now;
+
+		double dvx = vx - m_trackVx;
+		double dvy = vy - m_trackVy;
+		double change = Math.hypot(dvx, dvy);
+		double maxChange = VisionConstants.TrackingGains.MAX_LINEAR_ACCELERATION * dt;
+		double scale = change > maxChange ? maxChange / change : 1.0;
+		m_trackVx += dvx * scale;
+		m_trackVy += dvy * scale;
+
+		double maxOmegaChange = VisionConstants.TrackingGains.MAX_ANGULAR_ACCELERATION * dt;
+		m_trackOmega += Math.max(-maxOmegaChange, Math.min(maxOmegaChange, omega - m_trackOmega));
+
+		setControl(m_visionTrackRequest
+			.withVelocityX(m_trackVx)
+			.withVelocityY(m_trackVy)
+			.withRotationalRate(m_trackOmega));
 	}
 
 	/**

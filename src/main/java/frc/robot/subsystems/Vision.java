@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import com.ctre.phoenix6.Utils;
+
 import edu.wpi.first.apriltag.AprilTagFieldLayout;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -47,10 +49,20 @@ import frc.robot.util.Tunables;
  * the robot is square to the tag's face. Cameras only report the tag class
  * they are mounted for (rear funnel camera: coral stations; reef camera:
  * reef). Once tracking starts the first chosen tag is latched so the goal
- * cannot flip between adjacent reef faces mid-approach, and if the latched
- * tag drops out of view (the rear camera loses the station tag before the
- * bumpers are flush) its last sighting is carried on odometry for a short
- * time so the approach finishes.
+ * cannot flip between adjacent reef faces mid-approach.
+ *
+ * The tracker never drives on a raw camera solve. A tag does not move, so
+ * each NEW camera frame is turned into a FIELD position for the latched tag
+ * - using the robot's pose at the moment the image was captured, not now -
+ * and low-pass filtered there; every loop the tracker then gets that field
+ * position seen from the robot's CURRENT odometry pose. Filtering a static
+ * point adds no lag to the control, the 50-100 ms camera latency drops out
+ * (it used to show up as a phantom lateral error whenever the robot was
+ * turning: range x the heading change during the latency), single-frame
+ * solve noise no longer reaches the wheels, and a dropped frame changes
+ * nothing - which is also how the approach finishes when the latched tag
+ * leaves the camera's view (the rear camera loses the station tag before
+ * the bumpers are flush).
  *
  * Dashboard note: this subsystem publishes nothing itself. All telemetry is
  * read through the public getters by the central {@link frc.robot.Dashboard}
@@ -146,7 +158,12 @@ public class Vision extends SubsystemBase {
     private double latchedLastSeenTime = 0.0;
     private TagClass latchedTagClass = TagClass.NONE;
     private Optional<Rotation2d> latchedSquareHeading = Optional.empty();
+    /** Filtered FIELD position of the latched tag (see the class note); null until its first sample. */
     private Translation2d latchedTagFieldPosition = null;
+    /** NT timestamp (microseconds) of the last camera sample folded into the filter: one update per frame. */
+    private long latchedSampleStamp = Long.MIN_VALUE;
+    /** Consecutive samples that disagreed with the filter by more than the outlier distance. */
+    private int latchedOutlierCount = 0;
 
     // Precomputed "limelight-<name>" NT table names (avoids per-loop string
     // concatenation in the hot paths)
@@ -416,20 +433,47 @@ public class Vision extends SubsystemBase {
         return tagClass == TagClass.REEF;
     }
 
-    private void latch(AprilTagTarget target, Pose2d robotPose) {
+    private void latch(AprilTagTarget target, long sampleStamp, double captureTime, Pose2d robotPose) {
         latchedTagId = target.id;
         latchedTagClass = target.tagClass;
         latchedSquareHeading = target.squareHeading;
-        remember(target, robotPose);
+        latchedTagFieldPosition = null;
+        latchedSampleStamp = Long.MIN_VALUE;
+        latchedOutlierCount = 0;
+        updateLatchedEstimate(target, sampleStamp, captureTime, robotPose);
         for (String tableName : limelightTableNames) {
             LimelightHelpers.setPriorityTagID(tableName, target.id);
         }
     }
 
-    /** Records where the latched tag is on the field so odometry can carry it while unseen. */
-    private void remember(AprilTagTarget target, Pose2d robotPose) {
+    /**
+     * Folds one sighting of the latched tag into its filtered field
+     * position. Only a NEW camera frame counts (the robot loop reads the
+     * same frame several times), and the frame is placed on the field with
+     * the pose the robot had when the image was CAPTURED. A sample far from
+     * the estimate is ignored unless it persists - one bad solve must not
+     * yank the goal, but a real change (a pose reset) is followed.
+     */
+    private void updateLatchedEstimate(AprilTagTarget target, long sampleStamp, double captureTime, Pose2d robotPose) {
         latchedLastSeenTime = Timer.getFPGATimestamp();
-        latchedTagFieldPosition = robotFrameToField(robotPose, target.robotFrame);
+        if (sampleStamp == latchedSampleStamp) {
+            return;
+        }
+        latchedSampleStamp = sampleStamp;
+        Pose2d poseAtCapture = swerve.samplePoseAt(Utils.fpgaToCurrentTime(captureTime)).orElse(robotPose);
+        Translation2d measured = robotFrameToField(poseAtCapture, target.robotFrame);
+        if (latchedTagFieldPosition == null) {
+            latchedTagFieldPosition = measured;
+            return;
+        }
+        if (measured.getDistance(latchedTagFieldPosition) > VisionConstants.TrackingGains.TARGET_OUTLIER_METERS
+                && ++latchedOutlierCount < VisionConstants.TrackingGains.TARGET_OUTLIER_FRAMES) {
+            return;
+        }
+        latchedTagFieldPosition = latchedOutlierCount > 0
+            ? measured
+            : latchedTagFieldPosition.interpolate(measured, VisionConstants.TrackingGains.TARGET_FILTER_ALPHA);
+        latchedOutlierCount = 0;
     }
 
     private void releaseLatch() {
@@ -443,11 +487,20 @@ public class Vision extends SubsystemBase {
         }
     }
 
-    /** The latched tag's last sighting, moved by the odometry since. */
-    private AprilTagTarget rememberedTarget(Pose2d robotPose) {
-        return new AprilTagTarget(latchedTagId, latchedTagClass, "memory", -1,
-            0.0, 0.0, 0.0, 0.0, 0.0,
-            fieldToRobotFrame(robotPose, latchedTagFieldPosition), latchedSquareHeading, true);
+    /**
+     * The latched tag as the tracker should see it: its filtered field
+     * position from the robot's current pose. {@code live} is this loop's
+     * camera sighting (its display numbers are kept), or null while the tag
+     * is out of view.
+     */
+    private AprilTagTarget carriedTarget(Pose2d robotPose, AprilTagTarget live) {
+        Translation2d inRobot = fieldToRobotFrame(robotPose, latchedTagFieldPosition);
+        if (live == null) {
+            return new AprilTagTarget(latchedTagId, latchedTagClass, "memory", -1,
+                0.0, 0.0, 0.0, 0.0, 0.0, inRobot, latchedSquareHeading, true);
+        }
+        return new AprilTagTarget(live.id, live.tagClass, live.limelightName, live.cameraIndex,
+            live.tx, live.ty, live.cameraX, live.cameraY, live.cameraZ, inRobot, live.squareHeading, false);
     }
 
     /**
@@ -464,6 +517,8 @@ public class Vision extends SubsystemBase {
         double bestVisibleDistance = Double.MAX_VALUE;
         AprilTagTarget bestForGoal = null;
         double bestGoalDistance = Double.MAX_VALUE;
+        long bestGoalStamp = 0;
+        double bestGoalCaptureTime = now;
         boolean latchedSeen = false;
 
         for (int i = 0; i < limelightTableNames.length; i++) {
@@ -483,7 +538,11 @@ public class Vision extends SubsystemBase {
             // Raw camera-space array: an empty array (no 3D solve / topic
             // absent) or an all-zero one (3D solve disabled) must not become
             // a "0 m away" target that wins the closest-tag selection.
-            double[] cameraSpace = LimelightHelpers.getLimelightNTDoubleArray(limelightName, "targetpose_cameraspace");
+            // Read atomically with its NT timestamp: the timestamp identifies
+            // the camera frame, and minus the pipeline + capture latency it
+            // is when the image was taken.
+            var sample = LimelightHelpers.getLimelightDoubleArrayEntry(limelightName, "targetpose_cameraspace").getAtomic();
+            double[] cameraSpace = sample.value;
             if (cameraSpace.length < 6 || !(cameraSpace[2] > VisionConstants.MIN_CAMERA_Z)) {
                 continue;
             }
@@ -511,27 +570,36 @@ public class Vision extends SubsystemBase {
             if (distance < bestGoalDistance) {
                 bestForGoal = target;
                 bestGoalDistance = distance;
+                bestGoalStamp = sample.timestamp;
+                bestGoalCaptureTime = sample.timestamp / 1e6
+                    - (LimelightHelpers.getLatency_Pipeline(limelightName)
+                        + LimelightHelpers.getLatency_Capture(limelightName)) / 1000.0;
             }
         }
 
         cachedBestVisible = Optional.ofNullable(bestVisible);
         cachedBestTarget = Optional.ofNullable(bestForGoal);
 
-        // Latch management: hold the first chosen tag while tracking; while
-        // it is unseen, stand in its last sighting carried on odometry; drop
-        // it once it has been out of view for the memory time.
+        // Latch management: hold the first chosen tag while tracking, fold
+        // each new frame of it into the filtered field position, and drop it
+        // once it has been out of view for the memory time. While latched
+        // the tracker ALWAYS gets the filtered position seen from the
+        // current odometry pose - seen this loop or not.
         if (!trackingEnabled) {
             releaseLatch();
-        } else if (latchedTagId < 0) {
+            return;
+        }
+        if (latchedTagId < 0) {
             if (bestForGoal != null) {
-                latch(bestForGoal, robotPose);
+                latch(bestForGoal, bestGoalStamp, bestGoalCaptureTime, robotPose);
             }
         } else if (latchedSeen) {
-            remember(bestForGoal, robotPose);
+            updateLatchedEstimate(bestForGoal, bestGoalStamp, bestGoalCaptureTime, robotPose);
         } else if (now - latchedLastSeenTime > VisionConstants.TrackingGains.TARGET_MEMORY_SECONDS) {
             releaseLatch();
-        } else if (latchedTagFieldPosition != null) {
-            cachedBestTarget = Optional.of(rememberedTarget(robotPose));
+        }
+        if (latchedTagId >= 0 && latchedTagFieldPosition != null) {
+            cachedBestTarget = Optional.of(carriedTarget(robotPose, latchedSeen ? bestForGoal : null));
         }
     }
 

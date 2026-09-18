@@ -135,8 +135,6 @@ public class Robot extends LoggedRobot {
 
 	@Override
 	public void disabledExit() {
-		// First enable since boot: clear the logged "fresh code" flag
-		RobotContainer.freshCode = false;
 		// Hold both mechanisms where they are (see RobotContainer.enabledInit)
 		m_robotContainer.enabledInit();
 	}

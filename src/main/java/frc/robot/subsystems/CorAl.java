@@ -88,6 +88,8 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     /** Master switch: false reports "nothing held" whatever the sensor says. */
     private boolean appliedDetectionEnabled;
     private double commandedIntakeSpeed = 0; // Last commanded roller speed (+ = coral intake direction)
+    /** True while the rollers were started to take a coral IN: a confirmed arrival stops them (see periodic). */
+    private boolean arrivalStopArmed = false;
 
     // Position Tracking
     private double currentTargetAngle = 0;         // Current target angle for position control (degrees)
@@ -546,8 +548,21 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      * @param speed The speed value (-1.0 to 1.0)
      */
     public void setIntakeSpeed(double speed) {
+        arrivalStopArmed = speed > 0;
         commandedIntakeSpeed = speed;
         intakeMotor.setControl(percentRequest.withOutput(speed));
+    }
+
+    /**
+     * Runs the rollers to release a piece. The L2 - L4 coral eject and the
+     * algae eject run in the coral-intake direction, so without this the
+     * arrival auto-stop in periodic() would cut an eject short if the
+     * CANrange confirmed a detection part-way through it.
+     */
+    @Override
+    public void ejectRollers(double speed) {
+        setIntakeSpeed(speed);
+        arrivalStopArmed = false;
     }
 
     /**
@@ -843,12 +858,13 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         // threshold" and which side of the threshold a coral puts the
         // reading on depends on where the sensor looks. Then debounced on
         // both edges. On the confirmed rising edge (a coral just arrived),
-        // stop the rollers - but only if they are running in the
-        // coral-intake (positive) direction, so algae intake / holding and
-        // the L1 eject (negative) are never interrupted by the sensor.
+        // stop the rollers - but only if they were started to take a coral
+        // in (setIntakeSpeed with a positive speed), so algae intake /
+        // holding (negative) and every eject (ejectRollers) are never
+        // interrupted by the sensor.
         rawDetected = readDetection();
         boolean confirmed = detectionDebouncer.calculate(rawDetected);
-        if (confirmed && !gamePieceDetected && commandedIntakeSpeed > 0) {
+        if (confirmed && !gamePieceDetected && arrivalStopArmed) {
             stopIntake();
         }
         gamePieceDetected = confirmed;

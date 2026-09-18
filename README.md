@@ -253,7 +253,7 @@ One-time check after deploying: open `http://limelight-funnel.local:5801` and co
 If a camera still runs hot with those, check its mounting: the fan intake needs clear airflow, and a camera boxed in next to a motor or the roboRIO will run warm regardless of settings.
 
 ### LEDs ([LEDs.java](src/main/java/frc/robot/subsystems/LEDs.java)) — **commented out**
-There is no CANdle on the robot, so the whole subsystem is commented out to keep the device off the CAN bus and the class out of the build: every line of `LEDs.java`, `LEDConstants` in `Constants.java`, and the lines marked "CANdle disabled" in `RobotContainer.java` and `Dashboard.java`. The dashboard's *LEDs/State* field just says so. Restore all of them together when a CANdle is installed. What the code does when enabled — state derived automatically each loop, no commands needed:
+There is no CANdle on the robot, so the whole subsystem is commented out to keep the device off the CAN bus and the class out of the build: every line of `LEDs.java`, `LEDConstants` in `Constants.java`, and the lines marked "CANdle disabled" in `RobotContainer.java` and `Dashboard.java`. The dashboard's *LEDs/State* field reads "not installed". Restore all of them together when a CANdle is installed. What the code does when enabled — state derived automatically each loop, no commands needed:
 
 | Priority | State | Pattern |
 |---|---|---|
@@ -278,10 +278,10 @@ All dashboard integration goes through **[Elastic](https://frc-elastic.gitbook.i
 ### Tabs
 | Tab | Purpose | Highlights |
 |---|---|---|
-| **Setup** | Pre/post-match checks | FMS info, battery + CAN health, Alerts, Zero Elevator / Zero Pivot buttons, sensor status, **all three Limelight feeds** with per-camera "sees a tag" lights and the **Visible Tags** readout, auto chooser, branch side |
+| **Setup** | Pre/post-match checks | FMS info, battery + CAN health, Alerts, Zero Elevator / Zero Pivot buttons, sensor status, **all three Limelight feeds** with per-camera "sees a tag" lights and, under them, **Best Tag**, **Align Tag** and **Visible Tags**, auto chooser, branch side |
 | **Autonomous** | Auto selection & monitoring | Auto chooser, big match timer, **Field widget with live robot pose**, game piece indicator, Alerts |
 | **Teleop** | Driving | **Field widget**, match timer, big game-piece box, swerve module widget, vision tracking + **branch side**, elevator/pivot position bars and at-target lights |
-| **Testing** | One-mechanism testing + diagnostics | **Elevator / Pivot / Intake setpoint sliders with Go/Run/Stop buttons**, **Tunables (Robot Preferences) editor**, command scheduler, subsystem widgets, current graphs, **Best Tag**, vision + CANrange readouts |
+| **Testing** | One-mechanism testing + diagnostics | **Elevator / Pivot / Intake setpoint sliders with Go/Run/Stop buttons**, **Tunables (Robot Preferences) editor**, command scheduler, subsystem widgets, current graphs, **Best Tag**, the alignment tag's distance and TX (*Align Dist*, *Align TX*), CANrange readout |
 
 Every tab fits **12 × 5 grid cells** (1536 × 640 px at grid size 128), which leaves room for a docked Driver Station on the drive laptop. To change the layout, edit it in Elastic, `File → Export Layout`, and commit the exported file back to `src/main/deploy/elastic-layout.json`. The robot **switches Elastic to the right tab automatically** on mode changes (disabled → Setup, auto → Autonomous, teleop → Teleop, test → Testing) via ElasticLib ([util/Elastic.java](src/main/java/frc/robot/util/Elastic.java)). The Zero buttons on the Setup tab act only while the robot is disabled.
 
@@ -309,8 +309,8 @@ Two separate questions are answered on the dashboard, and they deliberately use 
 
 - A camera whose tag list has not changed for 10 s is ignored by these readouts, because NetworkTables keeps the last value of a camera that lost power or its link.
 - While disabled the cameras are throttled to about one solve per second, so the readouts lag the streams. **Select Test mode on the Driver Station** (no need to enable) to lift the throttle for bench checks.
-- `Vision/Best Tag Camera` and `Vision/Alignment Tag` have no widget in the shipped layout; drag them in from Elastic's topic list if you want them on a tab.
-- **After deploying this release, re-download the layout** (`File → Load Layout From Robot`) on every drive laptop — the *Visible Tags* widget appears only once the new `elastic-layout.json` is loaded.
+- *Best Tag* and *Align Tag* sit side by side on the Setup tab, so a tag that is seen but not aligned on shows at a glance. `Vision/Best Tag Camera` has no widget in the shipped layout (*Visible Tags* already names the camera); drag it in from Elastic's topic list if you want it.
+- **After deploying this release, re-download the layout** (`File → Load Layout From Robot`) on every drive laptop — the *Best Tag* / *Align Tag* / *Visible Tags* widgets on the Setup tab appear only once the new `elastic-layout.json` is loaded.
 
 ### Testing one mechanism at a time
 The Testing tab drives each mechanism **independently** — set the *Elevator Setpoint* slider and press *Elev Go*, and only the elevator moves; the arm stays exactly where it is. The same goes for *Pivot Setpoint / Pivot Go* and *Intake Speed / Run / Stop*.
@@ -346,7 +346,7 @@ Empirically measured numbers live in [util/Tunables.java](src/main/java/frc/robo
 | Vision – L1 Score Distance (m) | 1.0 | L1 standoff |
 | Vision – Barge Score Distance (m) / Processor Distance (m) | 1.2 / 0.55 | **First guesses** — unusable until the barge camera's pose is measured |
 | Vision – Reef Branch Offset (m) | 0.165 | Tag center to branch center |
-| Vision – Tracking Distance kP / Rotation kP | 1.5 / 0.06 | Alignment servo gains (m/s per m, rad/s per degree) |
+| Vision – Tracking Distance kP / Rotation kP | 1.5 / 0.06 | Alignment servo gains (m/s per m, rad/s per degree), clamped to 0 – 3× the default so a mistyped value cannot invert or destabilise the servo |
 
 Notes on the table:
 
@@ -594,7 +594,7 @@ The motion profiles, the controller mapping, reef and coral-station alignment, t
 ## Getting Started
 
 1. Install the **WPILib 2026** tools, then **clone this repository**.
-2. **Open the project** in WPILib VS Code 2026. On macOS / Linux, or with a non-default WPILib install, first change or remove the `org.gradle.java.home` line in `gradle.properties` (see [Unit tests](#unit-tests)).
+2. **Open the project** in WPILib VS Code 2026. On macOS / Linux, or with a non-default WPILib install, first point `org.gradle.java.home` at your WPILib JDK — either edit the line in `gradle.properties`, or override it in `~/.gradle/gradle.properties`, which takes precedence and leaves the repository untouched (see [Unit tests](#unit-tests)).
 3. Set your team number in `.wpilib/wpilib_preferences.json` if you are not Team 9143.
 4. **Build and test** with `./gradlew build`; try it without a robot with `./gradlew simulateJava`.
 5. **Deploy** (`./gradlew deploy` or the WPILib "Deploy Robot Code" command), then load the dashboard layout: Elastic → `File → Load Layout From Robot`.

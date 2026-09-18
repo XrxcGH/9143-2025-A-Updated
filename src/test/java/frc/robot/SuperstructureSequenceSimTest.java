@@ -156,6 +156,12 @@ class SuperstructureSequenceSimTest {
                 rollerDuties.add(dutyCycle);
             }
         }
+        /** Releases go through ejectRollers, which the real arm never cuts short on a detection edge. */
+        int ejects = 0;
+        @Override public void ejectRollers(double dutyCycle) {
+            ejects++;
+            setIntakeSpeed(dutyCycle);
+        }
         @Override public void stopIntake() { }
         @Override public boolean isGamePieceDetected() { return false; }
 
@@ -553,6 +559,7 @@ class SuperstructureSequenceSimTest {
                     loop("eject " + level, 0.0);
                 }
                 assertTrue(!arm.rollerDuties.isEmpty(), level + ": the rollers never ran");
+                assertTrue(arm.ejects == 1, level + ": a release must use ejectRollers (the arrival auto-stop must not cut it short)");
                 double expected = level.equals("L1") ? -intake : intake;
                 assertTrue(Math.signum(arm.rollerDuties.get(0)) == expected,
                     String.format("%s (%s): rollers ran at %.2f", level, auto ? "ejectCoral" : "score", arm.rollerDuties.get(0)));

@@ -18,15 +18,12 @@ import java.util.Arrays;
 
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
-import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 
-import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.networktables.LoggedDashboardChooser;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.button.Trigger;
@@ -34,7 +31,6 @@ import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
 import frc.robot.generated.TunerConstants;
 import frc.robot.Constants.DriveConstants;
-import frc.robot.Constants.ElevatorConstants;
 
 import frc.robot.subsystems.Swerve;
 import frc.robot.subsystems.Elevator;
@@ -140,15 +136,6 @@ public class RobotContainer {
     private final Elevator elevator = new Elevator();
     private final CorAl coral = new CorAl();
     // CANdle disabled (no CANdle on the robot): private final LEDs leds;
-
-    // Logged placeholders for AdvantageScope model work: four identity poses,
-    // and a flag that is true from boot until the robot is first enabled
-    // (cleared in Robot.disabledExit). The live mechanism poses are published
-    // by Dashboard as RobotState/ComponentPoses.
-    @AutoLogOutput (key = "Draggables/DesiredComponents3d")
-    public static Pose3d[] desiredComponents3d = {new Pose3d(), new Pose3d(), new Pose3d(), new Pose3d()};
-    @AutoLogOutput (key = "Draggables/FreshCode")
-    public static boolean freshCode = true;
 
     /** Coordinated elevator+arm motion with collision interlocks. */
     private final Superstructure superstructure = new Superstructure(elevator, coral);

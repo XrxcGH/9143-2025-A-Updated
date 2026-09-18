@@ -41,7 +41,7 @@ class SuperstructureCorridorTest {
     void measuredAndObservedContactsAreOutside() {
         assertFalse(Superstructure.poseClear(12.0, 0.0), "tucked arm hits the cross bar above ~10.75 in");
         assertFalse(Superstructure.poseClear(23.0, 5.0), "5 deg hits the middle-stage tube at ~23 in");
-        assertFalse(Superstructure.poseClear(52.5, 45.0), "old L4 angle hits the middle-stage tube at the top");
+        assertFalse(Superstructure.poseClear(52.5, 45.0), "45 deg hits the middle-stage tube at the top");
         assertFalse(Superstructure.poseClear(52.5, 35.0), "35 deg is no better at the top");
         assertFalse(Superstructure.poseClear(40.0, 90.0), "90 deg is not a safe travel angle above ~36 in");
         assertFalse(Superstructure.poseClear(2.0, 160.0), "algae intake angle hits the bumper near the base");
@@ -118,6 +118,14 @@ class SuperstructureCorridorTest {
             "the carriage should be down in the low box by the time the arm reaches RAISE, was " + height);
     }
 
+    // Facts about the clearance table along the L4 paths. The planner is clamped by the table every
+    // loop and needs no constants for them; they are pinned here so a table edit that closes one of
+    // these windows fails a test instead of stalling the arm under its clamp.
+    private static final double L4_ROTATE_START_HEIGHT = 31.0;           // in: from here to the mid-corridor ceiling 27.5-100 deg are all clear
+    private static final double L4_STAGE_WINDOW_MAX_ANGLE = 30.0;        // deg: the stage angle's row (25-30) is clear up to the pre-top height
+    private static final double L4_RETURN_MID_SWEEP_ANGLE = 45.0;        // deg: mid-sweep on the way out of L4
+    private static final double L4_RETURN_SAFE_ROTATE_MAX_HEIGHT = 37.0; // in: 45 deg -> band-pass angle is clear from the station to here
+
     @Test
     void stagedSequenceWaypointsAreInside() {
         // Low box: anything from the clear angle to the band-pass angle, up to the roof
@@ -132,12 +140,12 @@ class SuperstructureCorridorTest {
         }
         // L4 station: every angle from the stage angle to RAISE is clear across the rotate window
         // (the arm is released anywhere in this window, up to the mid-corridor ceiling the ratchet parks under)
-        for (double h = SuperstructureConstants.L4_ROTATE_START_HEIGHT; h <= SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT; h += 0.5) {
+        for (double h = L4_ROTATE_START_HEIGHT; h <= SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT; h += 0.5) {
             assertTrue(Superstructure.pivotPathClear(SuperstructureConstants.L4_STAGE_ANGLE, PivotPresetAngles.RAISE.getAngle(), h),
                 "station rotation at " + h);
         }
-        // L4 climb at the stage angle (and up to the stage-done angle) to the pre-top height
-        for (double a = SuperstructureConstants.L4_STAGE_ANGLE; a <= SuperstructureConstants.L4_STAGE_DONE_ANGLE; a += 1.0) {
+        // L4 climb at the stage angle (and across the rest of its row) to the pre-top height
+        for (double a = SuperstructureConstants.L4_STAGE_ANGLE; a <= L4_STAGE_WINDOW_MAX_ANGLE; a += 1.0) {
             assertTrue(Superstructure.elevatorPathClear(SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.L4_PRE_TOP_HEIGHT, a),
                 "L4 climb at " + a);
         }
@@ -148,20 +156,21 @@ class SuperstructureCorridorTest {
             PresetHeights.CORAL_L4.getHeight(), SuperstructureConstants.L4_FINAL_GATE_ANGLE));
         assertTrue(Superstructure.pivotPathClear(SuperstructureConstants.L4_STAGE_ANGLE, PivotPresetAngles.CORAL_L4.getAngle(),
             SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT));
-        // L4 return: drop at the L4 angle, stage to 45 below the rotate-max height, station, RAISE below the safe-rotate height
+        // L4 return: drop at the L4 angle; the sweep to RAISE passes 45 deg below the rotate-max height, the
+        // station is clear at 45 deg, and from the station up to the safe-rotate height 45 deg -> band-pass is clear
         assertTrue(Superstructure.elevatorPathClear(PresetHeights.CORAL_L4.getHeight(), SuperstructureConstants.L4_RETURN_DROP_HEIGHT,
             PivotPresetAngles.CORAL_L4.getAngle()));
         for (double h = SuperstructureConstants.L4_RETURN_DROP_HEIGHT; h <= SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT; h += 0.5) {
             assertTrue(Superstructure.pivotPathClear(PivotPresetAngles.CORAL_L4.getAngle(),
-                SuperstructureConstants.L4_RETURN_STAGE_ANGLE + SuperstructureConstants.SAFE_ANGLE_TOLERANCE, h), "L4 return stage at " + h);
+                L4_RETURN_MID_SWEEP_ANGLE + SuperstructureConstants.SAFE_ANGLE_TOLERANCE, h), "L4 return stage at " + h);
         }
         assertTrue(Superstructure.elevatorPathClear(SuperstructureConstants.L4_RETURN_DROP_HEIGHT, SuperstructureConstants.L4_STATION_HEIGHT,
-            SuperstructureConstants.L4_RETURN_STAGE_ANGLE));
-        for (double h = SuperstructureConstants.L4_STATION_HEIGHT; h <= SuperstructureConstants.L4_RETURN_SAFE_ROTATE_MAX_HEIGHT; h += 0.5) {
-            assertTrue(Superstructure.pivotPathClear(SuperstructureConstants.L4_RETURN_STAGE_ANGLE,
+            L4_RETURN_MID_SWEEP_ANGLE));
+        for (double h = SuperstructureConstants.L4_STATION_HEIGHT; h <= L4_RETURN_SAFE_ROTATE_MAX_HEIGHT; h += 0.5) {
+            assertTrue(Superstructure.pivotPathClear(L4_RETURN_MID_SWEEP_ANGLE,
                 SuperstructureConstants.BAND_PASS_MIN_ANGLE, h), "L4 return swing (to band-pass) at " + h);
         }
-        assertTrue(Superstructure.pivotPathClear(SuperstructureConstants.L4_RETURN_STAGE_ANGLE, PivotPresetAngles.RAISE.getAngle(),
+        assertTrue(Superstructure.pivotPathClear(L4_RETURN_MID_SWEEP_ANGLE, PivotPresetAngles.RAISE.getAngle(),
             SuperstructureConstants.L4_STATION_HEIGHT));
         // L3 approach: the RAISE -> L3 rotation is clear across the whole rotate window
         for (double h = PresetHeights.CORAL_L3.getHeight() - SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET;

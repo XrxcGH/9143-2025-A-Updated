@@ -864,8 +864,7 @@ public class Vision extends SubsystemBase {
                 // Its yaw is field-true from the tag geometry alone. Only a
                 // camera with a measured mounting pose can supply it.
                 double[] mt1 = LimelightHelpers.getLimelightDoubleArrayEntry(limelightName, "botpose_wpiblue").get();
-                bestGoalFieldTrueYaw = VisionConstants.LIMELIGHT_POSES[i].measured && mt1.length >= 8 && mt1[7] >= 1
-                    ? mt1[5] : Double.NaN;
+                bestGoalFieldTrueYaw = mt1.length >= 8 && mt1[7] >= 1 ? mt1[5] : Double.NaN;
             }
         }
 

@@ -112,12 +112,6 @@ public final class Constants {
 		// ratio from one tape reading - take two heights and use the slope.
 		public static final double ELEVATOR_MEASURED_TRAVEL_RATIO = 1.0;
 
-		// Default carriage travel (inches) per MOTOR rotation (~0.733): the
-		// model times the default ratio. Anything that needs the LIVE value
-		// asks the Elevator (inchesPerRotation()).
-		public static final double ELEVATOR_INCHES_PER_ROTATION =
-			ELEVATOR_MODELED_INCHES_PER_ROTATION * ELEVATOR_MEASURED_TRAVEL_RATIO;
-
 		// --- MAXMotion Profile (inches, seconds) - tunable defaults ---
 		// NEO free speed 5676 RPM = 94.6 rot/s -> 94.6 x 0.733 = ~69 in/s
 		// theoretical top speed through 15:1. Cruise is 58% of that: kV x 40 =
@@ -590,8 +584,7 @@ public final class Constants {
 			// pulling back, so settling exactly at it works; if the arm
 			// hunts against the limit during tuning, drop this 1-2 degrees.
 			ALGAE_INTAKE(160.0),
-			ALGAE_SCORE(105.0),
-			ALGAE_HOLD(90.0);
+			ALGAE_SCORE(105.0);
 
 			private final double angle;
 
@@ -708,8 +701,10 @@ public final class Constants {
 		// and SAFE_TRAVEL_MIN_ANGLE (band B for 75-95 deg starts at 36-39 in).
 		public static final double MID_CORRIDOR_MAX_HEIGHT = 36.0;  // Inches
 		// Arm angle from which the carriage may go anywhere: RAISE (100 deg)
-		// itself; the gate accepts SAFE_ANGLE_TOLERANCE below it, i.e. a
-		// measured 97 deg, and the 97.5 deg row is clear 4-53.5 in.
+		// itself. The gate accepts SAFE_ANGLE_TOLERANCE below it (a measured
+		// 97 deg): with chain slack the arm rests a degree or two short of
+		// RAISE, and a table lookup from there is nudged onto the RAISE row
+		// (Superstructure.snapIntoTable).
 		public static final double SAFE_TRAVEL_MIN_ANGLE = 100.0;   // Degrees
 		// Angles beyond this need height (bumper / Limelight bracket): from
 		// ~113 deg up the corridor starts at 4 in, from 135 deg at 5 in and
@@ -733,13 +728,16 @@ public final class Constants {
 
 		// --- High scoring pose (L4): height >= L4_ZONE_MIN_HEIGHT ---
 		public static final double L4_ZONE_MIN_HEIGHT = 35.0;       // Inches
-		// Approach: rise at RAISE to the station, rotate to the stage angle
-		// there (25-100 deg are all clear at 31-35 in), climb to the pre-top
-		// height with the arm at the stage angle (25-30 deg clear to 51 in),
-		// finish the rotation to 20 deg above 37 in (20 deg clear 37.5-53.5)
-		// and only then send the carriage to the top.
+		// Approach: the arm leaves RAISE as the carriage passes
+		// ARM_RELEASE_MIN_HEIGHT and sweeps down under the arm-side clamp
+		// while the carriage climbs. It waits at the stage angle (25-30 deg
+		// is clear 30-51 in) until the carriage is above the final-angle
+		// height, finishes to 20 deg there (20 deg is clear 37.5-53.5 in),
+		// and the carriage waits at the pre-top height until the arm is
+		// strictly inside the final gate angle.
+		// The station is where a carriage leaving L4 waits until the arm has
+		// cleared band A (25-100 deg are all clear at 31-35 in).
 		public static final double L4_STATION_HEIGHT = 33.0;        // Inches
-		public static final double L4_ROTATE_START_HEIGHT = 31.0;   // Inches: bottom of the window where 25-100 deg are ALL clear
 		// Carriage height from which the arm may leave RAISE on the way to a
 		// scoring pose, under the arm-side clamp (Superstructure
 		// .armLimitForHeight), which holds it at the edge of any row the
@@ -785,15 +783,15 @@ public final class Constants {
 		// reading of 24.x there is in the 20-25 row, which is blocked below
 		// 35.5 in.
 		public static final double L4_STAGE_ANGLE = 27.5;           // Degrees
-		public static final double L4_STAGE_DONE_ANGLE = 30.0;      // Degrees: carriage may continue up
 		public static final double L4_PRE_TOP_HEIGHT = 48.0;        // Inches
 		public static final double L4_FINAL_ANGLE_MIN_HEIGHT = 37.0; // Inches: arm may finish to 20 deg
 		public static final double L4_FINAL_GATE_ANGLE = 22.5;      // Degrees: carriage may go to the top
-		// Return ("drop before pivoting"): descend at the L4 angle to the
-		// drop height (20 deg is clear 37.5-53.5), swing to 45 deg while
-		// below the rotate-max height (45 deg clear 28-46), drop to the
-		// station, swing to RAISE below 37 in (90 deg clear to 36.5), then
-		// descend freely.
+		// Return ("drop before pivoting"): the carriage descends at the L4
+		// angle (20 deg is clear 37.5-53.5 in). Below the rotate-max height
+		// the arm heads for RAISE in one sweep under the arm-side clamp, and
+		// the carriage's target steps down as the arm rises: the drop height
+		// until the arm has passed the stage-done angle, the station until it
+		// has passed BAND_PASS_MIN_ANGLE, then the real target.
 		public static final double L4_RETURN_DROP_HEIGHT = 39.0;         // Inches
 		// Not a clearance gate, a speed-shaping waypoint: the exit's first leg
 		// runs at full pace to here (still at the L4 angle, clear 35.5-52.5
@@ -802,9 +800,7 @@ public final class Constants {
 		// the arm (Superstructure.l4ExitPace).
 		public static final double L4_RETURN_SHAPE_HEIGHT = 41.5;        // Inches
 		public static final double L4_RETURN_ROTATE_MAX_HEIGHT = 43.0;   // Inches
-		public static final double L4_RETURN_STAGE_ANGLE = 45.0;         // Degrees
-		public static final double L4_RETURN_STAGE_DONE_ANGLE = 40.0;    // Degrees
-		public static final double L4_RETURN_SAFE_ROTATE_MAX_HEIGHT = 37.0; // Inches
+		public static final double L4_RETURN_STAGE_DONE_ANGLE = 40.0;    // Degrees: carriage may leave the drop height for the station
 
 		// Kept below a ceiling (or above a floor) by the continuous carriage
 		// targets, so the carriage decelerating into its clamp still lands
@@ -1060,8 +1056,9 @@ public final class Constants {
 		// ...and the estimator heading must have CONVERGED on that solve: it
 		// must agree with the solve's own heading within this much
 		public static final double HEADING_SEED_AGREEMENT_DEGREES = 3.0;
-		// Driver heading re-seed (left bumper while enabled): MegaTag1 is fused
-		// for this long so the heading corrects from tag geometry
+		// Heading re-seed while enabled (Vision.requestHeadingReseed - not
+		// bound to a button by default): MegaTag1 is fused for this long so
+		// the heading corrects from tag geometry
 		public static final double HEADING_RESEED_WINDOW_SECONDS = 2.0;
 
 		// --- Tag Classes (2025 Reefscape field) ---
@@ -1190,7 +1187,7 @@ public final class Constants {
 		public static final long INTERNAL_LOG_MIN_FREE_BYTES = 100L * 1024 * 1024;
 		public static final int INTERNAL_LOG_KEEP_NEWEST = 5;
 
-		// Indices into the Components3d / DesiredComponents3d Pose3d arrays
+		// Indices into the component Pose3d array (RobotState/ComponentPoses)
 		// published for AdvantageScope's articulated 3D robot model. This
 		// robot's three moving components, in the order the code publishes
 		// them (must match the component order in

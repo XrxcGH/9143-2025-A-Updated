@@ -5,7 +5,6 @@ import edu.wpi.first.wpilibj.Preferences;
 import frc.robot.Constants.CorAlConstants;
 import frc.robot.Constants.DriveConstants;
 import frc.robot.Constants.ElevatorConstants;
-import frc.robot.Constants.SuperstructureConstants;
 import frc.robot.Constants.VisionConstants;
 
 /**
@@ -422,14 +421,16 @@ public final class Tunables {
     // Vision tracking gains
     // ------------------------------------------------------------------
 
-    /** m/s of drive command per meter of position error (not clamped). */
+    /** m/s of drive command per meter of position error, clamped to 0 - 3x the default. */
     public static double trackingDistanceKp() {
-        return Preferences.getDouble(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP);
+        return clamped(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP,
+            0.0, 3.0 * VisionConstants.TrackingGains.DISTANCE_kP);
     }
 
-    /** rad/s of rotation command per degree of angle error (not clamped). */
+    /** rad/s of rotation command per degree of angle error, clamped to 0 - 3x the default. */
     public static double trackingRotationKp() {
-        return Preferences.getDouble(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP);
+        return clamped(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP,
+            0.0, 3.0 * VisionConstants.TrackingGains.ROTATION_kP);
     }
 
 }

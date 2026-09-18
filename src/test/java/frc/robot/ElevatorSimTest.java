@@ -89,6 +89,6 @@ class ElevatorSimTest {
         }
 
         assertEquals(heldHeight, elevator.getCurrentPosition(), 2.0,
-            "Carriage should hold its height after the stick is released");
+            "Carriage should hold its height after holdCurrentPosition()");
     }
 }

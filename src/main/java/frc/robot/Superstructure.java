@@ -280,20 +280,21 @@ public class Superstructure {
                 + ". They are commanded as set; watch them.";
     }
 
-    /** One-line description of the staged-sequence stations, for the dashboard. */
+    /** One-line description of the L3 / L4 handoff gates, from the live constants, for the dashboard. */
     public static String stationSummary() {
         return String.format(
-            "L4 up: RAISE to %.0f in, rotate to %.0f deg there, climb to %.0f, finish %.0f deg above %.0f, top | "
-                + "L4 down: drop to %.0f at %.0f deg, %.0f deg below %.0f, station %.0f, RAISE below %.0f | "
-                + "L3 up: rotate %.0f in below target; down: lift to %.0f, descend at RAISE | "
+            "L3 / L4 up: arm leaves RAISE as the carriage passes %.0f in | "
+                + "L4 up: arm waits at %.1f deg below %.0f in, carriage waits at %.0f in until the arm is inside %.1f deg | "
+                + "L4 down: arm to RAISE below %.0f in; carriage holds %.0f in until %.0f deg, %.0f in until %.0f deg | "
+                + "L3 down: lift to %.0f in, descend past %.0f deg | "
                 + "L3 <-> L4: direct, arm turns inside the band overlap (no RAISE)",
-            SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.L4_STAGE_ANGLE,
-            SuperstructureConstants.L4_PRE_TOP_HEIGHT, PivotPresetAngles.CORAL_L4.getAngle(),
-            SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT,
-            SuperstructureConstants.L4_RETURN_DROP_HEIGHT, PivotPresetAngles.CORAL_L4.getAngle(),
-            SuperstructureConstants.L4_RETURN_STAGE_ANGLE, SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT,
-            SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.L4_RETURN_SAFE_ROTATE_MAX_HEIGHT,
-            SuperstructureConstants.MID_POSE_ROTATE_BELOW_TARGET, SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT);
+            SuperstructureConstants.ARM_RELEASE_MIN_HEIGHT,
+            SuperstructureConstants.L4_STAGE_ANGLE, SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT,
+            SuperstructureConstants.L4_PRE_TOP_HEIGHT, SuperstructureConstants.L4_FINAL_GATE_ANGLE,
+            SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT,
+            SuperstructureConstants.L4_RETURN_DROP_HEIGHT, SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE,
+            SuperstructureConstants.L4_STATION_HEIGHT, SuperstructureConstants.BAND_PASS_MIN_ANGLE,
+            SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT, SuperstructureConstants.BAND_PASS_MIN_ANGLE);
     }
 
     // ==================================================================
@@ -568,6 +569,7 @@ public class Superstructure {
         }
         return ceilings ? Math.min(a, b) : Math.max(a, b);
     }
+
     /** A blocked row this close (deg) to the arm is one the arm is about to enter. */
     private static final double IMMINENT_SWEEP = 5.0;
 
@@ -744,21 +746,6 @@ public class Superstructure {
                 elevator.setPosition(backTo, pace);
             }
         }
-    }
-
-    /**
-     * Climbs toward {@code target} as fast as the arm allows: every loop the
-     * carriage is given the target, clamped below the ceiling for the sweep
-     * the arm has left to do, and never below where it already is.
-     */
-    private Command climbWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
-        double[] latch = {Double.NaN};
-        double[] arrival = {Double.NaN, 0.0};
-        return Commands.run(() -> {
-            double target = targetSupplier.getAsDouble();
-            double destination = armDestination.getAsDouble();
-            commandCarriage(latch, climbGoal(target, armAngleForSweep(arrival, destination), destination), target, true);
-        }, elevator);
     }
 
     /**
@@ -1688,7 +1675,7 @@ public class Superstructure {
         // clamp the ratchet last sent) and let any pose command cancel the
         // eject.
         return Commands.sequence(
-            Commands.runOnce(() -> coral.setIntakeSpeed(scoreSpeed(currentGoal))),
+            Commands.runOnce(() -> coral.ejectRollers(scoreSpeed(currentGoal))),
             Commands.waitSeconds(0.5),
             Commands.runOnce(coral::stopIntake)
         ).handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
@@ -1737,9 +1724,12 @@ public class Superstructure {
     public Command scoreAlgae() {
         return setGoal(Goal.ALGAE_SCORE)
             .andThen(moveTo(PresetHeights.ALGAE_SCORE, PivotPresetAngles.ALGAE_SCORE))
-            .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_SCORE_SPEED), coral))
+            .andThen(Commands.runOnce(() -> coral.ejectRollers(CorAlConstants.ALGAE_SCORE_SPEED), coral))
             .andThen(Commands.waitSeconds(0.5))
-            .andThen(Commands.runOnce(coral::stopIntake, coral))
+            .andThen(Commands.runOnce(() -> {
+                coral.stopIntake();
+                algaeHeld = false; // released: the next home() stows and intakes instead of carrying
+            }, coral))
             .handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
     }
 
@@ -1768,8 +1758,8 @@ public class Superstructure {
     /**
      * Distance the drivetrain must travel from where it ejected before an
      * L3/L4 exit may start. Leaving those poses swings the claw through
-     * 75-110 deg, where it reaches 8.9-11.7 in past the front bumper face
-     * (CAD) - into the reef if the robot is still flush against it.
+     * 75-110 deg, where it reaches 9-12 in (8.9-11.7 in the CAD) past the
+     * front bumper face - into the reef if the robot is still flush against it.
      */
     private static final double REEF_BACKOFF_METERS = 0.35;
 
@@ -1849,7 +1839,7 @@ public class Superstructure {
             Pose2d ejectedAt = robotPose.get();
 
             Command rollersOut = Commands.startEnd(
-                () -> coral.setIntakeSpeed(scoreSpeed(scored)), // L1 runs the rollers the other way
+                () -> coral.ejectRollers(scoreSpeed(scored)), // L1 runs the rollers the other way
                 coral::stopIntake, coral);
             Command ejectWindow = algae
                 ? Commands.waitSeconds(0.5)

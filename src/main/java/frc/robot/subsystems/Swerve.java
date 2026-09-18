@@ -123,8 +123,6 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 	// bindings, cleared whenever the tracking command ends
 	private boolean isVisionTrackingEnabled = false;
 
-	public Command aprilTagTrackingCommand;
-
 	// SysId routine for characterizing translation. This is used to find PID gains for the drive motors.
 	private final SysIdRoutine m_sysIdRoutineTranslation = new SysIdRoutine(
 		new SysIdRoutine.Config(
@@ -205,7 +203,6 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			startSimThread();
 		}
 
-		aprilTagTrackingCommand = createAprilTagTrackingCommand();
 
 		configureAutoBuilder();
 	}
@@ -230,7 +227,6 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			startSimThread();
 		}
 
-		aprilTagTrackingCommand = createAprilTagTrackingCommand();
 
 		configureAutoBuilder();
 	}
@@ -259,7 +255,6 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 			startSimThread();
 		}
 
-		aprilTagTrackingCommand = createAprilTagTrackingCommand();
 
 		configureAutoBuilder();
 	}

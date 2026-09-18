@@ -226,10 +226,10 @@
             }
           },
           {
-            "title": "Elevator Height (in)",
+            "title": "Elev (in)",
             "x": 384.0,
             "y": 512.0,
-            "width": 256.0,
+            "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
@@ -239,15 +239,41 @@
             }
           },
           {
-            "title": "CorAl Angle (deg)",
-            "x": 640.0,
+            "title": "Arm (deg)",
+            "x": 512.0,
             "y": 512.0,
-            "width": 256.0,
+            "width": 128.0,
             "height": 128.0,
             "type": "Text Display",
             "properties": {
               "period": 0.033,
               "topic": "/SmartDashboard/CorAl/Angle",
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "Best Tag",
+            "x": 640.0,
+            "y": 512.0,
+            "width": 128.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "period": 0.033,
+              "topic": "/SmartDashboard/Vision/Best Tag",
+              "show_submit_button": false
+            }
+          },
+          {
+            "title": "Align Tag",
+            "x": 768.0,
+            "y": 512.0,
+            "width": 128.0,
+            "height": 128.0,
+            "type": "Text Display",
+            "properties": {
+              "period": 0.033,
+              "topic": "/SmartDashboard/Vision/Alignment Tag",
               "show_submit_button": false
             }
           },
@@ -929,7 +955,7 @@
             }
           },
           {
-            "title": "Vision Dist (m)",
+            "title": "Align Dist (m)",
             "x": 1408.0,
             "y": 128.0,
             "width": 128.0,
@@ -955,7 +981,7 @@
             }
           },
           {
-            "title": "Vision TX",
+            "title": "Align TX",
             "x": 1408.0,
             "y": 384.0,
             "width": 128.0,

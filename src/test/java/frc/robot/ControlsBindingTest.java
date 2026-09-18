@@ -119,7 +119,7 @@ class ControlsBindingTest {
         operator.setRightY(-1.0);
         run(10);
         assertFalse(elevator.isInManualMode(), "stick alone must not drive the elevator");
-        assertEquals(null, elevator.getCurrentCommand(), "no default command owns the elevator any more");
+        assertEquals(null, elevator.getCurrentCommand(), "no default command owns the elevator");
     }
 
     @Test

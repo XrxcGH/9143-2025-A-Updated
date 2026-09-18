@@ -247,11 +247,11 @@ public class Dashboard {
         // operator's Back / Start zeroing bindings).
         SmartDashboard.putData("Zero Elevator",
             Commands.runOnce(elevator::resetEncoders, elevator)
-                .onlyIf(edu.wpi.first.wpilibj.DriverStation::isDisabled)
+                .onlyIf(DriverStation::isDisabled)
                 .ignoringDisable(true).withName("Zero Elevator"));
         SmartDashboard.putData("Zero CorAl Pivot",
             Commands.runOnce(coral::resetPivotEncoder, coral)
-                .onlyIf(edu.wpi.first.wpilibj.DriverStation::isDisabled)
+                .onlyIf(DriverStation::isDisabled)
                 .ignoringDisable(true).withName("Zero CorAl Pivot"));
 
         // --- Elastic SwerveDrive widget ---
@@ -494,7 +494,7 @@ public class Dashboard {
         // below. To restore, publish the real state instead (see LEDs.java):
         // SmartDashboard.putString("LEDs/State",
         //     leds.getState() != null ? leds.getState().name() : "INIT");
-        SmartDashboard.putString("LEDs/State", "CANdle code commented out");
+        SmartDashboard.putString("LEDs/State", "not installed");
 
 
         // --- Alerts (persistent conditions) ---

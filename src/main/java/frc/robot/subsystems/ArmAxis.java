@@ -34,6 +34,9 @@ public interface ArmAxis extends Subsystem {
 
     void setIntakeSpeed(double dutyCycle);
 
+    /** Runs the rollers to RELEASE a piece: as setIntakeSpeed, but never stopped by the arrival auto-stop. */
+    void ejectRollers(double dutyCycle);
+
     void stopIntake();
 
     boolean isGamePieceDetected();

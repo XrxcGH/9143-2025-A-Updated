@@ -273,6 +273,144 @@ public class Superstructure {
     }
 
     // ==================================================================
+    // Continuous carriage targets ("ratchets")
+    // ==================================================================
+    // The staged sequences below are safe because every handover waits on
+    // MEASURED state. What made them feel like a routine was the carriage
+    // stopping at each intermediate height while the arm worked. These two
+    // helpers remove those stops without touching the handover logic: the
+    // carriage is given the FINAL height every loop, clamped to what the
+    // corridors allow for the angles the arm still has to sweep, so it
+    // climbs (or descends) continuously as the arm unlocks travel.
+    //
+    // This is cheap - one walk of the 32-row corridor table per loop, no
+    // search - and it cannot deadlock, because the arm's schedule is
+    // unchanged and its direction within a stage is known: the limit only
+    // moves in the carriage's favour as the arm advances.
+
+    private static final double NO_BAND = Double.NaN;
+
+    /**
+     * Ceiling of the corridor band containing {@code height} at
+     * {@code angle}, or NaN when that pose is blocked. Allocation-free: this
+     * runs every loop while a move is in progress.
+     */
+    private static double bandCeiling(double angle, double height) {
+        for (double[] row : SuperstructureConstants.FREE_CORRIDORS) {
+            if (angle < row[0]) {
+                if (height >= row[1] && height <= row[2]) {
+                    return row[2];
+                }
+                if (!Double.isNaN(row[3]) && height >= row[3] && height <= row[4]) {
+                    return row[4];
+                }
+                return NO_BAND;
+            }
+        }
+        return NO_BAND;
+    }
+
+    /** Floor of the corridor band containing {@code height} at {@code angle}, or NaN when blocked. */
+    private static double bandFloor(double angle, double height) {
+        for (double[] row : SuperstructureConstants.FREE_CORRIDORS) {
+            if (angle < row[0]) {
+                if (height >= row[1] && height <= row[2]) {
+                    return row[1];
+                }
+                if (!Double.isNaN(row[3]) && height >= row[3] && height <= row[4]) {
+                    return row[3];
+                }
+                return NO_BAND;
+            }
+        }
+        return NO_BAND;
+    }
+
+    /**
+     * Highest height that stays clear for every angle between {@code from}
+     * and {@code to} - the angles the arm still has to pass through - so the
+     * carriage never climbs into a height the arm is about to block.
+     */
+    public static double ceilingForSweep(double from, double to, double height) {
+        double ceiling = ElevatorConstants.ELEVATOR_MAX_POSITION;
+        // Walk FROM the arm's current angle toward its destination. The first
+        // sample is the current pose, which is clear; the walk stops at the
+        // first angle whose band does not contain this height, because the
+        // arm cannot pass that angle until the carriage has moved - and by
+        // then this is recomputed.
+        double step = to >= from ? SWEEP_STEP : -SWEEP_STEP;
+        double angle = from;
+        while (true) {
+            double rowCeiling = bandCeiling(angle, height);
+            if (Double.isNaN(rowCeiling)) {
+                break;
+            }
+            ceiling = Math.min(ceiling, rowCeiling);
+            if (angle == to) {
+                break;
+            }
+            angle += step;
+            if ((step > 0 && angle > to) || (step < 0 && angle < to)) {
+                angle = to;
+            }
+        }
+        return ceiling;
+    }
+
+    /** Mirror of {@link #ceilingForSweep} for descents. */
+    public static double floorForSweep(double from, double to, double height) {
+        double floor = ElevatorConstants.ELEVATOR_ZERO_HEIGHT;
+        double step = to >= from ? SWEEP_STEP : -SWEEP_STEP;
+        double angle = from;
+        while (true) {
+            double rowFloor = bandFloor(angle, height);
+            if (Double.isNaN(rowFloor)) {
+                break;
+            }
+            floor = Math.max(floor, rowFloor);
+            if (angle == to) {
+                break;
+            }
+            angle += step;
+            if ((step > 0 && angle > to) || (step < 0 && angle < to)) {
+                angle = to;
+            }
+        }
+        return floor;
+    }
+
+    private static final double SWEEP_STEP = 2.5;
+
+    /**
+     * Climbs toward {@code target} as fast as the arm allows: every loop the
+     * carriage is given the target, clamped below the ceiling for the sweep
+     * the arm has left to do, and never below where it already is.
+     */
+    private Command climbWithArm(double target, DoubleSupplier armDestination) {
+        return Commands.run(() -> {
+            double height = elevator.getCurrentPosition();
+            double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
+            // The margin holds the carriage short of a ceiling it is being
+            // clamped AT, but never short of the target itself: the scoring
+            // poses sit at the top of their band by design (L4 is 52.5 in a
+            // band that ends at 52.5), so subtracting a margin from those
+            // would leave the carriage permanently half an inch low.
+            double ceiling = Math.max(raw - SuperstructureConstants.RATCHET_MARGIN, Math.min(target, raw));
+            elevator.setPosition(Math.max(Math.min(target, ceiling), height));
+        }, elevator);
+    }
+
+    /** Mirror of {@link #climbWithArm}: descends as fast as the arm allows. */
+    private Command descendWithArm(double target, DoubleSupplier armDestination) {
+        return Commands.run(() -> {
+            double height = elevator.getCurrentPosition();
+            double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
+            double floor = Math.min(raw + SuperstructureConstants.RATCHET_MARGIN, Math.max(target, raw));
+            elevator.setPosition(Math.min(Math.max(target, floor), height));
+        }, elevator);
+    }
+
+    // ==================================================================
     // Motion planner
     // ==================================================================
 
@@ -401,8 +539,17 @@ public class Superstructure {
         // to wait for RAISE because 75-95 deg is blocked above ~36 in.
         double release = descendingNext ? SuperstructureConstants.BAND_PASS_MIN_ANGLE
             : SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE;
-        return both(lift, SAFE_ANGLE)
+        // The carriage lifts clear of the tube while the arm starts up, then
+        // descends as soon as the arm's angle allows it - the floor falls
+        // from 30 in to nothing as the arm passes 75 deg - so the lift and
+        // the descent are one motion rather than two.
+        Command armWork = armTo(SAFE_ANGLE)
             .andThen(Commands.waitUntil(() -> armAtLeast(release)));
+        return elevatorTo(lift)
+            .andThen(Commands.deadline(armWork,
+                descendWithArm(ElevatorConstants.ELEVATOR_ZERO_HEIGHT, () -> SAFE_ANGLE)
+                    .beforeStarting(Commands.waitUntil(() -> heightAtLeast(lift - 1.0)
+                        || armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)))));
     }
 
     /**
@@ -413,14 +560,19 @@ public class Superstructure {
     private Command leaveHighPose(boolean descendingNext) {
         double release = descendingNext ? SuperstructureConstants.BAND_PASS_MIN_ANGLE
             : SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE;
-        return elevatorTo(SuperstructureConstants.L4_RETURN_DROP_HEIGHT)
-            .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT)))
-            .andThen(armTo(SuperstructureConstants.L4_RETURN_STAGE_ANGLE))
+        // The carriage drops first (the top is only clear at the L4 angle),
+        // and once it is low enough for the arm to start swinging back, the
+        // two run together: the arm sweeps up to RAISE while the carriage
+        // keeps descending, its floor falling as the arm rises (39 in at 45
+        // deg, 0 past 75). One continuous drop instead of drop-rotate-drop.
+        Command armWork = armTo(SuperstructureConstants.L4_RETURN_STAGE_ANGLE)
             .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE)))
-            .andThen(elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT))
-            .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_SAFE_ROTATE_MAX_HEIGHT)))
             .andThen(armTo(SAFE_ANGLE))
             .andThen(Commands.waitUntil(() -> armAtLeast(release)));
+        return elevatorTo(SuperstructureConstants.L4_RETURN_DROP_HEIGHT)
+            .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT)))
+            .andThen(Commands.deadline(armWork,
+                descendWithArm(ElevatorConstants.ELEVATOR_ZERO_HEIGHT, () -> SAFE_ANGLE)));
     }
 
     /**
@@ -472,20 +624,23 @@ public class Superstructure {
                 .andThen(armTo(targetAngle))
                 .andThen(settle());
         }
-        // High scoring pose (L4): staged through the station. The rotation
-        // waits for the carriage to be IN the station window, not merely
-        // above its floor, so arriving from above (an algae pose) is safe.
+        // High scoring pose (L4): the carriage rises to the rotation station
+        // (the only window where 25-100 deg is clear), the arm starts its
+        // rotation as the carriage ARRIVES there - the gate is the window,
+        // not a settled height - and from then on the two run together: the
+        // arm continues down to the scoring angle while the carriage climbs
+        // continuously behind it, its ceiling rising as the arm comes down
+        // (36 in at 95 deg, 40 at 70, 48 at 40, 52.5 at 25). No second stop.
         double stageAngle = Math.min(targetAngle, SuperstructureConstants.L4_STAGE_ANGLE);
+        Command armWork = armTo(stageAngle)
+            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT)))
+            .andThen(armTo(targetAngle))
+            .andThen(Commands.waitUntil(coral::isAtTargetAngle)
+                .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS));
         return elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT)
             .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)
                 && heightAtMost(SuperstructureConstants.L4_STATION_HEIGHT + 2.0)))
-            .andThen(armTo(stageAngle))
-            .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.L4_STAGE_DONE_ANGLE)))
-            .andThen(elevatorTo(SuperstructureConstants.L4_PRE_TOP_HEIGHT))
-            .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_FINAL_ANGLE_MIN_HEIGHT)))
-            .andThen(armTo(targetAngle))
-            .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)))
-            .andThen(elevatorTo(targetHeight))
+            .andThen(Commands.deadline(armWork, climbWithArm(targetHeight, () -> targetAngle)))
             .andThen(settle());
     }
 

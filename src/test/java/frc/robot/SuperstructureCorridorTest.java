@@ -67,6 +67,58 @@ class SuperstructureCorridorTest {
     }
 
     @Test
+    void ratchetedCarriageTargetsStayInTheCorridorsAndArrive() {
+        double margin = SuperstructureConstants.RATCHET_MARGIN;
+
+        // L4 climb: the arm sweeps from RAISE down to the scoring angle
+        // while the carriage follows its ceiling up from the station.
+        double height = SuperstructureConstants.L4_STATION_HEIGHT;
+        double goal = PresetHeights.CORAL_L4.getHeight();
+        double finalAngle = PivotPresetAngles.CORAL_L4.getAngle();
+        for (double angle = PivotPresetAngles.RAISE.getAngle(); angle >= finalAngle; angle -= 0.5) {
+            double raw = Superstructure.ceilingForSweep(angle, finalAngle, height);
+            double ceiling = Math.max(raw - margin, Math.min(goal, raw));
+            double target = Math.max(Math.min(goal, ceiling), height);
+            assertTrue(Superstructure.poseClear(target, angle),
+                String.format("L4 climb would command %.2f in at %.1f deg", target, angle));
+            assertTrue(Superstructure.elevatorPathClear(height, target, angle),
+                String.format("L4 climb path to %.2f in is blocked at %.1f deg", target, angle));
+            height = target;
+        }
+        assertEquals(goal, height, 0.75, "the carriage should reach the L4 height as the arm arrives");
+
+        // L4 return: the arm sweeps up to RAISE while the carriage follows
+        // its floor down from the drop height.
+        height = SuperstructureConstants.L4_RETURN_DROP_HEIGHT;
+        for (double angle = finalAngle; angle <= PivotPresetAngles.RAISE.getAngle(); angle += 0.5) {
+            double raw = Superstructure.floorForSweep(angle, PivotPresetAngles.RAISE.getAngle(), height);
+            double floor = Math.min(raw + margin, Math.max(BASE, raw));
+            double target = Math.min(Math.max(BASE, floor), height);
+            assertTrue(Superstructure.poseClear(target, angle),
+                String.format("L4 return would command %.2f in at %.1f deg", target, angle));
+            assertTrue(Superstructure.elevatorPathClear(height, target, angle),
+                String.format("L4 return path to %.2f in is blocked at %.1f deg", target, angle));
+            height = target;
+        }
+        assertTrue(height <= SuperstructureConstants.LOW_BOX_ROOF,
+            "the carriage should be down in the low box by the time the arm reaches RAISE, was " + height);
+
+        // L3 return: same, from the lift height.
+        height = SuperstructureConstants.MID_POSE_RETURN_LIFT_HEIGHT;
+        for (double angle = PivotPresetAngles.CORAL_L3.getAngle();
+                angle <= PivotPresetAngles.RAISE.getAngle(); angle += 0.5) {
+            double raw = Superstructure.floorForSweep(angle, PivotPresetAngles.RAISE.getAngle(), height);
+            double floor = Math.min(raw + margin, Math.max(BASE, raw));
+            double target = Math.min(Math.max(BASE, floor), height);
+            assertTrue(Superstructure.poseClear(target, angle),
+                String.format("L3 return would command %.2f in at %.1f deg", target, angle));
+            height = target;
+        }
+        assertTrue(height <= SuperstructureConstants.LOW_BOX_ROOF,
+            "the carriage should be down in the low box by the time the arm reaches RAISE, was " + height);
+    }
+
+    @Test
     void stagedSequenceWaypointsAreInside() {
         // Low box: anything from the clear angle to the band-pass angle, up to the roof
         for (double a = SuperstructureConstants.ARM_CLEAR_MIN_ANGLE + 2.0; a <= SuperstructureConstants.BAND_PASS_MIN_ANGLE; a += 2.5) {

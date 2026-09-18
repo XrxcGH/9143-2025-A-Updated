@@ -658,6 +658,11 @@ public final class Constants {
 		public static final double L4_RETURN_STAGE_DONE_ANGLE = 40.0;    // Degrees
 		public static final double L4_RETURN_SAFE_ROTATE_MAX_HEIGHT = 37.0; // Inches
 
+		// Kept below a ceiling (or above a floor) by the continuous carriage
+		// targets, so the carriage decelerating into its clamp still lands
+		// inside the corridor. The table already carries ~1 in of model margin.
+		public static final double RATCHET_MARGIN = 0.5;           // Inches
+
 		// --- Tolerances ---
 		// The arm counts as "at" a gate angle within this tolerance (the
 		// through bore reads the real arm, after the chain backlash).

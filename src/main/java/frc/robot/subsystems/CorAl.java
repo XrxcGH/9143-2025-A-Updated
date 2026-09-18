@@ -3,6 +3,7 @@ package frc.robot.subsystems;
 import com.ctre.phoenix6.configs.CANrangeConfiguration;
 import com.ctre.phoenix6.configs.MotionMagicConfigs;
 import com.ctre.phoenix6.configs.ProximityParamsConfigs;
+import com.ctre.phoenix6.configs.Slot0Configs;
 import com.ctre.phoenix6.configs.TalonFXConfiguration;
 import com.ctre.phoenix6.controls.DutyCycleOut;
 import com.ctre.phoenix6.controls.MotionMagicVoltage;
@@ -20,6 +21,7 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DigitalInput;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DutyCycle;
+import edu.wpi.first.wpilibj.Preferences;
 import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.RobotController;
 import edu.wpi.first.wpilibj.Timer;
@@ -95,12 +97,34 @@ public class CorAl extends SubsystemBase {
     private double throughBoreOffset = 0;
 
     // ------------------------------------------------------------------
+    // The through bore is an ABSOLUTE encoder, but it used to be treated as
+    // a relative one: every code start took "wherever the arm is now" as
+    // zero. A restart with the arm raised (a brownout, a code crash, a
+    // redeploy mid-practice) then shifted every Superstructure gate and
+    // both soft limits by the arm's angle. The raw reading at the zero
+    // position is now remembered on the roboRIO (Preferences; it survives
+    // deploys) whenever the pivot is zeroed, and restored at the next start
+    // once the encoder is reporting - so the arm knows its real angle
+    // wherever it was when the code came up. A restored angle outside the
+    // arm's travel means the encoder has moved on its shaft: it is refused
+    // and this start's zero is kept, with a dashboard alert.
+    // ------------------------------------------------------------------
+    private static final String THROUGH_BORE_ZERO_KEY = "CorAl - Through Bore Zero (raw deg, set by zeroing)";
+    private static final double RESTORE_MIN_ANGLE = -10.0;
+    private static final double RESTORE_MAX_ANGLE = CorAlConstants.CORAL_PIVOT_MAX_ANGLE + 10.0;
+    private boolean bootReferenceResolved = false;
+    private boolean bootZeroRejected = false;
+    private double bootRestoredAngle = 0.0;
+
+    // ------------------------------------------------------------------
     // Live-tunable Motion Magic profile (Testing tab -> Tunables widget),
     // as last applied to the pivot TalonFX. See periodic().
     // ------------------------------------------------------------------
     private double appliedCruiseVelocity;  // deg/s
     private double appliedMaxAcceleration; // deg/s^2
     private double appliedMaxJerk;         // deg/s^3
+    private double appliedKg;              // V with the claw horizontal
+    private double appliedBalanceAngle;    // deg where gravity does nothing
     private final Timer tunablePollTimer = new Timer();
     private static final double TUNABLE_POLL_SECONDS = 0.5;
 
@@ -134,8 +158,9 @@ public class CorAl extends SubsystemBase {
         configureIntakeMotor(intakeMotor);
         configureCanRange(canRangeSensor);
 
-        // Use the current position as the zero reference
-        zeroEncoders();
+        // Provisional zero: the current position. periodic() replaces it with
+        // the stored absolute zero once the through bore is reporting.
+        applyZeroHere();
         tunablePollTimer.start();
 
         if (RobotBase.isSimulation()) {
@@ -156,9 +181,56 @@ public class CorAl extends SubsystemBase {
      * position becomes the zero reference.
      */
     public void zeroEncoders() {
+        applyZeroHere();
+        if (isThroughBoreConnected()) {
+            // Remember where zero is on the absolute encoder (see the note above)
+            Preferences.setDouble(THROUGH_BORE_ZERO_KEY, throughBoreOffset);
+            bootZeroRejected = false;
+            bootRestoredAngle = 0.0;
+        }
+        bootReferenceResolved = true;
+    }
+
+    private void applyZeroHere() {
         throughBoreOffset = getRawThroughBoreAngle();
         pivotMotor.setPosition(0);
         currentTargetAngle = 0;
+    }
+
+    /**
+     * Once per start, while disabled, as soon as the through bore reports:
+     * restore the stored absolute zero (or, the first time ever, store this
+     * start's).
+     */
+    private void resolveBootReference() {
+        bootReferenceResolved = true;
+        if (!Preferences.containsKey(THROUGH_BORE_ZERO_KEY)) {
+            zeroEncoders(); // first start with this code: the arm is at its base, as it always had to be
+            return;
+        }
+        double range = CorAlConstants.THROUGH_BORE_DEGREES_PER_ROTATION;
+        double stored = Preferences.getDouble(THROUGH_BORE_ZERO_KEY, 0.0);
+        double angle = getRawThroughBoreAngle() - stored;
+        angle -= range * Math.round(angle / range);
+        if (angle < RESTORE_MIN_ANGLE || angle > RESTORE_MAX_ANGLE) {
+            bootZeroRejected = true; // keep this start's provisional zero
+            applyZeroHere();
+            return;
+        }
+        throughBoreOffset = stored;
+        bootRestoredAngle = angle;
+        pivotMotor.setPosition(angle / 360.0, 0);
+        currentTargetAngle = angle;
+    }
+
+    /** True if the stored through bore zero put the arm outside its travel at this start and was refused. */
+    public boolean isBootZeroRejected() {
+        return bootZeroRejected;
+    }
+
+    /** The arm angle (deg) restored from the stored zero at this start; 0 if it started at its base or was just zeroed. */
+    public double getBootRestoredAngle() {
+        return bootRestoredAngle;
     }
 
     private void configurePivotMotor(TalonFX motor) {
@@ -181,22 +253,8 @@ public class CorAl extends SubsystemBase {
         // rotations-to-degrees multiplier here.)
         config.Feedback.SensorToMechanismRatio = CorAlConstants.CORAL_PIVOT_GEAR_RATIO;
 
-        // Closed-loop gains (error in mechanism rotations, output in volts)
-        config.Slot0.kP = CorAlConstants.CORAL_PIVOT_kP;
-        config.Slot0.kI = CorAlConstants.CORAL_PIVOT_kI;
-        config.Slot0.kD = CorAlConstants.CORAL_PIVOT_kD;
-        config.Slot0.kG = CorAlConstants.CORAL_PIVOT_kG;
-        config.Slot0.GravityType = GravityTypeValue.Arm_Cosine;
-        // 0 deg is not horizontal on this arm: tell Arm_Cosine where the
-        // balance point is (see CORAL_PIVOT_kG). Phoenix clamps the offset to
-        // +/-0.25 rot silently, so keep the balance angle inside 0-180.
-        config.Slot0.GravityArmPositionOffset = 0.25
-            - Math.min(Math.max(CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG, 0.0), 180.0) / 360.0;
-        // Profile feedforward: Motion Magic feeds these its profiled velocity
-        // so the arm follows the profile instead of lagging and overshooting
-        config.Slot0.kS = CorAlConstants.CORAL_PIVOT_kS;
-        config.Slot0.kV = CorAlConstants.CORAL_PIVOT_kV;
-        config.Slot0.kA = CorAlConstants.CORAL_PIVOT_kA;
+        // Closed-loop gains, profile feedforward and gravity (see slot0Config)
+        config.Slot0 = slot0Config();
 
         // Motion Magic profile from the live tunables
         config.MotionMagic = motionMagicConfig();
@@ -210,11 +268,36 @@ public class CorAl extends SubsystemBase {
         motor.getConfigurator().apply(config);
     }
 
-    /** Snapshots the profile tunables into the applied fields. */
+    /**
+     * Slot 0: closed-loop gains (error in mechanism rotations, output in
+     * volts), the profile feedforward Motion Magic feeds its profiled
+     * velocity / acceleration into, and gravity. 0 deg is not horizontal on
+     * this arm, so Arm_Cosine is told where the balance point is: it outputs
+     * kG x cos(position + offset) with offset = 0.25 rot - balance / 360
+     * (Phoenix clamps the offset to +/-0.25 rot silently, hence the 1-179
+     * deg clamp on the tunable). kG and the balance angle are live tunables;
+     * kG ships at 0 until it has been measured (CORAL_PIVOT_kG).
+     */
+    private Slot0Configs slot0Config() {
+        return new Slot0Configs()
+            .withKP(CorAlConstants.CORAL_PIVOT_kP)
+            .withKI(CorAlConstants.CORAL_PIVOT_kI)
+            .withKD(CorAlConstants.CORAL_PIVOT_kD)
+            .withKS(CorAlConstants.CORAL_PIVOT_kS)
+            .withKV(CorAlConstants.CORAL_PIVOT_kV)
+            .withKA(CorAlConstants.CORAL_PIVOT_kA)
+            .withKG(appliedKg)
+            .withGravityType(GravityTypeValue.Arm_Cosine)
+            .withGravityArmPositionOffset(0.25 - appliedBalanceAngle / 360.0);
+    }
+
+    /** Snapshots the profile and gravity tunables into the applied fields. */
     private void readProfileTunables() {
         appliedCruiseVelocity = Tunables.pivotCruiseVelocity();
         appliedMaxAcceleration = Tunables.pivotMaxAcceleration();
         appliedMaxJerk = Tunables.pivotMaxJerk();
+        appliedKg = Tunables.pivotKg();
+        appliedBalanceAngle = Tunables.pivotBalanceAngle();
     }
 
     /** True if any profile tunable differs from what is applied to the TalonFX. */
@@ -222,6 +305,11 @@ public class CorAl extends SubsystemBase {
         return Tunables.pivotCruiseVelocity() != appliedCruiseVelocity
             || Tunables.pivotMaxAcceleration() != appliedMaxAcceleration
             || Tunables.pivotMaxJerk() != appliedMaxJerk;
+    }
+
+    /** True if a gravity tunable differs from what is applied to the TalonFX. */
+    private boolean gravityTunablesChanged() {
+        return Tunables.pivotKg() != appliedKg || Tunables.pivotBalanceAngle() != appliedBalanceAngle;
     }
 
     /**
@@ -597,6 +685,11 @@ public class CorAl extends SubsystemBase {
         return intakeMotor.getSupplyCurrent().getValueAsDouble();
     }
 
+    /** Voltage the pivot motor is applying - what the kG measurement reads (see CORAL_PIVOT_kG). */
+    public double getPivotVolts() {
+        return pivotMotor.getMotorVoltage().getValueAsDouble();
+    }
+
     /** Pivot motor applied duty cycle, -1 to 1. */
     public double getPivotOutput() {
         return pivotMotor.getDutyCycle().getValueAsDouble();
@@ -646,6 +739,12 @@ public class CorAl extends SubsystemBase {
         }
         gamePieceDetected = confirmed;
 
+        // Absolute zero: once per start, only while disabled (never move the
+        // frame under a live setpoint), as soon as the encoder is reporting.
+        if (!bootReferenceResolved && DriverStation.isDisabled() && isThroughBoreConnected()) {
+            resolveBootReference();
+        }
+
         // Keep the motor sensor honest against the absolute encoder, but only
         // while no closed-loop move is holding a target - re-seeding mid-move
         // shifts the reference frame and makes the arm land off target.
@@ -658,9 +757,13 @@ public class CorAl extends SubsystemBase {
         // arm - polled twice a second. Only the MotionMagic group is sent,
         // so gains, limits, and the sensor ratio are untouched.
         if (DriverStation.isDisabled() && tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)) {
-            if (profileTunablesChanged()) {
+            if (profileTunablesChanged() || gravityTunablesChanged()) {
+                boolean gravity = gravityTunablesChanged();
                 readProfileTunables();
                 pivotMotor.getConfigurator().apply(motionMagicConfig());
+                if (gravity) {
+                    pivotMotor.getConfigurator().apply(slot0Config());
+                }
             }
             // Coral detection threshold / hysteresis: only the proximity
             // group is sent to the CANrange.

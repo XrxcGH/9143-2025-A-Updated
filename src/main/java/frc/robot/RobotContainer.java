@@ -189,6 +189,20 @@ public class RobotContainer {
             superstructure.stow().andThen(
                 superstructure.intakeRollers().withTimeout(Constants.AutoConstants.AUTO_INTAKE_TIMEOUT_SECONDS)));
         NamedCommands.registerCommand("stow", superstructure.stow());
+        // Building blocks for autos that OVERLAP the mechanism with driving
+        // instead of doing everything in place at the reef: "prepL*" as an
+        // event marker on the approach path (the pose is reached as the
+        // robot arrives), "ejectCoral" at the reef, and "stowAfterBackingOff"
+        // at the START of the departing path - it waits until the robot has
+        // moved 0.35 m before the arm swings out, because leaving L3 / L4
+        // puts the claw 9-12 in past the front bumper. The "score*" commands
+        // above still do all three in place.
+        NamedCommands.registerCommand("prepL4", superstructure.goToCoralL4());
+        NamedCommands.registerCommand("prepL3", superstructure.goToCoralL3());
+        NamedCommands.registerCommand("prepL2", superstructure.goToCoralL2());
+        NamedCommands.registerCommand("ejectCoral", superstructure.ejectCoral());
+        NamedCommands.registerCommand("stowAfterBackingOff",
+            superstructure.stowAfterBackingOff(() -> swerve.getStateCopy().Pose));
 
         SendableChooser<Command> chooser;
         if (AutoBuilder.isConfigured()) {

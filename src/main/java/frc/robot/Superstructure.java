@@ -726,7 +726,17 @@ public class Superstructure {
                 && (targetAngle < SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE
                     || target < SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT)) {
             double holdAngle = targetAngle >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE ? targetAngle : SAFE_ANGLE;
-            lowerFirst = both(Math.max(target, SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT), holdAngle)
+            double lowerTo = Math.max(target, SuperstructureConstants.HIGH_ANGLE_MIN_HEIGHT);
+            if (targetAngle < SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE) {
+                // Heading for a scoring pose: no higher than the top of the
+                // window the arm is released in. This used to send the
+                // carriage to the FINAL height (51.5 in for L4) while the arm
+                // came back to RAISE, and the approach then brought it all the
+                // way back down to the station: a yo-yo.
+                lowerTo = Math.min(lowerTo,
+                    SuperstructureConstants.MID_CORRIDOR_MAX_HEIGHT - SuperstructureConstants.RATCHET_MARGIN);
+            }
+            lowerFirst = both(lowerTo, holdAngle)
                 .andThen(Commands.waitUntil(() -> armAtMost(SuperstructureConstants.HIGH_ANGLE_STAGE)));
         }
         // ---- Scoring pose to scoring pose (L3 <-> L4) ----
@@ -1244,7 +1254,7 @@ public class Superstructure {
             .andThen(moveTo(PresetHeights.CORAL_L3, PivotPresetAngles.CORAL_L3));
     }
 
-    /** Moves to the L4 scoring pose (52.5 in, 20 degrees) through the 33 in rotation station. */
+    /** Moves to the L4 scoring pose (51.5 in, 20 degrees): arm released as the carriage passes 24 in, pre-top gated. */
     public Command goToCoralL4() {
         return setGoal(Goal.CORAL_L4)
             .andThen(moveTo(PresetHeights.CORAL_L4, PivotPresetAngles.CORAL_L4));
@@ -1301,7 +1311,7 @@ public class Superstructure {
     }
 
     /**
-     * Moves to the algae scoring pose (52.5 in, 105 degrees), ejects for
+     * Moves to the algae scoring pose (52 in, 105 degrees), ejects for
      * half a second, then stops the rollers (mirroring ejectCoral - without
      * the stop they would spin at 50% duty until another roller command).
      */
@@ -1412,6 +1422,22 @@ public class Superstructure {
             return Commands.deadline(ejectWindow, rollersOut)
                 .andThen(Commands.runOnce(() -> algaeHeld = false))
                 .andThen(backedOff.andThen(home()).unless(coral::isGamePieceDetected));
+        }, Set.of(elevator, coral));
+    }
+
+    /**
+     * For autos: stow once the drivetrain has moved REEF_BACKOFF_METERS from
+     * where this command started. Leaving L3 / L4 swings the claw 9-12 in
+     * past the front bumper, so a stow IN PLACE against the reef swings it
+     * into the reef; run this alongside the departing path instead (an
+     * event marker at its start, or a parallel group).
+     */
+    public Command stowAfterBackingOff(Supplier<Pose2d> robotPose) {
+        return Commands.defer(() -> {
+            Pose2d from = robotPose.get();
+            return Commands.waitUntil(() -> robotPose.get().getTranslation()
+                    .getDistance(from.getTranslation()) >= REEF_BACKOFF_METERS)
+                .andThen(stow());
         }, Set.of(elevator, coral));
     }
 

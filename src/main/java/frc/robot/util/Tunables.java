@@ -56,6 +56,8 @@ public final class Tunables {
     private static final String PIVOT_CRUISE_VELOCITY = "Pivot - Cruise Velocity (deg/s)";
     private static final String PIVOT_MAX_ACCELERATION = "Pivot - Acceleration (deg/s^2)";
     private static final String PIVOT_MAX_JERK = "Pivot - Jerk (deg/s^3)";
+    private static final String PIVOT_KG = "Pivot - kG (V, claw horizontal)";
+    private static final String PIVOT_BALANCE_ANGLE = "Pivot - Balance Angle (deg)";
     private static final String CORAL_DETECT_DISTANCE = "CorAl - Coral Detect Distance (m)";
     private static final String CORAL_DETECT_HYSTERESIS = "CorAl - Coral Detect Hysteresis (m)";
     private static final String CORAL_DETECT_WHEN_CLOSER = "CorAl - Coral Detect When Closer (1) Or Farther (0)";
@@ -118,6 +120,8 @@ public final class Tunables {
         Preferences.initDouble(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY);
         Preferences.initDouble(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION);
         Preferences.initDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
+        Preferences.initDouble(PIVOT_KG, CorAlConstants.CORAL_PIVOT_kG);
+        Preferences.initDouble(PIVOT_BALANCE_ANGLE, CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG);
         Preferences.initDouble(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD);
         Preferences.initDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
         Preferences.initDouble(CORAL_DETECT_WHEN_CLOSER,
@@ -153,6 +157,8 @@ public final class Tunables {
         Preferences.setDouble(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY);
         Preferences.setDouble(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION);
         Preferences.setDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
+        Preferences.setDouble(PIVOT_KG, CorAlConstants.CORAL_PIVOT_kG);
+        Preferences.setDouble(PIVOT_BALANCE_ANGLE, CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG);
         Preferences.setDouble(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD);
         Preferences.setDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
         Preferences.setDouble(CORAL_DETECT_WHEN_CLOSER,
@@ -280,6 +286,20 @@ public final class Tunables {
     /** Motion Magic acceleration, deg/s^2. */
     public static double pivotMaxAcceleration() {
         return clamped(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION, 20.0, 3000.0);
+    }
+
+    /**
+     * Pivot gravity feedforward, volts with the claw HORIZONTAL (the most
+     * gravity the arm ever sees). 0 until measured - see CORAL_PIVOT_kG.
+     * Clamped to about three times the CAD estimate.
+     */
+    public static double pivotKg() {
+        return clamped(PIVOT_KG, CorAlConstants.CORAL_PIVOT_kG, 0.0, 1.0);
+    }
+
+    /** Arm angle (deg) at which gravity does nothing: the claw balanced straight up. */
+    public static double pivotBalanceAngle() {
+        return clamped(PIVOT_BALANCE_ANGLE, CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG, 1.0, 179.0);
     }
 
     /** Motion Magic jerk limit, deg/s^3 (0 disables the limit - a plain trapezoid). */

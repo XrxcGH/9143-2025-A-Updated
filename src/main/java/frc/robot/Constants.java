@@ -281,7 +281,11 @@ public final class Constants {
 			CORAL_L4(51.5),
 			ALGAE_LOW_INTAKE(20.5),
 			ALGAE_HIGH_INTAKE(37.5),
-			ALGAE_SCORE(52.5);
+			// Was 52.5: half an inch under the 53.0 soft limit, the height at
+			// which L4 stuttered against the top of travel. 52.0 keeps a full
+			// inch. The barge shot wants height - raise it back toward 52.5
+			// only if the shot needs it AND the carriage holds there quietly.
+			ALGAE_SCORE(52.0);
 
 			private final double height;
 

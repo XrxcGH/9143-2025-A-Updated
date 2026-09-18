@@ -140,6 +140,14 @@ public class Dashboard {
     private final Alert elevatorSyncAlert = new Alert(
         "Elevator sides out of sync - check for belt slippage or mechanical binding.",
         AlertType.kWarning);
+    private final Alert coralBootZeroAlert = new Alert(
+        "CorAl pivot: the stored through-bore zero put the arm outside its travel at startup and was refused "
+            + "(has the encoder moved on its shaft?). Put the arm on its base stop and zero it (operator Start, 1 s, disabled).",
+        AlertType.kError);
+    private final Alert coralBootAngleAlert = new Alert(
+        "CorAl pivot started away from its base: the angle was restored from the stored through-bore zero. "
+            + "If the arm IS on its base stop, the encoder has shifted - zero it (operator Start, 1 s, disabled).",
+        AlertType.kInfo);
     private final Alert coralFeedbackAlert = new Alert(
         "CorAl motor encoder disagrees with the through bore - it will re-sync when the arm is idle.",
         AlertType.kWarning);
@@ -401,6 +409,7 @@ public class Dashboard {
         SmartDashboard.putNumber("CorAl/Pivot Current", coral.getPivotCurrent());
         SmartDashboard.putNumber("CorAl/Intake Current", coral.getIntakeCurrent());
         SmartDashboard.putNumber("CorAl/Pivot Output", coral.getPivotOutput());
+        SmartDashboard.putNumber("CorAl/Pivot Volts", coral.getPivotVolts());
         SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
 
         // --- Vision ---
@@ -460,6 +469,8 @@ public class Dashboard {
         elevatorBelowZeroAlert.set(elevator.readsBelowZero());
         elevatorRatioPendingAlert.set(elevator.isTravelRatioChangePending());
         coralFeedbackAlert.set(throughBoreConnected && !coral.isMotorFeedbackValid());
+        coralBootZeroAlert.set(coral.isBootZeroRejected());
+        coralBootAngleAlert.set(Math.abs(coral.getBootRestoredAngle()) > 3.0);
         // Resting-voltage check only while disabled - voltage sags under
         // load during a match are normal and would nag the drive team.
         lowBatteryAlert.set(DriverStation.isDisabled()

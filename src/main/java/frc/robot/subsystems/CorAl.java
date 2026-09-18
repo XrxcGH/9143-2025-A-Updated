@@ -486,8 +486,16 @@ public class CorAl extends SubsystemBase {
             detectLatch = false;
             return false;
         }
+        double strength = canRangeSensor.getSignalStrength().getValueAsDouble();
+        // The strength gate is what separates a held coral from an empty
+        // claw on this mechanism (65535 against 3000-4000). It latches: once
+        // a return is strong enough to count, it keeps counting until the
+        // strength drops well below the gate, so a coral held at an awkward
+        // angle cannot blink out.
+        double release = appliedMinSignalStrength * CorAlConstants.GAME_PIECE_STRENGTH_RELEASE_FRACTION;
+        boolean strongEnough = detectLatch ? strength >= release : strength >= appliedMinSignalStrength;
         boolean valid = canRangeSensor.getMeasurementHealth().getValue() != MeasurementHealthValue.Bad
-            && canRangeSensor.getSignalStrength().getValueAsDouble() >= appliedMinSignalStrength;
+            && strongEnough;
         if (!valid) {
             detectLatch = false;
             return false;

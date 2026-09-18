@@ -386,8 +386,9 @@ public class Superstructure {
      * carriage is given the target, clamped below the ceiling for the sweep
      * the arm has left to do, and never below where it already is.
      */
-    private Command climbWithArm(double target, DoubleSupplier armDestination) {
+    private Command climbWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
         return Commands.run(() -> {
+            double target = targetSupplier.getAsDouble();
             double height = elevator.getCurrentPosition();
             double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
             // The margin holds the carriage short of a ceiling it is being
@@ -401,8 +402,9 @@ public class Superstructure {
     }
 
     /** Mirror of {@link #climbWithArm}: descends as fast as the arm allows. */
-    private Command descendWithArm(double target, DoubleSupplier armDestination) {
+    private Command descendWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
         return Commands.run(() -> {
+            double target = targetSupplier.getAsDouble();
             double height = elevator.getCurrentPosition();
             double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
             double floor = Math.min(raw + SuperstructureConstants.RATCHET_MARGIN, Math.max(target, raw));
@@ -547,9 +549,9 @@ public class Superstructure {
             .andThen(Commands.waitUntil(() -> armAtLeast(release)));
         return elevatorTo(lift)
             .andThen(Commands.deadline(armWork,
-                descendWithArm(ElevatorConstants.ELEVATOR_ZERO_HEIGHT, () -> SAFE_ANGLE)
-                    .beforeStarting(Commands.waitUntil(() -> heightAtLeast(lift - 1.0)
-                        || armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)))));
+                descendWithArm(() -> armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)
+                        ? ElevatorConstants.ELEVATOR_ZERO_HEIGHT : lift,
+                    () -> SAFE_ANGLE)));
     }
 
     /**
@@ -569,10 +571,21 @@ public class Superstructure {
             .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE)))
             .andThen(armTo(SAFE_ANGLE))
             .andThen(Commands.waitUntil(() -> armAtLeast(release)));
+        // Mirror of the climb: continuous down to the station, and below it
+        // only once the arm has cleared band A, which is what the staged
+        // version waited for.
         return elevatorTo(SuperstructureConstants.L4_RETURN_DROP_HEIGHT)
             .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.L4_RETURN_ROTATE_MAX_HEIGHT)))
             .andThen(Commands.deadline(armWork,
-                descendWithArm(ElevatorConstants.ELEVATOR_ZERO_HEIGHT, () -> SAFE_ANGLE)));
+                descendWithArm(() -> {
+                    if (armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)) {
+                        return ElevatorConstants.ELEVATOR_ZERO_HEIGHT;   // band A cleared: all the way down
+                    }
+                    if (armAtLeast(SuperstructureConstants.L4_RETURN_STAGE_DONE_ANGLE)) {
+                        return SuperstructureConstants.L4_STATION_HEIGHT; // staged: down to the station
+                    }
+                    return SuperstructureConstants.L4_RETURN_DROP_HEIGHT; // arm still near the L4 angle
+                }, () -> SAFE_ANGLE)));
     }
 
     /**
@@ -637,10 +650,20 @@ public class Superstructure {
             .andThen(armTo(targetAngle))
             .andThen(Commands.waitUntil(coral::isAtTargetAngle)
                 .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS));
+        // The last few inches still wait for the arm to REACH the scoring
+        // angle. The corridor table says 25 deg is clear to 51 in, but the
+        // robot says otherwise up there - L4 caught the top bar when the
+        // carriage was allowed to climb past the pre-top height with the arm
+        // still at 25 - so the pre-top height stays a hard ceiling until the
+        // arm is inside its final gate, exactly as the staged version had it.
+        // Everything below that is continuous.
         return elevatorTo(SuperstructureConstants.L4_STATION_HEIGHT)
             .andThen(Commands.waitUntil(() -> heightAtLeast(SuperstructureConstants.L4_ROTATE_START_HEIGHT)
                 && heightAtMost(SuperstructureConstants.L4_STATION_HEIGHT + 2.0)))
-            .andThen(Commands.deadline(armWork, climbWithArm(targetHeight, () -> targetAngle)))
+            .andThen(Commands.deadline(armWork,
+                climbWithArm(() -> armAtMost(SuperstructureConstants.L4_FINAL_GATE_ANGLE)
+                        ? targetHeight : SuperstructureConstants.L4_PRE_TOP_HEIGHT,
+                    () -> targetAngle)))
             .andThen(settle());
     }
 

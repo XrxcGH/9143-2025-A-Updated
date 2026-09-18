@@ -415,25 +415,31 @@ public final class Constants {
 		// CorAl/CANrange Distance on the Testing tab with the claw empty and
 		// with a coral, and put the threshold halfway between.
 		public static final double GAME_PIECE_DETECTION_CONFIRMATION_TIME = 0.3; // Seconds each edge must persist (both edges)
-		public static final double GAME_PIECE_DETECTION_THRESHOLD = 0.08;        // Tunable default: detect below this (meters)
-		public static final double GAME_PIECE_DETECTION_HYSTERESIS = 0.015;      // Tunable default: the verdict only changes outside threshold +/- this (meters)
-		// CTRE's tuning guide (CANrange -> Tuning) describes two setups, and
-		// which one this claw is decides which number does the work:
-		//   1. the sensor sees OPEN AIR with nothing held - the return is weak
-		//      with nothing there and strong with a coral, so SIGNAL STRENGTH is
-		//      the discriminator and the distance threshold can be generous;
-		//   2. the sensor sees claw structure behind the coral - the return is
-		//      always strong, so DISTANCE is the discriminator.
-		// Both are tunable, because only measurements on the robot can say.
-		// Read CorAl/CANrange Distance and CorAl/CANrange Signal Strength with
-		// the claw empty and with a coral held, then set the threshold(s) to
-		// split the two readings (README: "If the sensor sees a coral that
-		// isn't there").
-		public static final double GAME_PIECE_MIN_SIGNAL_STRENGTH = 2500;        // Tunable default (CTRE's default)
+		// MEASURED on the robot (Sept 2026), and it settles how this claw
+		// detects a coral. CTRE's CANrange tuning guide describes two setups;
+		// this one is the first, "open air":
+		//                      distance        signal strength
+		//   coral held         0.04-0.05 m     65535 (saturated)
+		//   claw empty         about the SAME  3000-4000
+		// The distance is therefore useless here - an empty claw returns a
+		// short reading of nothing in particular - and the SIGNAL STRENGTH is
+		// what separates the two, by a factor of sixteen. So the strength gate
+		// does the work and the distance threshold is deliberately generous:
+		// per the guide, it only has to sit above the distance a held piece
+		// reads. This is why an empty claw used to report a coral: the old
+		// strength gate was CTRE's 2500 default, which 3000-4000 clears.
+		public static final double GAME_PIECE_MIN_SIGNAL_STRENGTH = 15000;       // Tunable default: ~4x the empty return, far below a held one
+		public static final double GAME_PIECE_DETECTION_THRESHOLD = 0.30;        // Tunable default: well above the 0.05 m a held coral reads (m)
+		public static final double GAME_PIECE_DETECTION_HYSTERESIS = 0.015;      // Tunable default: the verdict only changes outside threshold +/- this (m)
+		// A return that has already counted as a coral keeps counting until the
+		// strength falls this far below the gate, so a piece held at an awkward
+		// angle cannot blink in and out.
+		public static final double GAME_PIECE_STRENGTH_RELEASE_FRACTION = 0.75;
 		// Which side of the distance threshold a HELD coral puts the reading on.
-		// The CANrange's own proximity bit can only mean "closer than the
-		// threshold", which is wrong for a claw whose empty reading is already
-		// short - so the verdict is formed in code and this picks the polarity.
+		// With the strength gate doing the work this barely matters, but the
+		// CANrange's own proximity bit can only mean "closer than the
+		// threshold", so the verdict is formed in code and this picks the
+		// polarity for a claw where that is the wrong question.
 		public static final boolean GAME_PIECE_DETECT_WHEN_CLOSER = true;
 		// Master switch. Turn detection OFF (tunable 0) to run the intake purely
 		// on the operator's button while the thresholds are still being set: a

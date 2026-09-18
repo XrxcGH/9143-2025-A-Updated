@@ -90,7 +90,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 12; // 12: CANrange signal-strength threshold and detection master switch (Sept 17 2026)
+    private static final int DEFAULTS_VERSION = 13; // 13: CANrange tuned from measurements - strength gate 15000, distance 0.30 (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -294,7 +294,7 @@ public final class Tunables {
 
     /** CANrange proximity threshold, meters: a coral is "present" below it (minus the hysteresis). */
     public static double coralDetectDistance() {
-        return clamped(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD, 0.02, 0.5);
+        return clamped(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD, 0.02, 4.0);
     }
 
     /**

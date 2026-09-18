@@ -90,7 +90,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 13; // 13: CANrange tuned from measurements - strength gate 15000, distance 0.30 (Sept 17 2026)
+    private static final int DEFAULTS_VERSION = 14; // 14: pivot profile 300 deg/s / 800 deg/s^2 / jerk 6000 with kA (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet

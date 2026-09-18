@@ -401,6 +401,28 @@ public class Superstructure {
         }, elevator);
     }
 
+    /**
+     * Travels toward {@code target} in whichever direction it lies, as fast
+     * as the arm's sweep allows - the climb ratchet when the target is
+     * above, the descent ratchet when it is below. Used wherever the arm has
+     * work to do and the carriage would otherwise sit still waiting for it.
+     */
+    private Command travelWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
+        return Commands.run(() -> {
+            double target = targetSupplier.getAsDouble();
+            double height = elevator.getCurrentPosition();
+            if (target >= height) {
+                double raw = ceilingForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
+                double ceiling = Math.max(raw - SuperstructureConstants.RATCHET_MARGIN, Math.min(target, raw));
+                elevator.setPosition(Math.max(Math.min(target, ceiling), height));
+            } else {
+                double raw = floorForSweep(coral.getPivotAngle(), armDestination.getAsDouble(), height);
+                double floor = Math.min(raw + SuperstructureConstants.RATCHET_MARGIN, Math.max(target, raw));
+                elevator.setPosition(Math.min(Math.max(target, floor), height));
+            }
+        }, elevator);
+    }
+
     /** Mirror of {@link #climbWithArm}: descends as fast as the arm allows. */
     private Command descendWithArm(DoubleSupplier targetSupplier, DoubleSupplier armDestination) {
         return Commands.run(() -> {
@@ -507,9 +529,13 @@ public class Superstructure {
         if (h0 > SuperstructureConstants.LOW_BOX_ROOF) {
             // Arm between the band-pass and safe-travel angles above the low
             // box (e.g. 90 deg at 38 in after manual control): rotating on
-            // toward RAISE moves the claw's rear away from the tube.
-            return armTo(SAFE_ANGLE)
-                .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
+            // toward RAISE moves the claw's rear away from the tube. The
+            // carriage travels toward the target underneath it rather than
+            // waiting, clamped to what the arm's measured angle allows.
+            return Commands.deadline(
+                armTo(SAFE_ANGLE)
+                    .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE))),
+                travelWithArm(() -> targetHeight, () -> SAFE_ANGLE));
         }
 
         // In the low box. Swing up; when the move is upward, let the carriage
@@ -518,14 +544,19 @@ public class Superstructure {
         // low box roof -> mid corridor -> anything). MAXMotion re-profiles
         // each retarget from the current motion state, so the carriage keeps
         // climbing smoothly. Never commands downward.
-        Command swing = armTo(SAFE_ANGLE);
-        if (targetHeight > h0) {
-            return swing.andThen(Commands.run(() -> {
-                double ceiling = climbCeiling(coral.getPivotAngle());
-                elevator.setPosition(Math.max(Math.min(targetHeight, ceiling), elevator.getCurrentPosition()));
-            }, elevator).until(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
-        }
-        return swing.andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)));
+        // Swing to RAISE, and travel toward the target the whole time: up
+        // behind the ratcheting ceiling (tuck limit -> low box roof -> mid
+        // corridor -> anything), or down behind the falling floor. Either
+        // way the carriage is moving while the arm is, so nothing waits.
+        return Commands.deadline(
+            armTo(SAFE_ANGLE)
+                .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE))),
+            targetHeight > h0
+                ? Commands.run(() -> {
+                    double ceiling = climbCeiling(coral.getPivotAngle());
+                    elevator.setPosition(Math.max(Math.min(targetHeight, ceiling), elevator.getCurrentPosition()));
+                }, elevator)
+                : travelWithArm(() -> targetHeight, () -> SAFE_ANGLE));
     }
 
     /**
@@ -593,9 +624,16 @@ public class Superstructure {
      * is at/above the safe travel angle. Picks the strategy by target type.
      */
     private Command approach(double targetHeight, double targetAngle) {
-        // Tuck target (BASE) from above: descend at RAISE, tuck below the limit
+        // Tuck target (BASE) from above: descend at RAISE, and start the arm
+        // down as soon as the carriage is inside the low box - every angle
+        // from ARM_CLEAR_MIN_ANGLE up is clear there, so the arm can come
+        // most of the way round while the carriage is still descending
+        // instead of waiting for it. The last few degrees into the tuck wait
+        // for the tuck limit, which is the one part that is not clear higher.
         if (targetAngle < SuperstructureConstants.ARM_CLEAR_MIN_ANGLE) {
             return elevatorTo(targetHeight)
+                .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.LOW_BOX_ROOF)))
+                .andThen(armTo(SuperstructureConstants.ARM_CLEAR_MIN_ANGLE + TOL))
                 .andThen(Commands.waitUntil(() -> heightAtMost(SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)))
                 .andThen(armTo(targetAngle))
                 .andThen(settle());

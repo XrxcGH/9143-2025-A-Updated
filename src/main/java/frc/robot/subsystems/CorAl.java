@@ -191,6 +191,7 @@ public class CorAl extends SubsystemBase {
         // so the arm follows the profile instead of lagging and overshooting
         config.Slot0.kS = CorAlConstants.CORAL_PIVOT_kS;
         config.Slot0.kV = CorAlConstants.CORAL_PIVOT_kV;
+        config.Slot0.kA = CorAlConstants.CORAL_PIVOT_kA;
 
         // Motion Magic profile from the live tunables
         config.MotionMagic = motionMagicConfig();

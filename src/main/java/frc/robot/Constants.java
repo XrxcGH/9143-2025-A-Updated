@@ -337,23 +337,32 @@ public final class Constants {
 		// values keep the arm ~2x faster than the first-power-on profile
 		// (90-degree swing ~1.2 s instead of 2.1 s, the 45-degree L4
 		// rotation ~0.9 s) while easing into every stop:
-		//   - 200 deg/s is 36% of the Kraken's free speed through 65.41:1
-		//     (100 rotor rps / 65.41 = 1.53 rot/s = 550 deg/s): ~4.4 V of
-		//     kV at cruise, plenty of headroom for kP.
-		//   - 300 deg/s^2: 37% less peak force at the chain catch than the
-		//     480 the mechanism can otherwise handle.
-		//   - 2000 deg/s^3: ~0.15 s to reach full deceleration, so the stop
-		//     ramps in instead of snapping.
-		// WHEN THE CHAIN IS FIXED (no slop): 240 / 480 / 4800 tracked
-		// cleanly and is the match-pace target - set it on the Testing tab,
-		// then move these defaults. If a held coral slips during a swing,
-		// lower the ACCELERATION first (it sets the peak tangential force),
-		// then cruise.
+		// Sized from what the sweeps actually need. The rotations the L3 and
+		// L4 sequences wait on are about 75 deg, and a 75 deg move at 300
+		// deg/s^2 never reaches a 200 deg/s cruise - it peaks at 150 - so the
+		// carriage was waiting on ACCELERATION, not top speed. Raising the
+		// acceleration is what shortens them:
+		//     sweep      200/300      300/800
+		//     75 deg     1.30 s       0.88 s
+		//     100 deg    1.45 s       0.97 s
+		//     160 deg    1.77 s       1.18 s
+		//   - 300 deg/s is 55% of the Kraken's free speed through 65.41:1
+		//     (100 rotor rps / 65.41 = 1.53 rot/s = 550 deg/s), so kV at cruise
+		//     is ~6.5 V and kP still has room.
+		//   - 800 deg/s^2 costs the motor about 9 A against the arm's inertia -
+		//     nothing. What it costs the GAME PIECE is the real limit: peak
+		//     centripetal load at the claw goes from ~0.4 g to ~1.0 g.
+		//   - 6000 deg/s^3 keeps the S-curve ramp at 0.13 s, the same easing
+		//     the 300/2000 pair had, so the stop still ramps in instead of
+		//     snapping - that is what the chain slop needs.
+		// If a held piece slips: on a LONG swing (algae, base to RAISE) the
+		// peak is the cruise, so lower CRUISE; on the short scoring rotations
+		// the peak is set by acceleration, so lower ACCELERATION.
 		// The Superstructure handoff heights follow the live values - re-check
 		// the Handoffs readout after a change.
-		public static final double CORAL_PIVOT_MAX_VELOCITY = 200.0;     // Cruise velocity (deg/s)
-		public static final double CORAL_PIVOT_MAX_ACCELERATION = 300.0; // Acceleration (deg/s^2)
-		public static final double CORAL_PIVOT_MAX_JERK = 2000.0;        // Jerk limit (deg/s^3); ~0.15 s to reach full accel
+		public static final double CORAL_PIVOT_MAX_VELOCITY = 300.0;     // Cruise velocity (deg/s)
+		public static final double CORAL_PIVOT_MAX_ACCELERATION = 800.0; // Acceleration (deg/s^2)
+		public static final double CORAL_PIVOT_MAX_JERK = 6000.0;        // Jerk limit (deg/s^3); 0.13 s to reach full accel
 
 		// --- Closed-Loop Gains (Phoenix 6 slot 0; voltage-based, error in mechanism rotations) ---
 		// TUNE - starting points for first power-on:
@@ -380,6 +389,12 @@ public final class Constants {
 		// friction so the arm starts moving without kP winding up first.
 		public static final double CORAL_PIVOT_kS = 0.2;  // Volts to overcome static friction (TUNE: raise until motion starts)
 		public static final double CORAL_PIVOT_kV = 7.85; // Volts per pivot rot/s of profile velocity
+		// kA: volts per pivot rot/s^2 of PROFILE acceleration. Motion Magic
+		// applies it on the ramps, so the position loop no longer has to buy
+		// that force with tracking error - the same thing that fixed the
+		// elevator's overshoot. 800 deg/s^2 is 2.2 rot/s^2 and needs ~0.3 V
+		// against the arm's inertia (~0.8 kg m^2 through 65.41:1), hence 0.13.
+		public static final double CORAL_PIVOT_kA = 0.13;
 
 		// --- Pivot Angle Limits (degrees) ---
 		// The pivot is zeroed at its base position on initialization, so the

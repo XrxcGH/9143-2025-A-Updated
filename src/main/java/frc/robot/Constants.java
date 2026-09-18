@@ -749,7 +749,7 @@ public final class Constants {
 		// this far inside its band (the carriage's own clamp keeps it
 		// RATCHET_MARGIN inside, so the two can never wait on each other), and
 		// the arm stops this far short of a row that is not open.
-		public static final double ARM_CLAMP_HEIGHT_MARGIN = 0.25;  // Inches
+		public static final double ARM_CLAMP_HEIGHT_MARGIN = 0.1;   // Inches
 		public static final double ARM_CLAMP_ANGLE_MARGIN = 2.5;    // Degrees
 		// The angle the arm may hold while the carriage is still below the
 		// final-angle height. 27.5 is the MIDDLE of the 25-30 row (clear

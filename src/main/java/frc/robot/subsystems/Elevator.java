@@ -61,7 +61,7 @@ import frc.robot.util.Tunables;
  * read through the public getters by the central {@link frc.robot.Dashboard}
  * class, which owns every NetworkTables/Elastic publication for the robot.
  */
-public class Elevator extends SubsystemBase {
+public class Elevator extends SubsystemBase implements CarriageAxis {
 
     private final SparkMax leftMotor;   // Leader
     private final SparkMax rightMotor;  // Follower

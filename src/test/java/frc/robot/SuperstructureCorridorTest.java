@@ -215,8 +215,13 @@ class SuperstructureCorridorTest {
         assertTrue(Superstructure.ceilingForSweep(raise, a4, 36.6) <= 36.6);
         // ...but the legitimate unlock still works: 20 deg only opens above 35.5 in, just ahead
         assertEquals(36.0, Superstructure.ceilingForSweep(raise, a4, 33.0), 1e-9);
-        // L4 exit: the 25-30 row does not hold 51.5 in, and descending is what unlocks it
-        assertEquals(35.5, Superstructure.floorForSweep(a4, raise, l4), 1e-9);
+        // L4 exit: the 25-30 row does not hold 51.5 in, and descending is what unlocks it. The arm
+        // rests ON the 20 deg row edge, so the tighter of the two rows it may be read in applies
+        // (37.5 in for 15-20 deg, 35.5 for 20-25) - constant whichever side the reading falls
+        assertEquals(37.5, Superstructure.floorForSweep(a4, raise, l4), 1e-9);
+        assertEquals(37.5, Superstructure.floorForSweep(a4 - 0.4, raise, l4), 1e-9);
+        assertEquals(37.5, Superstructure.floorForSweep(a4 + 0.4, raise, l4), 1e-9);
+        assertEquals(35.5, Superstructure.floorForSweep(a4 + 2.0, raise, l4), 1e-9);
         // A carriage passing 20 in on its way up, arm parked at RAISE: the 65-70 row's gap far along
         // the sweep is NOT a reason to brake - the arm is gated on height before it gets there
         assertEquals(36.0, Superstructure.ceilingForSweep(98.0, a4, 20.0), 1e-9);

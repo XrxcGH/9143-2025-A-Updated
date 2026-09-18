@@ -53,7 +53,7 @@ import frc.robot.util.Tunables;
  * read through the public getters by the central {@link frc.robot.Dashboard}
  * class, which owns every NetworkTables/Elastic publication for the robot.
  */
-public class CorAl extends SubsystemBase {
+public class CorAl extends SubsystemBase implements ArmAxis {
     // Hardware Components
     private final TalonFX pivotMotor;             // Motor controlling the pivot mechanism
     private final TalonFX intakeMotor;            // Motor controlling the intake rollers

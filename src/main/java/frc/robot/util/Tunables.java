@@ -226,8 +226,8 @@ public final class Tunables {
 
     /**
      * Acceleration feedforward, volts per in/s^2 of profile acceleration.
-     * Clamped to twice the no-spring model: more than that would mean the
-     * carriage weighs far more than the CAD says.
+     * Clamped to about three times the CAD model: more than that would
+     * mean the carriage weighs far more than the CAD says.
      */
     public static double elevatorKa() {
         return clamped(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA, 0.0, 0.012);

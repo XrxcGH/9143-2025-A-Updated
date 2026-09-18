@@ -149,9 +149,7 @@ public final class Constants {
 		//   1. Calibrate the height reading against a tape measure (README:
 		//      "Calibrating the elevator height").
 		//   2. Set kG from the holding voltage: hold a height, read
-		//      "Elevator/Hold Volts", and set kG to it (the constant-force
-		//      springs carry part of the weight, so it is lower than the
-		//      no-help model).
+		//      "Elevator/Hold Volts", and set kG to it.
 		//   3. Command a preset and check the carriage tracks without lagging
 		//      on the ramps (that is kA) or resting short (that is kP or kG).
 		// kP sizing: the position loop must supply whatever the feedforward
@@ -195,12 +193,14 @@ public final class Constants {
 		// scale multiplies that model (REV: overshoot -> reduce kV).
 		public static final double NEO_FREE_SPEED_RPM = 5676.0;
 		public static final double ELEVATOR_kV_SCALE = 1.0;
-		// kG: carriage + arm + half the middle stage is ~145 N without help,
-		// which is ~0.99 V through 15:1; the CAD's two constant-force springs
-		// on the middle stage carry part of it, so the shipped value assumes
-		// roughly a third of the weight is sprung. MEASURE it on the robot:
-		// hold a height and read "Elevator/Hold Volts" (TUNE step 2).
-		public static final double ELEVATOR_kG = 0.65;
+		// kG: nothing counterbalances this elevator (the constant-force
+		// springs in the CAD are not on the robot), so the motors hold the
+		// whole carriage + arm + half the middle stage - about 145 N by the
+		// CAD mass estimate, which is ~1.0 V through 15:1 (the estimate spans
+		// 0.8-1.3 V). MEASURE it on the robot: hold a height and read
+		// "Elevator/Hold Volts" (TUNE step 2). If a counterbalance is ever
+		// added, re-measure - kG drops by whatever share it carries.
+		public static final double ELEVATOR_kG = 1.0;
 
 		/** NEO back-EMF velocity feedforward (volts per in/s) for a given carriage travel per motor rotation. */
 		public static double modelKv(double inchesPerRotation) {

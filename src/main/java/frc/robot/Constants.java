@@ -416,7 +416,14 @@ public final class Constants {
 		// with a coral, and put the threshold halfway between.
 		public static final double GAME_PIECE_DETECTION_CONFIRMATION_TIME = 0.3; // Seconds each edge must persist (both edges)
 		public static final double GAME_PIECE_DETECTION_THRESHOLD = 0.08;        // Tunable default: detect below this (meters)
-		public static final double GAME_PIECE_DETECTION_HYSTERESIS = 0.015;      // Tunable default: detect below threshold - this, release above threshold + this (meters)
+		public static final double GAME_PIECE_DETECTION_HYSTERESIS = 0.015;      // Tunable default: the verdict only changes outside threshold +/- this (meters)
+		// Which side of the threshold a HELD coral puts the reading on. The
+		// CANrange's own proximity bit can only mean "closer than the
+		// threshold"; if the sensor looks across an empty claw at structure a
+		// few centimetres away, that bit is stuck ON with nothing in the claw.
+		// So the verdict is formed in code from the distance and this picks the
+		// polarity. Tunable: "CorAl - Coral Detect When Closer (1) Or Farther (0)".
+		public static final boolean GAME_PIECE_DETECT_WHEN_CLOSER = true;
 		public static final double GAME_PIECE_MIN_SIGNAL_STRENGTH = 2500;        // Below this the measurement is invalid and cannot detect (CTRE default)
 		public static final double GAME_PIECE_FOV_DEGREES = 13.5;                // Field of view, both axes (6.75 min, 27 max); narrow keeps claw structure out of the beam
 
@@ -572,75 +579,55 @@ public final class Constants {
 			{165.0,  7.0,  53.5,   Double.NaN,   Double.NaN},
 		};
 
-		// --- Planning limits derived from the table (margin ~1 in) ---
-		// Highest carriage height with the arm fully tucked (< ARM_CLEAR_MIN_ANGLE).
-		public static final double ARM_TUCK_MAX_HEIGHT = 8.5;       // Inches
-		// Smallest arm angle that may leave the tuck zone (5 deg is only
-		// clear to ~10 in; 7.5 deg to ~21 in). L2 is 12.5 deg.
-		public static final double ARM_CLEAR_MIN_ANGLE = 8.0;       // Degrees
-		// Highest carriage height with the arm ANYWHERE from 8 to 75 deg
-		// (the low box roof: 17.5 in at 60-70 deg is the tightest).
-		public static final double LOW_BOX_ROOF = 16.5;             // Inches
-		// Arm angle that clears band A, so the carriage may climb past the
-		// low box roof (67.5 deg is the first continuous row).
-		public static final double BAND_PASS_MIN_ANGLE = 75.0;      // Degrees
-		// Highest carriage height with the arm between BAND_PASS_MIN_ANGLE
-		// and SAFE_TRAVEL_MIN_ANGLE (band B for 75-95 deg starts at 36-39 in).
-		public static final double MID_CORRIDOR_MAX_HEIGHT = 36.0;  // Inches
-		// Arm angle from which the carriage may go anywhere: RAISE (100 deg)
-		// itself; the gate accepts SAFE_ANGLE_TOLERANCE below it, i.e. a
-		// measured 97 deg, and the 97.5 deg row is clear 4-53.5 in.
-		public static final double SAFE_TRAVEL_MIN_ANGLE = 100.0;   // Degrees
-		// Angles beyond this need height (bumper / Limelight bracket): from
-		// ~113 deg up the corridor starts at 4 in, from 135 deg at 5 in and
-		// at 160 deg at 7.5 in. The arm is held at this stage angle (which
-		// is clear right down to the base) until the carriage is above the
-		// minimum height, and brought back to it before dropping below.
-		public static final double HIGH_ANGLE_STAGE = 110.0;        // Degrees
-		public static final double HIGH_ANGLE_MIN_HEIGHT = 8.0;     // Inches
+		// --- Coordinated motion ---
+		// The planner does not walk through stations any more: both mechanisms
+		// stream targets every loop, each CLAMPED to what the other's MEASURED
+		// position allows, so they move together and nothing waits at a
+		// waypoint. These set how that clamp is computed.
+		//
+		// The elevator's window is the intersection of the corridor bands over
+		// every angle the arm will sweep between where it is now and where it
+		// is going, sampled this finely - so the carriage never commits to a
+		// height the arm is about to block. The arm's window is the mirror:
+		// the intersection over every height the carriage will pass through.
+		public static final double COORD_ANGLE_STEP = 2.5;    // Degrees
+		public static final double COORD_HEIGHT_STEP = 0.5;   // Inches
+		// Kept inside each window so a mechanism that overshoots its commanded
+		// target slightly (the profiles decelerate into it) still lands clear.
+		// The corridor table already carries ~1 in of model margin.
+		public static final double COORD_HEIGHT_MARGIN = 0.5;  // Inches
+		public static final double COORD_ANGLE_MARGIN = 2.0;   // Degrees
+		// A retarget is only sent when the clamped command has moved by this
+		// much, so the controllers are not spammed with identical setpoints.
+		public static final double COORD_SEND_EPSILON_IN = 0.05;
+		public static final double COORD_SEND_EPSILON_DEG = 0.5;
+		// Backstop on one coordinated phase. Timing out leaves the latched
+		// setpoints holding, which is safe; it only releases the operator's
+		// controls if something has jammed.
+		public static final double COORD_TIMEOUT_SECONDS = 6.0;
+		// The follower switches to the next waypoint once the pose is this
+		// close to the current one, so the profiles retarget before they
+		// decelerate into it and the legs run together as one motion.
+		public static final double ROUTE_LOOKAHEAD_IN = 1.5;
+		public static final double ROUTE_LOOKAHEAD_DEG = 8.0;
+		// Plan-time kinematic rehearsal of the clamp (pure geometry, no
+		// hardware): step sizes in the ratio of the mechanisms' speeds, and the
+		// step budget before a move is declared unreachable without a detour.
+		public static final double PLAN_HEIGHT_STEP = 0.2;    // Inches per step
+		public static final double PLAN_ANGLE_STEP = 1.0;     // Degrees per step
+		public static final int PLAN_MAX_STEPS = 4000;
 
-		// --- Mid-height scoring poses (L3): 17 < height < L4_ZONE_MIN_HEIGHT ---
-		// The arm starts its final rotation (from RAISE) once the carriage is
-		// this close to the target; the carriage keeps settling meanwhile.
-		// 0.5 because the L3 pose (30.5 in, 25 deg) sits half an inch above
-		// the 25-30 deg corridor floor (30 in).
-		public static final double MID_POSE_ROTATE_BELOW_TARGET = 0.5; // Inches
-		// Leaving a mid pose: lift to here (all of 25-100 deg is clear at
-		// 31-35 in) while the arm swings up; only descend once the arm is at
-		// BAND_PASS_MIN_ANGLE. This is the fix for the L3 return hitting the
-		// middle-stage top tube when the elevator dropped too early.
-		public static final double MID_POSE_RETURN_LIFT_HEIGHT = 31.0; // Inches
-
-		// --- High scoring pose (L4): height >= L4_ZONE_MIN_HEIGHT ---
-		public static final double L4_ZONE_MIN_HEIGHT = 35.0;       // Inches
-		// Approach: rise at RAISE to the station, rotate to the stage angle
-		// there (25-100 deg are all clear at 31-35 in), climb to the pre-top
-		// height with the arm at the stage angle (25-30 deg clear to 51 in),
-		// finish the rotation to 20 deg above 37 in (20 deg clear 37.5-53.5)
-		// and only then send the carriage to the top.
-		public static final double L4_STATION_HEIGHT = 33.0;        // Inches
-		public static final double L4_ROTATE_START_HEIGHT = 31.0;   // Inches: arm may leave RAISE
-		public static final double L4_STAGE_ANGLE = 25.0;           // Degrees
-		public static final double L4_STAGE_DONE_ANGLE = 30.0;      // Degrees: carriage may continue up
-		public static final double L4_PRE_TOP_HEIGHT = 48.0;        // Inches
-		public static final double L4_FINAL_ANGLE_MIN_HEIGHT = 37.0; // Inches: arm may finish to 20 deg
-		public static final double L4_FINAL_GATE_ANGLE = 22.5;      // Degrees: carriage may go to the top
-		// Return ("drop before pivoting"): descend at the L4 angle to the
-		// drop height (20 deg is clear 37.5-53.5), swing to 45 deg while
-		// below the rotate-max height (45 deg clear 28-46), drop to the
-		// station, swing to RAISE below 37 in (90 deg clear to 36.5), then
-		// descend freely.
-		public static final double L4_RETURN_DROP_HEIGHT = 39.0;         // Inches
-		public static final double L4_RETURN_ROTATE_MAX_HEIGHT = 43.0;   // Inches
-		public static final double L4_RETURN_STAGE_ANGLE = 45.0;         // Degrees
-		public static final double L4_RETURN_STAGE_DONE_ANGLE = 40.0;    // Degrees
-		public static final double L4_RETURN_SAFE_ROTATE_MAX_HEIGHT = 37.0; // Inches
+		// --- Angles that matter to the planner ---
+		// From SAFE_TRAVEL_MIN_ANGLE (RAISE = 100 deg) the whole travel is
+		// clear, so it is the angle the arm is sent to when a target cannot be
+		// reached by clamped motion alone (the detour).
+		public static final double SAFE_TRAVEL_MIN_ANGLE = 100.0;  // Degrees
 
 		// --- Tolerances ---
-		// The arm counts as "at" a gate angle within this tolerance (the
+		// The arm counts as "at" a commanded angle within this tolerance (the
 		// through bore reads the real arm, after the chain backlash).
 		public static final double SAFE_ANGLE_TOLERANCE = 3.0; // Degrees
-		// Final settle wait per planned move. Safety gates never time out.
+		// Final settle wait per planned move.
 		public static final double SETTLE_TIMEOUT_SECONDS = 3.0;
 		// A settle also ends when both mechanisms have stopped: the closed
 		// loops hold their latched setpoints, so once motion has ceased,

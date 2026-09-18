@@ -58,6 +58,7 @@ public final class Tunables {
     private static final String PIVOT_MAX_JERK = "Pivot - Jerk (deg/s^3)";
     private static final String CORAL_DETECT_DISTANCE = "CorAl - Coral Detect Distance (m)";
     private static final String CORAL_DETECT_HYSTERESIS = "CorAl - Coral Detect Hysteresis (m)";
+    private static final String CORAL_DETECT_WHEN_CLOSER = "CorAl - Coral Detect When Closer (1) Or Farther (0)";
     private static final String REEF_FLUSH_DISTANCE = "Vision - Reef Flush Distance (m)";
     private static final String STATION_FLUSH_DISTANCE = "Vision - Station Flush Distance (m)";
     private static final String L1_SCORE_DISTANCE = "Vision - L1 Score Distance (m)";
@@ -87,7 +88,7 @@ public final class Tunables {
      *      arm arrival offsets retired (the Superstructure now runs
      *      CAD-derived staged sequences gated on measured state)
      */
-    private static final int DEFAULTS_VERSION = 10; // 10: hard-stop height 1.000 in (the middle-stage tube), Sept 17 2026
+    private static final int DEFAULTS_VERSION = 11; // 11: CANrange detect polarity tunable; hard-stop height 1.000 in (Sept 17 2026)
 
     /**
      * Seeds every key with its Constants default if it does not exist yet
@@ -117,6 +118,8 @@ public final class Tunables {
         Preferences.initDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
         Preferences.initDouble(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD);
         Preferences.initDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
+        Preferences.initDouble(CORAL_DETECT_WHEN_CLOSER,
+            CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER ? 1.0 : 0.0);
         Preferences.initDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.initDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.initDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -147,6 +150,8 @@ public final class Tunables {
         Preferences.setDouble(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK);
         Preferences.setDouble(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD);
         Preferences.setDouble(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS);
+        Preferences.setDouble(CORAL_DETECT_WHEN_CLOSER,
+            CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER ? 1.0 : 0.0);
         Preferences.setDouble(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE);
         Preferences.setDouble(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE);
         Preferences.setDouble(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE);
@@ -282,6 +287,17 @@ public final class Tunables {
     /** CANrange proximity threshold, meters: a coral is "present" below it (minus the hysteresis). */
     public static double coralDetectDistance() {
         return clamped(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD, 0.02, 0.5);
+    }
+
+    /**
+     * Which way a coral moves the CANrange reading: 1 = a piece reads
+     * CLOSER than the detect distance, 0 = a piece reads FARTHER. Set it
+     * from the dashboard by reading CorAl/CANrange Distance with the claw
+     * empty and with a coral held.
+     */
+    public static boolean coralDetectWhenCloser() {
+        return Preferences.getDouble(CORAL_DETECT_WHEN_CLOSER,
+            CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER ? 1.0 : 0.0) >= 0.5;
     }
 
     /** CANrange proximity hysteresis, meters, applied on both sides of the threshold. */

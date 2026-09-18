@@ -70,11 +70,16 @@ public class CorAl extends SubsystemBase {
     private final Debouncer detectionDebouncer = new Debouncer(
         CorAlConstants.GAME_PIECE_DETECTION_CONFIRMATION_TIME, Debouncer.DebounceType.kBoth);
     private boolean gamePieceDetected = false;
-    private boolean rawDetected = false; // Last raw (undebounced) sensor verdict, for the dashboard
+    private boolean rawDetected = false; // Last raw (undebounced) verdict, for the dashboard
+    // Latched side of the hysteresis band, so a reading inside the band
+    // keeps whatever the last verdict was.
+    private boolean detectLatch = false;
 
     // Applied CANrange detection tunables (re-applied while disabled; see periodic())
     private double appliedDetectThreshold;
     private double appliedDetectHysteresis;
+    /** True = a piece reads CLOSER than the threshold; false = FARTHER. */
+    private boolean appliedDetectWhenCloser;
     private double commandedIntakeSpeed = 0; // Last commanded roller speed (+ = coral intake direction)
 
     // Position Tracking
@@ -254,12 +259,14 @@ public class CorAl extends SubsystemBase {
     private void readDetectTunables() {
         appliedDetectThreshold = Tunables.coralDetectDistance();
         appliedDetectHysteresis = Tunables.coralDetectHysteresis();
+        appliedDetectWhenCloser = Tunables.coralDetectWhenCloser();
     }
 
     /** True if a detection tunable differs from what is applied to the sensor. */
     private boolean detectTunablesChanged() {
         return Tunables.coralDetectDistance() != appliedDetectThreshold
-            || Tunables.coralDetectHysteresis() != appliedDetectHysteresis;
+            || Tunables.coralDetectHysteresis() != appliedDetectHysteresis
+            || Tunables.coralDetectWhenCloser() != appliedDetectWhenCloser;
     }
 
     /**
@@ -443,6 +450,49 @@ public class CorAl extends SubsystemBase {
     }
 
     /**
+     * The raw detection verdict, formed from the measured distance.
+     *
+     * The CANrange's own proximity bit is fixed to "distance below the
+     * threshold". That is only the right question when a game piece is the
+     * NEAREST thing the sensor can see; if the sensor looks across an empty
+     * claw at structure a few centimetres away, an empty claw reads closer
+     * than the threshold and the bit is stuck on - which is exactly the
+     * "solid detected with nothing in the claw" symptom. So the verdict is
+     * formed here instead, with the polarity as a tunable:
+     *
+     *   detect-when-closer  : a piece is CLOSER than the threshold
+     *   detect-when-farther : a piece is FARTHER than the threshold (it
+     *                         pushes the reflection away, or blocks a near
+     *                         return the empty claw shows)
+     *
+     * A reading inside the hysteresis band around the threshold keeps the
+     * previous verdict, a reading the sensor flags as unhealthy or too weak
+     * counts as "nothing", and the caller debounces both edges. Set both the
+     * threshold and the polarity from the dashboard: read
+     * CorAl/CANrange Distance with the claw empty and with a coral held, put
+     * the threshold halfway between, and set the polarity to whichever way
+     * the coral moves the reading.
+     */
+    private boolean readDetection() {
+        boolean valid = canRangeSensor.getMeasurementHealth().getValue() != MeasurementHealthValue.Bad
+            && canRangeSensor.getSignalStrength().getValueAsDouble() >= CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH;
+        if (!valid) {
+            detectLatch = false;
+            return false;
+        }
+        double distance = canRangeSensor.getDistance().getValueAsDouble();
+        double near = appliedDetectThreshold - appliedDetectHysteresis;
+        double far = appliedDetectThreshold + appliedDetectHysteresis;
+        if (distance <= near) {
+            detectLatch = appliedDetectWhenCloser;
+        } else if (distance >= far) {
+            detectLatch = !appliedDetectWhenCloser;
+        }
+        // Inside the band: keep the last verdict.
+        return detectLatch;
+    }
+
+    /**
      * Distance reading from the CANrange sensor in meters.
      */
     public double getCANRangeDistance() {
@@ -459,9 +509,14 @@ public class CorAl extends SubsystemBase {
         return canRangeSensor.getMeasurementHealth().getValue().name();
     }
 
-    /** The sensor's raw, undebounced proximity verdict (after the health check). */
+    /** The raw, undebounced verdict (after the validity check). */
     public boolean isCANRangeRawDetected() {
         return rawDetected;
+    }
+
+    /** True while "detected" means closer than the threshold, false while it means farther. */
+    public boolean isDetectWhenCloser() {
+        return appliedDetectWhenCloser;
     }
 
     /** Proximity threshold (meters) currently applied to the CANrange. */
@@ -527,16 +582,17 @@ public class CorAl extends SubsystemBase {
 
     @Override
     public void periodic() {
-        // Game piece detection: the CANrange's on-device proximity bit
-        // (threshold + hysteresis + minimum signal strength, configured
-        // above), additionally rejected while the sensor reports a
-        // compromised measurement, then debounced on both edges. On the
+        // Game piece detection: see readDetection() - the verdict is formed
+        // from the measured DISTANCE here rather than from the sensor's own
+        // proximity bit, because that bit can only mean "closer than the
+        // threshold" and which side of the threshold a coral puts the
+        // reading on depends on where the sensor looks. Then debounced on
+        // both edges. On the
         // confirmed rising edge (a coral just arrived), stop the rollers -
         // but only if they are running in the coral-intake (positive)
         // direction, so algae holding/ejecting is never interrupted by the
         // sensor.
-        rawDetected = canRangeSensor.getIsDetected().getValue()
-            && canRangeSensor.getMeasurementHealth().getValue() != MeasurementHealthValue.Bad;
+        rawDetected = readDetection();
         boolean confirmed = detectionDebouncer.calculate(rawDetected);
         if (confirmed && !gamePieceDetected && commandedIntakeSpeed > 0) {
             stopIntake();

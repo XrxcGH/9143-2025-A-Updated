@@ -158,7 +158,8 @@ public final class Constants {
 		//   1. Calibrate the height reading against a tape measure (README:
 		//      "Calibrating the elevator height").
 		//   2. Set kG from the holding voltage: hold a height, read
-		//      "Elevator/Hold Volts", and set kG to it.
+		//      "Elevator/Hold Volts", and set kG to it. (The readout already
+		//      has kS taken off: the controller adds +kS at rest as well.)
 		//   3. Command a preset and check the carriage tracks without lagging
 		//      on the ramps (that is kA) or resting short (that is kP or kG).
 		// kP sizing: the position loop must supply whatever the feedforward
@@ -386,7 +387,23 @@ public final class Constants {
 		public static final double CORAL_PIVOT_kP = 40.0; // Volts per rotation of position error (~0.11 V/deg)
 		public static final double CORAL_PIVOT_kI = 0.0;  // Leave 0 - use kG for gravity
 		public static final double CORAL_PIVOT_kD = 0.0;  // Volts per rot/s of error derivative
-		public static final double CORAL_PIVOT_kG = 0.0;  // Volts to hold the arm horizontal (requires 0 deg = horizontal)
+		// kG no longer needs 0 deg to be horizontal: Phoenix 6 26.x adds
+		// Slot0.GravityArmPositionOffset, and Arm_Cosine then outputs
+		// kG x cos(position + offset). This arm's 0 deg has the claw ~33 deg
+		// past vertical toward the rear, so gravity does nothing at the
+		// BALANCE ANGLE (~33 deg, claw straight up) and the offset is
+		// 0.25 rot - balance/360 (checked for sign in the Phoenix sim: +57 deg
+		// of offset gives +0.55 V at 0 deg, 0 at 33, -1.0 at 123 for kG = 1).
+		// kG STAYS 0 UNTIL MEASURED - with 0 the offset does nothing:
+		//   1. Balance angle: disabled, pivot in Coast (Tuner X), find the
+		//      through-bore angle where the claw balances.
+		//   2. kG: at balance + 90 (~123 deg, claw horizontal) creep up and
+		//      down at ~5 deg/s and read the pivot's MotorVoltage:
+		//      kG = (|V up| + |V down|) / 2, kS = the half-difference.
+		// Expect ~0.3 V (4 kg at ~0.25 m through 65.41:1). Without it the arm
+		// rests 2-3 deg low at RAISE and the algae poses (kG / kP).
+		public static final double CORAL_PIVOT_kG = 0.0;  // Volts to hold the arm with the claw horizontal
+		public static final double CORAL_PIVOT_BALANCE_ANGLE_DEG = 33.0; // Degrees: where gravity does nothing (0 < angle < 180)
 
 		// --- Profile Feedforward (volts) ---
 		// Physics-based so Motion Magic tracks its profile instead of lagging
@@ -673,7 +690,26 @@ public final class Constants {
 		// finish the rotation to 20 deg above 37 in (20 deg clear 37.5-53.5)
 		// and only then send the carriage to the top.
 		public static final double L4_STATION_HEIGHT = 33.0;        // Inches
-		public static final double L4_ROTATE_START_HEIGHT = 31.0;   // Inches: arm may leave RAISE
+		public static final double L4_ROTATE_START_HEIGHT = 31.0;   // Inches: bottom of the window where 25-100 deg are ALL clear
+		// Carriage height from which the arm may leave RAISE on the way to a
+		// scoring pose, under the arm-side clamp (Superstructure
+		// .armLimitForHeight), which holds it at the edge of any row the
+		// carriage has not opened yet. 75-100 deg is clear from the base to
+		// 36 in by the table, so this is NOT a table limit: below ~22 in the
+		// claw's tail bar passes the funnel's sheet-metal lips, which the CAD
+		// clearance model does not include, and at RAISE it is well behind
+		// them. 24 in puts the tail bar ~2.5 in above the lips before the arm
+		// moves. Lower it (to 18) only after jogging the arm to 75 deg and
+		// raising the carriage slowly from 12 to 24 in with eyes on that gap -
+		// every inch lower is 25 ms more lead for the arm, and at ~18 the
+		// carriage no longer slows for its 35.5 in clamp at all.
+		public static final double ARM_RELEASE_MIN_HEIGHT = 24.0;   // Inches
+		// Arm-side clamp margins: a row counts as open once the carriage is
+		// this far inside its band (the carriage's own clamp keeps it
+		// RATCHET_MARGIN inside, so the two can never wait on each other), and
+		// the arm stops this far short of a row that is not open.
+		public static final double ARM_CLAMP_HEIGHT_MARGIN = 0.25;  // Inches
+		public static final double ARM_CLAMP_ANGLE_MARGIN = 2.5;    // Degrees
 		// The angle the arm may hold while the carriage is still below the
 		// final-angle height. 27.5 is the MIDDLE of the 25-30 row (clear
 		// 30-51 in); 25.0 was that row's edge, and a through-bore reading of

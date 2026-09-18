@@ -187,6 +187,11 @@ public class CorAl extends SubsystemBase {
         config.Slot0.kD = CorAlConstants.CORAL_PIVOT_kD;
         config.Slot0.kG = CorAlConstants.CORAL_PIVOT_kG;
         config.Slot0.GravityType = GravityTypeValue.Arm_Cosine;
+        // 0 deg is not horizontal on this arm: tell Arm_Cosine where the
+        // balance point is (see CORAL_PIVOT_kG). Phoenix clamps the offset to
+        // +/-0.25 rot silently, so keep the balance angle inside 0-180.
+        config.Slot0.GravityArmPositionOffset = 0.25
+            - Math.min(Math.max(CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG, 0.0), 180.0) / 360.0;
         // Profile feedforward: Motion Magic feeds these its profiled velocity
         // so the arm follows the profile instead of lagging and overshooting
         config.Slot0.kS = CorAlConstants.CORAL_PIVOT_kS;

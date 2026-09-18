@@ -471,6 +471,11 @@ public class Elevator extends SubsystemBase {
         return ElevatorConstants.ELEVATOR_MODELED_INCHES_PER_ROTATION * appliedTravelRatio;
     }
 
+    /** Static friction feedforward (volts) currently applied; the controller adds it at rest too. */
+    public double staticFeedforward() {
+        return appliedKs;
+    }
+
     /** Acceleration feedforward (volts per in/s^2) currently applied. */
     public double accelerationFeedforward() {
         return appliedKa;

@@ -358,10 +358,13 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Right Current", elevator.getRightCurrent());
         SmartDashboard.putNumber("Elevator/Left Output", elevator.getLeftOutput());
         // Voltage the leader is applying (output is voltage-compensated to
-        // 12 V). Holding still, this IS kG + whatever the position loop is
-        // adding, so it is how kG gets measured on the robot.
+        // 12 V) MINUS kS. The Spark MAX adds +kS whenever the profile is at
+        // rest (REVLib 2026 - measured in REV's own sim: it does not follow
+        // the sign of the error), so the raw output holding still is
+        // kG + kS + kP x error. With kS taken off, what is left is what kG
+        // should be - "set kG to Hold Volts" used to over-set it by kS.
         SmartDashboard.putNumber("Elevator/Hold Volts",
-            elevator.getLeftOutput() * ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE);
+            elevator.getLeftOutput() * ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE - elevator.staticFeedforward());
         SmartDashboard.putNumber("Elevator/Right Output", elevator.getRightOutput());
         // Calibration in effect on the controllers (the tunables may still be pending)
         SmartDashboard.putNumber("Elevator/Travel Ratio", elevator.travelRatio());

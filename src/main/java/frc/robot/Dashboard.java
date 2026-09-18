@@ -232,12 +232,17 @@ public class Dashboard {
         SmartDashboard.putData("CorAl Subsystem", coral);
 
         // --- Pre-match utility buttons (Command widgets on the Setup tab) ---
-        // ignoringDisable lets the pit crew zero mechanisms without enabling.
+        // ignoringDisable lets the pit crew zero mechanisms without enabling -
+        // and ONLY without enabling: zeroing under a latched closed-loop
+        // setpoint shifts its frame and drives the mechanism hard. (These ran
+        // while enabled too; the controller bindings never did.)
         SmartDashboard.putData("Zero Elevator",
             Commands.runOnce(elevator::resetEncoders, elevator)
+                .onlyIf(edu.wpi.first.wpilibj.DriverStation::isDisabled)
                 .ignoringDisable(true).withName("Zero Elevator"));
         SmartDashboard.putData("Zero CorAl Pivot",
             Commands.runOnce(coral::resetPivotEncoder, coral)
+                .onlyIf(edu.wpi.first.wpilibj.DriverStation::isDisabled)
                 .ignoringDisable(true).withName("Zero CorAl Pivot"));
 
         // --- Elastic SwerveDrive widget ---

@@ -265,7 +265,7 @@ public final class Constants {
 
 		// --- Manual Control (unitless stick values) ---
 		public static final double ELEVATOR_MANUAL_CONTROL_DEADBAND = 0.2; // Stick deadband
-		public static final double ELEVATOR_MANUAL_SPEED_LIMIT = 0.25;     // Max duty cycle in manual mode
+		public static final double ELEVATOR_MANUAL_MAX_VOLTS = 3.0;        // Full stick = kG +/- this (about 17 in/s either way)
 
 		// --- Preset Heights (inches; bottom of carriage 2x1 to top of base stage 2x1) ---
 		public enum PresetHeights {

@@ -16,6 +16,7 @@ import com.pathplanner.lib.util.FlippingUtil;
 import java.io.File;
 import java.util.Arrays;
 
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -28,6 +29,7 @@ import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
 import frc.robot.generated.TunerConstants;
@@ -39,6 +41,7 @@ import frc.robot.subsystems.Elevator;
 import frc.robot.subsystems.CorAl;
 // CANdle disabled (no CANdle on the robot): import frc.robot.subsystems.LEDs;
 import frc.robot.subsystems.Vision;
+import frc.robot.util.Rumble;
 import frc.robot.util.Tunables;
 
 /**
@@ -46,44 +49,47 @@ import frc.robot.util.Tunables;
  * This is the single place to look up "what does this button do".
  *
  * ================================ CONTROLS =================================
+ * One coral cycle is LT -> a face button -> RT: index fingers and the right
+ * thumb. A pose button first; RT always releases the piece (coral or algae).
+ *
  * DRIVER (port 0):
- *   Left stick          - field-centric translation (forward/strafe)
+ *   Left stick          - field-centric translation (scaled down automatically
+ *                         as the carriage rises: 100 % below 16.5", 40 % at 45"+)
  *   Right stick X       - rotation
+ *   Left / right trigger (HOLD) - align on the LEFT / RIGHT reef branch (or the
+ *                         coral station when stowed and empty); release = sticks
+ *   Right bumper        - SCORE (same gated command as operator RT; while
+ *                         aligning it also waits for "aligned")
+ *   Left bumper         - driver heading zero: the way the robot faces now =
+ *                         stick forward (back+LB also re-seeds the pose heading)
  *   A (hold)            - X-lock the wheels (brake)
- *   B (hold)            - point all modules at the left-stick direction
- *   Y (press)           - toggle AprilTag vision tracking (goal follows the
- *                         operator's selected pose: reef flush for L2-L4 on
- *                         the chosen branch, 1 m standoff for L1, flush
- *                         centered for algae, rear-flush at coral stations)
- *   Left trigger        - align on the LEFT reef branch (L2-L4 tracking)
- *   Right trigger       - align on the RIGHT reef branch (L2-L4 tracking)
- *   D-pad               - slow robot-centric nudges (up/down/left/right)
- *   Left bumper         - driver heading zero: the way the robot faces now = stick forward (back+LB also re-seeds the pose heading)
- *   Back/Start + X/Y    - SysId characterization routines (test setup only)
+ *   D-pad               - slow robot-centric nudges, all 8 directions
+ *   B, Back/Start + X/Y - point wheels / SysId: TEST MODE ONLY
  *
  * OPERATOR (port 1):
- *   All position buttons run coordinated elevator+arm sequences through the
- *   Superstructure, which automatically avoids mechanism contact from any
- *   starting pose.
- *   Left stick Y        - elevator manual control (holds height on release;
- *                         NO collision interlocks - watch the mechanism)
- *   Right stick X       - CorAl pivot manual control (holds angle on release;
- *                         NO collision interlocks - watch the mechanism)
- *   D-pad down          - coral L1 scoring pose (0", 100 deg)
- *   D-pad left          - coral L2 scoring pose (12", 12.5 deg)
- *   D-pad right         - coral L3 scoring pose (30.5", 25 deg, rotated at the target)
- *   D-pad up            - coral L4 scoring pose (52.5", 45 deg, handoff overlap)
- *   A                   - coral intake (stow to base, rollers until the
- *                         CANrange confirms a game piece)
- *   X                   - eject coral at the current pose (rollers 0.5 s)
- *   B                   - algae low intake (20.5", 160 deg, rollers in)
- *   Back                - algae high intake (37.5", 160 deg, rollers in)
- *   Y                   - algae hold (hold rollers, arm to 90 deg)
- *   Right bumper        - algae score (52.5", 105 deg, then eject)
- *   Left trigger        - stow to base (rollers stopped, arm tucked)
- *   Right trigger       - raise arm to safe travel angle (context-aware)
- *   Left bumper         - reset elevator encoders (DISABLED only, mechanism at base)
- *   Start               - reset CorAl pivot encoder (DISABLED ONLY, at base)
+ *   A / X / B / Y       - coral L1 / L2 / L3 / L4 (the old D-pad diamond, under
+ *                         the right thumb)
+ *   Right trigger       - SCORE: waits until the MEASURED pose is reached, runs
+ *                         the rollers until the coral has left, then goes home
+ *                         by itself (after L3/L4 only once the robot has backed
+ *                         0.35 m away - the exit swings the claw past the bumper)
+ *   Left trigger        - HOME: stow + intake until a coral is detected; with an
+ *                         algae held: carry it low at the travel angle
+ *   Left bumper (HOLD)  - MANUAL take-over: cancels the running move and stops
+ *                         both mechanisms; while held left stick Y = elevator,
+ *                         right stick Y = pivot (NO collision interlocks), RT /
+ *                         LT = rollers out / in; release = hold position.
+ *                         The sticks do nothing unless LB is held.
+ *   Right bumper        - barge pose (RT then fires the algae)
+ *   D-pad up / down     - algae HIGH / LOW intake (diagonals count)
+ *   D-pad left          - algae hold in place (hold rollers, arm to 100 deg)
+ *   Back (enabled)      - raise the arm to the safe travel angle, in place
+ *   Back / Start, held 1 s, DISABLED only - zero the elevator / the pivot
+ *                         (mechanism at its base)
+ *
+ * RUMBLE: coral acquired (both, one long) - pose reached (operator, two short)
+ *   - aligned AND pose reached (driver, steady) - scored at L3/L4, back away
+ *   (driver, slow pulse) - RT with nothing to score from (operator, one tick).
  * ===========================================================================
  */
 public class RobotContainer {
@@ -119,6 +125,9 @@ public class RobotContainer {
     // Controllers: driver handles the drivetrain, operator handles mechanisms
     private final CommandXboxController driver_controller = new CommandXboxController(0);
     private final CommandXboxController operator_controller = new CommandXboxController(1);
+    /** Haptic cues (coral acquired, pose reached, aligned, back away). */
+    private final Rumble driverRumble = new Rumble(driver_controller);
+    private final Rumble operatorRumble = new Rumble(operator_controller);
 
     // ------------------------------------------------------------------
     // Subsystems
@@ -199,7 +208,12 @@ public class RobotContainer {
 
         // Vision alignment goals depend on what the superstructure is doing
         // (L1 standoff vs. flush scoring vs. algae) - wire that in.
-        swerve.getVision().setGoalSupplier(superstructure::getGoal);
+        // ...and with a coral in the claw but no level pressed yet (goal still
+        // STOW) the next stop is the reef, not a station: without this the
+        // aligner only accepted station tags and just sat still at the reef.
+        swerve.getVision().setGoalSupplier(() ->
+            superstructure.getGoal() == Superstructure.Goal.STOW && coral.isGamePieceDetected()
+                ? Superstructure.Goal.CORAL_L4 : superstructure.getGoal());
 
         // (Tunables.init() runs in Robot before this container is built, so
         // the subsystems above were configured from the stored values.)
@@ -221,162 +235,169 @@ public class RobotContainer {
     }
 
     // ==================================================================
-    // Driver bindings (drivetrain)
+    // Driver bindings (drivetrain + align + score)
     // ==================================================================
+
+    /** Above this carriage height the driver's speed starts to be scaled down... */
+    private static final double SLOW_START_HEIGHT = 16.5;   // in (the low box roof)
+    /** ...reaching the minimum scale at this height. */
+    private static final double SLOW_FULL_HEIGHT = 45.0;    // in
+    private static final double SLOW_MIN_SCALE = 0.40;
+
+    /** 1.0 with the carriage low, falling linearly to SLOW_MIN_SCALE as it rises. */
+    private double heightSpeedScale() {
+        double t = MathUtil.clamp((elevator.getCurrentPosition() - SLOW_START_HEIGHT)
+            / (SLOW_FULL_HEIGHT - SLOW_START_HEIGHT), 0.0, 1.0);
+        return MathUtil.interpolate(1.0, SLOW_MIN_SCALE, t);
+    }
+
+    /**
+     * Hold-to-align: selects the branch, tracks while held, and hands the
+     * sticks straight back on release (the tracking command's own finallyDo
+     * stops the robot and clears the tracking state). One new command per
+     * binding - a command instance cannot sit in two compositions.
+     */
+    private Command alignTo(Vision.BranchSide side) {
+        return Commands.runOnce(() -> {
+                swerve.getVision().setBranchSide(side);
+                swerve.setVisionTrackingEnabled(true);
+            })
+            .andThen(swerve.createAprilTagTrackingCommand())
+            .withName("Align " + side);
+    }
+
     private void configureSwerveBindings() {
-        // Default command: field-centric driving from the sticks (closed-loop
-        // velocity; see the drive request note above).
-        // Note that X is defined as forward according to WPILib convention,
-        // and Y is defined as to the left according to WPILib convention.
-        //
-        // Both translation AND rotation are scaled by the "Drive - Teleop
-        // Speed Scale" tunable (default 25% for indoor testing; edit it on
-        // the dashboard, no redeploy). The deadbands scale with it: a fixed
-        // deadband sized for full speed would swallow most of the stick's
-        // travel at a small scale.
         swerve.setDefaultCommand(
             swerve.applyRequest(() -> {
-                double scale = Tunables.teleopSpeedScale();
+                double scale = Tunables.teleopSpeedScale() * heightSpeedScale();
                 double maxSpeed = MaxSpeed * scale;
                 double maxAngularRate = MaxAngularRate * scale;
                 return drive
                     .withDeadband(maxSpeed * DriveConstants.STICK_DEADBAND)
                     .withRotationalDeadband(maxAngularRate * DriveConstants.STICK_DEADBAND)
-                    .withVelocityX(-driver_controller.getLeftY() * maxSpeed)       // Forward with negative Y (stick up)
-                    .withVelocityY(-driver_controller.getLeftX() * maxSpeed)       // Left with negative X
-                    .withRotationalRate(-driver_controller.getRightX() * maxAngularRate); // CCW with negative X (stick left)
+                    .withVelocityX(-driver_controller.getLeftY() * maxSpeed)
+                    .withVelocityY(-driver_controller.getLeftX() * maxSpeed)
+                    .withRotationalRate(-driver_controller.getRightX() * maxAngularRate);
             })
         );
 
-        // A: X-lock wheels; B: point modules at the left-stick direction
+        Trigger testMode = new Trigger(DriverStation::isTest);
+
+        // A: X-lock. B (point wheels) and the SysId chords only exist in Test mode.
         driver_controller.a().whileTrue(swerve.applyRequest(() -> brake));
-        driver_controller.b().whileTrue(swerve.applyRequest(() ->
-            point.withModuleDirection(new Rotation2d(-driver_controller.getLeftY(), -driver_controller.getLeftX()))
-        ));
+        driver_controller.b().and(testMode).whileTrue(swerve.applyRequest(() ->
+            point.withModuleDirection(new Rotation2d(-driver_controller.getLeftY(), -driver_controller.getLeftX()))));
+        driver_controller.back().and(driver_controller.y()).and(testMode).whileTrue(swerve.sysIdDynamic(Direction.kForward));
+        driver_controller.back().and(driver_controller.x()).and(testMode).whileTrue(swerve.sysIdDynamic(Direction.kReverse));
+        driver_controller.start().and(driver_controller.y()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
+        driver_controller.start().and(driver_controller.x()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
 
-        // D-pad: slow robot-centric nudges for lining up on field elements
-        driver_controller.povUp().whileTrue(swerve.applyRequest(() ->
-            forwardStraight.withVelocityX(0.5).withVelocityY(0))
-        );
-        driver_controller.povDown().whileTrue(swerve.applyRequest(() ->
-            forwardStraight.withVelocityX(-0.5).withVelocityY(0))
-        );
-        driver_controller.povLeft().whileTrue(swerve.applyRequest(() ->
-            forwardStraight.withVelocityX(0).withVelocityY(0.5))
-        );
-        driver_controller.povRight().whileTrue(swerve.applyRequest(() ->
-            forwardStraight.withVelocityX(0).withVelocityY(-0.5))
-        );
-
-        // Run SysId routines when holding back/start and X/Y.
-        // Note that each routine should be run exactly once in a single log.
-        driver_controller.back().and(driver_controller.y()).whileTrue(swerve.sysIdDynamic(Direction.kForward));
-        driver_controller.back().and(driver_controller.x()).whileTrue(swerve.sysIdDynamic(Direction.kReverse));
-        driver_controller.start().and(driver_controller.y()).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
-        driver_controller.start().and(driver_controller.x()).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
+        // D-pad nudges in all EIGHT directions from the POV angle, so a thumb
+        // that lands on a diagonal still moves the robot (povUp() is true
+        // only at exactly 0 degrees; 45 matched nothing before).
+        new Trigger(() -> driver_controller.getHID().getPOV() >= 0).whileTrue(swerve.applyRequest(() -> {
+            double pov = Math.toRadians(driver_controller.getHID().getPOV()); // 0 = up, clockwise
+            return forwardStraight.withVelocityX(0.5 * Math.cos(pov)).withVelocityY(-0.5 * Math.sin(pov));
+        }));
 
         // Driver heading zero on left bumper: "the way the robot faces now is
         // forward on my stick". It only moves the DRIVER's frame (held in the
         // raw gyro frame - see Swerve.periodic), never the pose estimator's
-        // heading, so it is safe at any time: MegaTag2 trusts the pose
-        // heading absolutely, and vision corrections to that heading no
-        // longer move the driver's frame either. While DISABLED with no tag
+        // heading, so it is safe at any time. While DISABLED with no tag
         // supplying a heading it also seeds the POSE heading to the
-        // alliance's forward direction (robot squared up by hand on a field
-        // with no tag in view); back + left bumper forces that seed at any
-        // time (a no-tag practice space). No swerve requirement, so the press
-        // cannot interrupt an alignment in progress.
+        // alliance's forward direction; back + left bumper forces that seed.
         driver_controller.leftBumper().and(driver_controller.back().negate())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(
                 DriverStation.isDisabled() && !swerve.getVision().hasFreshHeadingSeed())).ignoringDisable(true));
         driver_controller.back().and(driver_controller.leftBumper())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(true)).ignoringDisable(true));
 
-        // Select which reef branch vision tracking centers on for L2-L4
-        // (latched; defaults to LEFT on boot)
-        driver_controller.leftTrigger().onTrue(Commands.runOnce(() ->
-            swerve.getVision().setBranchSide(Vision.BranchSide.LEFT)));
-        driver_controller.rightTrigger().onTrue(Commands.runOnce(() ->
-            swerve.getVision().setBranchSide(Vision.BranchSide.RIGHT)));
+        // HOLD a trigger to align on that side's branch; release = sticks.
+        driver_controller.leftTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.LEFT));
+        driver_controller.rightTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.RIGHT));
 
-        // Toggle vision tracking on Y, but not while back/start are held
-        // (back+Y and start+Y are the SysId test combos above). The toggle
-        // keys off whether the tracking command is actually SCHEDULED, not a
-        // parallel flag - the command's own finallyDo stops the robot and
-        // clears the tracking state whenever it ends, including when another
-        // swerve binding (brake, point, nudges, SysId) interrupts it, so the
-        // toggle can never desync from reality.
-        driver_controller.y()
-            .and(driver_controller.back().negate())
-            .and(driver_controller.start().negate())
-            .onTrue(Commands.runOnce(() -> {
-            if (swerve.aprilTagTrackingCommand.isScheduled()) {
-                swerve.aprilTagTrackingCommand.cancel();
-            } else {
-                swerve.setVisionTrackingEnabled(true);
-                CommandScheduler.getInstance().schedule(swerve.aprilTagTrackingCommand);
-            }
-        }));
-
-        // Stream drivetrain state to NetworkTables + SignalLogger for analysis
         swerve.registerTelemetry(logger::telemeterize);
     }
 
     // ==================================================================
-    // Operator bindings (superstructure - coordinated elevator + CorAl)
+    // Operator bindings (superstructure)
     // ==================================================================
-    // Every position button goes through the Superstructure, which sequences
-    // the elevator and arm so they can never reach a contact combination,
-    // regardless of where the mechanisms currently are.
     private void configureSuperstructureBindings() {
-        // Coral scoring poses on the D-pad (L1 through L4)
-        operator_controller.povDown().onTrue(superstructure.goToCoralL1());
-        operator_controller.povLeft().onTrue(superstructure.goToCoralL2());
-        operator_controller.povRight().onTrue(superstructure.goToCoralL3());
-        operator_controller.povUp().onTrue(superstructure.goToCoralL4());
+        // LB is the manual take-over. Everything automatic is gated on it
+        // being UP, so a held LB means "sticks only" with no surprises.
+        Trigger manual = operator_controller.leftBumper();
+        Trigger auto = manual.negate();
+        Trigger teleop = new Trigger(DriverStation::isTeleopEnabled);
+        Trigger disabled = new Trigger(DriverStation::isDisabled);
 
-        // Coral handling
-        operator_controller.a().onTrue(superstructure.intakeCoral());
-        operator_controller.x().onTrue(superstructure.ejectCoral());
+        // ---- Coral levels: the old D-pad diamond, under the right thumb ----
+        operator_controller.a().and(auto).onTrue(superstructure.goToCoralL1()); // bottom
+        operator_controller.x().and(auto).onTrue(superstructure.goToCoralL2()); // left
+        operator_controller.b().and(auto).onTrue(superstructure.goToCoralL3()); // right
+        operator_controller.y().and(auto).onTrue(superstructure.goToCoralL4()); // top
 
-        // Algae handling
-        operator_controller.b().onTrue(superstructure.intakeAlgaeLow());
-        operator_controller.back().onTrue(superstructure.intakeAlgaeHigh());
-        operator_controller.y().onTrue(superstructure.holdAlgae());
-        operator_controller.rightBumper().onTrue(superstructure.scoreAlgae());
+        // ---- Triggers: game piece in / game piece out ----
+        // HOME: stow (+ intake rollers if empty), or algae carry if one is held.
+        operator_controller.leftTrigger().and(auto).onTrue(superstructure.home());
 
-        // Stow (rollers stopped, elevator down, arm tucked) and safe raise
-        operator_controller.leftTrigger().onTrue(superstructure.stow());
-        operator_controller.rightTrigger().onTrue(superstructure.raiseArm());
+        // SCORE: gated on the MEASURED pose. Pulled early it simply waits -
+        // the rising edge of (trigger AND ready) is what fires - so it can
+        // never interrupt a staged move the way the old eject button did.
+        Trigger ready = new Trigger(superstructure::readyToScore);
+        Command score = superstructure.score(() -> swerve.getStateCopy().Pose);
+        operator_controller.rightTrigger().and(auto).and(ready).onTrue(score);
+        // Driver's copy: also waits for the aligner when the aligner is in use.
+        driver_controller.rightBumper().and(ready)
+            .and(() -> !swerve.isVisionTrackingEnabled() || swerve.isAligned())
+            .onTrue(score);
 
-        // Encoder resets: ONLY while disabled, with mechanisms at their
-        // physical base positions. Zeroing while enabled would shift the
-        // reference frame under a latched closed-loop setpoint - the
-        // controller would suddenly see a huge error and drive the mechanism
-        // hard toward a position that no longer means what it did.
-        operator_controller.leftBumper().and(DriverStation::isDisabled)
-            .onTrue(Commands.runOnce(() -> elevator.resetEncoders(), elevator).ignoringDisable(true));
-        operator_controller.start().and(DriverStation::isDisabled)
-            .onTrue(Commands.runOnce(() -> coral.resetPivotEncoder(), coral).ignoringDisable(true));
+        // ---- Algae on the left thumb: up = high, down = low, left = hold ----
+        // Diagonals count toward up/down so a sloppy press is not lost.
+        Trigger dpadUp = operator_controller.povUp()
+            .or(operator_controller.povUpLeft()).or(operator_controller.povUpRight());
+        Trigger dpadDown = operator_controller.povDown()
+            .or(operator_controller.povDownLeft()).or(operator_controller.povDownRight());
+        dpadUp.and(auto).onTrue(superstructure.intakeAlgaeHigh());
+        dpadDown.and(auto).onTrue(superstructure.intakeAlgaeLow());
+        operator_controller.povLeft().and(auto).onTrue(superstructure.holdAlgae());
+        operator_controller.rightBumper().and(auto).onTrue(superstructure.goToBarge()); // RT then fires it
 
-        // -------- Manual overrides (default commands) --------
-        // WARNING: manual control commands the subsystems directly and has
-        // NO collision interlocks - the operator must watch the mechanism.
+        // Back (enabled): swing the arm to the safe travel angle, in place.
+        operator_controller.back().and(auto).and(disabled.negate()).onTrue(superstructure.raiseArm());
 
-        // Elevator manual control; holds height under closed loop on release
-        elevator.setDefaultCommand(Commands.run(() -> {
-            double speed = -operator_controller.getLeftY();
-            if (Math.abs(speed) > ElevatorConstants.ELEVATOR_MANUAL_CONTROL_DEADBAND) {
-                elevator.manualControl(speed);
-            } else if (elevator.isInManualMode()) {
-                elevator.holdCurrentPosition();
-            }
-        }, elevator));
+        // ---- Encoder zeroing: DISABLED only, and only after a 1 s hold ----
+        operator_controller.back().and(disabled).debounce(1.0)
+            .onTrue(Commands.runOnce(elevator::resetEncoders, elevator).ignoringDisable(true));
+        operator_controller.start().and(disabled).debounce(1.0)
+            .onTrue(Commands.runOnce(coral::resetPivotEncoder, coral).ignoringDisable(true));
 
-        // Pivot manual control; the subsystem applies the deadband and speed
-        // limit and holds the current angle when the stick is released
-        coral.setDefaultCommand(Commands.run(() ->
-            coral.manualPivotControl(operator_controller.getRightX()), coral));
+        // ---- Manual take-over (replaces the always-live default commands) ----
+        // Pressing LB cancels the running sequence and freezes both
+        // mechanisms; sticks jog while it is held; releasing holds position.
+        manual.whileTrue(superstructure.manualOverride(
+            () -> -operator_controller.getLeftY(),      // up = carriage up
+            () -> -operator_controller.getRightY()));   // forward = claw forward (+ angle)
+        // Raw rollers inside manual: no pose check, no subsystem requirement.
+        manual.and(operator_controller.rightTrigger())
+            .whileTrue(superstructure.rollersRaw(Constants.CorAlConstants.CORAL_SCORE_SPEED));
+        manual.and(operator_controller.leftTrigger())
+            .whileTrue(superstructure.rollersRaw(Constants.CorAlConstants.ALGAE_INTAKE_SPEED));
+
+        // ---- Rumble cues ----
+        // Coral acquired: both drivers, one long buzz -> leave the station.
+        new Trigger(coral::isGamePieceDetected).and(teleop)
+            .onTrue(driverRumble.pulse(1.0, 0.4).alongWith(operatorRumble.pulse(1.0, 0.4)));
+        // Pose reached: operator, two short buzzes -> the score trigger is live.
+        ready.and(teleop).onTrue(operatorRumble.pulses(2, 0.8, 0.12, 0.10));
+        // Aligned AND pose reached: driver, steady light buzz -> fire.
+        ready.and(() -> swerve.isVisionTrackingEnabled() && swerve.isAligned())
+            .whileTrue(driverRumble.whileActive(0.5));
+        // Scored at L3/L4, exit is waiting for room: driver, slow pulse -> back away.
+        new Trigger(superstructure::isWaitingForBackOff)
+            .whileTrue(driverRumble.pulses(2, 0.6, 0.15, 0.35).repeatedly());
+        // Score pulled with nothing to score from: operator, one tick.
+        operator_controller.rightTrigger().and(auto).and(() -> !superstructure.isScoringGoal())
+            .onTrue(operatorRumble.pulse(0.4, 0.08));
     }
 
     /** Returns the autonomous routine selected on the dashboard. */

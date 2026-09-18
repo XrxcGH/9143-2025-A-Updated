@@ -4,7 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
 
+import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -74,7 +76,9 @@ public class Superstructure {
         CORAL_L4,
         ALGAE_LOW,
         ALGAE_HIGH,
-        ALGAE_SCORE
+        ALGAE_SCORE,
+        /** Carrying an algae low at the travel angle (the "home" pose while one is held). */
+        ALGAE_CARRY
     }
 
     /** Safe travel angle in degrees (RAISE preset): clear at every height. */
@@ -86,6 +90,8 @@ public class Superstructure {
 
     /** Last commanded pose family (drives vision alignment goals). */
     private Goal currentGoal = Goal.STOW;
+    /** True from an algae intake / hold until it is scored or the rollers are run by hand: picks what "home" means. */
+    private boolean algaeHeld = false;
 
     public Superstructure(Elevator elevator, CorAl coral) {
         this.elevator = elevator;
@@ -1268,6 +1274,7 @@ public class Superstructure {
     /** Moves to the low algae intake pose (20.5 in, 160 degrees) and runs the rollers inward. */
     public Command intakeAlgaeLow() {
         return setGoal(Goal.ALGAE_LOW)
+            .andThen(Commands.runOnce(() -> algaeHeld = true))
             .andThen(moveTo(PresetHeights.ALGAE_LOW_INTAKE, PivotPresetAngles.ALGAE_INTAKE))
             .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), coral));
     }
@@ -1275,6 +1282,7 @@ public class Superstructure {
     /** Moves to the high algae intake pose (37.5 in, 160 degrees) and runs the rollers inward. */
     public Command intakeAlgaeHigh() {
         return setGoal(Goal.ALGAE_HIGH)
+            .andThen(Commands.runOnce(() -> algaeHeld = true))
             .andThen(moveTo(PresetHeights.ALGAE_HIGH_INTAKE, PivotPresetAngles.ALGAE_INTAKE))
             .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), coral));
     }
@@ -1285,7 +1293,10 @@ public class Superstructure {
      * stays free to move anywhere). The elevator is left where it is.
      */
     public Command holdAlgae() {
-        return Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED), coral)
+        return Commands.runOnce(() -> {
+                algaeHeld = true;
+                coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED);
+            }, coral)
             .andThen(raiseArm()); // Hold angle == safe travel angle
     }
 
@@ -1301,6 +1312,186 @@ public class Superstructure {
             .andThen(Commands.waitSeconds(0.5))
             .andThen(Commands.runOnce(coral::stopIntake, coral))
             .handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
+    }
+
+    // ==================================================================
+    // Operator workflow: gated score, auto-home, manual take-over
+    // ==================================================================
+
+    /** How close to the preset the MEASURED pose must be before a score is released. */
+    private static final double SCORE_READY_HEIGHT_TOL = 0.75;   // in
+    private static final double SCORE_READY_ANGLE_TOL = 2.5;     // deg
+    private static final double SCORE_READY_MAX_ELEVATOR_SPEED = 2.0;  // in/s
+    private static final double SCORE_READY_MAX_PIVOT_SPEED = 15.0;    // deg/s
+    /**
+     * Distance the drivetrain must travel from where it ejected before an
+     * L3/L4 exit may start. Leaving those poses swings the claw through
+     * 75-110 deg, where it reaches 8.9-11.7 in past the front bumper face
+     * (CAD) - into the reef if the robot is still flush against it.
+     */
+    private static final double REEF_BACKOFF_METERS = 0.35;
+
+    /** True while a finished L3/L4 score is waiting for the robot to back away before its exit. */
+    private boolean waitingForBackOff = false;
+
+    public boolean isAlgaeHeld() {
+        return algaeHeld;
+    }
+
+    public boolean isWaitingForBackOff() {
+        return waitingForBackOff;
+    }
+
+    /** {height, angle} of the pose a goal commands, or null when the goal is not a scoring pose. */
+    private static double[] scoringPreset(Goal goal) {
+        switch (goal) {
+            case CORAL_L1: return new double[] {PresetHeights.CORAL_L1.getHeight(), PivotPresetAngles.CORAL_L1.getAngle()};
+            case CORAL_L2: return new double[] {PresetHeights.CORAL_L2.getHeight(), PivotPresetAngles.CORAL_L2.getAngle()};
+            case CORAL_L3: return new double[] {PresetHeights.CORAL_L3.getHeight(), PivotPresetAngles.CORAL_L3.getAngle()};
+            case CORAL_L4: return new double[] {PresetHeights.CORAL_L4.getHeight(), PivotPresetAngles.CORAL_L4.getAngle()};
+            case ALGAE_SCORE: return new double[] {PresetHeights.ALGAE_SCORE.getHeight(), PivotPresetAngles.ALGAE_SCORE.getAngle()};
+            case ALGAE_CARRY: return new double[] {PresetHeights.CORAL_L1.getHeight(), PivotPresetAngles.RAISE.getAngle()};
+            default: return null;
+        }
+    }
+
+    /** True when the last commanded pose is one a game piece is released from. */
+    public boolean isScoringGoal() {
+        return scoringPreset(currentGoal) != null;
+    }
+
+    /**
+     * True when the mechanisms are MEASURED at the last commanded scoring
+     * pose and have stopped. This is the gate on the score trigger: an early
+     * pull simply waits for it, so it can never interrupt a staged move.
+     */
+    public boolean readyToScore() {
+        double[] preset = scoringPreset(currentGoal);
+        if (preset == null) {
+            return false;
+        }
+        double height = Math.max(preset[0], ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
+        return Math.abs(elevator.getCurrentPosition() - height) <= SCORE_READY_HEIGHT_TOL
+            && Math.abs(coral.getPivotAngle() - preset[1]) <= SCORE_READY_ANGLE_TOL
+            && Math.abs(elevator.getVelocity()) <= SCORE_READY_MAX_ELEVATOR_SPEED
+            && Math.abs(coral.getPivotVelocity()) <= SCORE_READY_MAX_PIVOT_SPEED;
+    }
+
+    /**
+     * Releases the game piece at the current scoring pose, then goes home by
+     * itself. Bind it behind {@link #readyToScore()}.
+     *   - Coral: rollers out for at least 0.5 s and until the CANrange says
+     *     the coral has left (capped at 1.5 s). If it is STILL detected the
+     *     command ends without stowing, so the pose is kept for a second try.
+     *   - L3 / L4: the exit waits until the drivetrain has backed away
+     *     REEF_BACKOFF_METERS from where it ejected (see the constant).
+     *   - Then home(): stow and restart the intake, or carry for an algae.
+     * Any other button interrupts it at any point.
+     */
+    public Command score(Supplier<Pose2d> robotPose) {
+        return Commands.defer(() -> {
+            Goal scored = currentGoal;
+            boolean algae = scored == Goal.ALGAE_SCORE || scored == Goal.ALGAE_CARRY;
+            boolean exitSwingsForward = scored == Goal.CORAL_L3 || scored == Goal.CORAL_L4;
+            Pose2d ejectedAt = robotPose.get();
+
+            Command rollersOut = Commands.startEnd(
+                () -> coral.setIntakeSpeed(algae ? CorAlConstants.ALGAE_SCORE_SPEED : CorAlConstants.CORAL_SCORE_SPEED),
+                coral::stopIntake, coral);
+            Command ejectWindow = algae
+                ? Commands.waitSeconds(0.5)
+                : Commands.waitSeconds(0.5)
+                    .andThen(Commands.waitUntil(() -> !coral.isGamePieceDetected()).withTimeout(1.0));
+            Command backedOff = exitSwingsForward
+                ? Commands.waitUntil(() -> robotPose.get().getTranslation()
+                        .getDistance(ejectedAt.getTranslation()) >= REEF_BACKOFF_METERS)
+                    .beforeStarting(() -> waitingForBackOff = true)
+                    .finallyDo(() -> waitingForBackOff = false)
+                : Commands.none();
+
+            return Commands.deadline(ejectWindow, rollersOut)
+                .andThen(Commands.runOnce(() -> algaeHeld = false))
+                .andThen(backedOff.andThen(home()).unless(coral::isGamePieceDetected));
+        }, Set.of(elevator, coral));
+    }
+
+    /**
+     * The one "safe" button: the right home for whatever is held. Empty or
+     * holding a coral: stow, and start the intake rollers if empty. Holding
+     * an algae: carry it low at the travel angle with holding pressure.
+     */
+    public Command home() {
+        return Commands.either(carryAlgae(), stow().andThen(intakeRollers()), () -> algaeHeld);
+    }
+
+    /** Algae carry: holding pressure, base height, travel angle (the L1 pose, which the corridors clear). */
+    public Command carryAlgae() {
+        return setGoal(Goal.ALGAE_CARRY)
+            .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED), coral))
+            .andThen(moveTo(PresetHeights.CORAL_L1, PivotPresetAngles.RAISE));
+    }
+
+    /** Barge pose only (holding pressure kept on); the score trigger releases the algae. */
+    public Command goToBarge() {
+        return setGoal(Goal.ALGAE_SCORE)
+            .andThen(Commands.runOnce(() -> {
+                algaeHeld = true;
+                coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED);
+            }, coral))
+            .andThen(moveTo(PresetHeights.ALGAE_SCORE, PivotPresetAngles.ALGAE_SCORE));
+    }
+
+    /**
+     * Brings both mechanisms to rest where their profiles can actually stop
+     * them: the target is the measured position plus the stopping distance
+     * v^2 / 2a, so nothing overshoots and comes back the way "hold the
+     * current position" does at speed.
+     */
+    private void freezeNow() {
+        double v = elevator.getVelocity();
+        elevator.setPosition(elevator.getCurrentPosition()
+            + Math.copySign(v * v / (2.0 * elevator.maxAcceleration()), v));
+        double w = coral.getPivotVelocity();
+        coral.setPivotAngle(coral.getPivotAngle()
+            + Math.copySign(w * w / (2.0 * coral.maxAcceleration()), w));
+    }
+
+    /**
+     * Manual take-over, bound whileTrue to a modifier. Pressing it cancels
+     * whatever sequence is running and freezes both mechanisms; while it is
+     * held the sticks drive them (NO collision interlocks); releasing it
+     * holds position. With the modifier up the sticks do nothing at all.
+     */
+    public Command manualOverride(DoubleSupplier elevatorStick, DoubleSupplier pivotStick) {
+        return Commands.startRun(
+            this::freezeNow,
+            () -> {
+                double speed = elevatorStick.getAsDouble();
+                if (Math.abs(speed) > ElevatorConstants.ELEVATOR_MANUAL_CONTROL_DEADBAND) {
+                    elevator.manualControl(speed);
+                } else if (elevator.isInManualMode()) {
+                    elevator.holdCurrentPosition();
+                }
+                coral.manualPivotControl(pivotStick.getAsDouble());
+            }, elevator, coral)
+            .finallyDo(() -> {
+                if (elevator.isInManualMode()) {
+                    elevator.holdCurrentPosition();
+                }
+                coral.manualPivotControl(0.0); // captures and holds if the stick was deflected
+            });
+    }
+
+    /**
+     * Rollers at a fixed duty while held, at ANY pose. Deliberately has no
+     * subsystem requirement so it can run inside the manual take-over
+     * without cancelling it.
+     */
+    public Command rollersRaw(double dutyCycle) {
+        return Commands.startEnd(() -> coral.setIntakeSpeed(dutyCycle), () -> {
+            coral.stopIntake();
+            algaeHeld = false;
+        });
     }
 
     // ==================================================================

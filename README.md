@@ -17,9 +17,40 @@ This repository contains the code for Team 9143's 2025 FRC robot, updated to the
 
 ## Controls
 
+One coral cycle is **LT → a face button → RT**: index fingers and the right thumb. A pose button first; **RT always releases the piece**, coral or algae. Anything that drives the robot is a *hold*, never a toggle; the manual sticks do nothing unless the operator holds LB; anything rare or dangerous is disabled-only behind a 1 s hold, or Test-mode only.
+
 ### Driver (Xbox controller, port 0)
 | Input | Action |
 |---|---|
+| Left stick | Field-centric translation (scaled by the *Teleop Speed Scale* tunable — 25% by default for indoor testing — **and automatically by carriage height**: 100 % below 16.5", falling to 40 % at 45" and above) |
+| Right stick X | Rotate |
+| **Left / Right trigger (hold)** | **Align** on the LEFT / RIGHT reef branch while held (or the coral station when stowed and empty); release = sticks back instantly. With a coral in the claw and no level pressed yet it still targets the reef |
+| **Right bumper** | **SCORE** — the same gated command as the operator's RT; while aligning it also waits for *aligned*, so hold a trigger + RB = fire the instant the robot is aligned **and** the pose is reached |
+| Left bumper | **Driver heading zero**: the way the robot faces now becomes "forward" on the stick (point it away from you first). Safe at any time — it moves only the driver's frame, never the pose estimator's heading. While disabled with no tag supplying a heading it also seeds the pose heading to alliance-forward; Back + left bumper forces that seed at any time |
+| A (hold) | X-lock wheels (brake) |
+| D-pad | Slow robot-centric nudges, all 8 directions |
+| B, Back/Start + X/Y | Point modules / SysId — **Test mode only** (a dynamic SysId is a full-voltage step; it no longer exists in a match) |
+
+### Operator (Xbox controller, port 1)
+All position buttons run coordinated elevator + arm sequences through the **Superstructure**, which automatically avoids mechanism contact from any starting pose.
+
+| Input | Action |
+|---|---|
+| **A / X / B / Y** | Coral **L1 / L2 / L3 / L4** — the old D-pad diamond (down / left / right / up) moved under the right thumb: same shape, discrete buttons (a D-pad thumb landing on a diagonal fired nothing, and a roll from up to right could fire two levels). L1 0"/100°, L2 12"/12.5°, L3 30.5"/25°, L4 51.5"/20° |
+| **Right trigger** | **SCORE**, gated on the *measured* pose (within 0.75" / 2.5° of the preset and stopped). Pulled early it simply waits and fires the loop the pose is reached, so it can never interrupt a move. Coral: rollers until the CANrange says it has left (0.5–1.5 s); still detected → the pose is kept for a second try. Then **home by itself** — after L3/L4 only once the drivetrain has moved **0.35 m** from where it ejected, because that exit swings the claw 9–12" past the front bumper. Algae: 0.5 s, then home |
+| **Left trigger** | **HOME**: stow and run the intake until the CANrange confirms a coral; with an algae held: carry it low at the travel angle with holding pressure |
+| **Left bumper (hold)** | **Manual take-over**: pressing it cancels the running move and brings both mechanisms to rest at their stopping distance; while held, left stick Y = elevator (gravity-compensated, so up and down feel the same), **right stick Y** = pivot (forward = claw forward), RT / LT = rollers out / in; presets are locked out; release = hold. **No collision interlocks.** |
+| Right bumper | Barge pose (52", 105°, holding pressure); RT then fires the algae |
+| D-pad up / down | Algae **high** (37.5") / **low** (20.5") intake at 160° — diagonals count |
+| D-pad left | Algae hold in place (hold rollers, arm to 100° — the safe travel angle) |
+| Back (enabled) | Raise the arm to the safe travel angle, in place |
+| Back / Start, **held 1 s, disabled only** | Zero the elevator / the CorAl pivot (mechanism at its base) |
+
+**Rumble.** Coral acquired — both pads, one long buzz (leave the station). Pose reached — operator, two short (RT is live). Aligned **and** pose reached — driver, steady (fire). Scored at L3/L4 and waiting for room — driver, slow pulse (back away). RT with nothing to score from — operator, one tick.
+
+**What moved** (one practice session): intake A → **LT**; eject X → **RT**; levels D-pad → **face buttons**; algae B / Back / Y → **D-pad down / up / left**; raise-arm RT → **Back**; the manual sticks need **LB**, and the pivot stick is now **Y**, not X; zeroing → 1 s hold while disabled; driver align Y-toggle + trigger-tap → **hold a trigger**. What did not: driver sticks, A, LB, nudges, "left trigger = left branch"; operator LT = go home, RB = algae score, left stick Y = elevator. The whole remap is one commit — `git revert` it to get the old layout back.
+
+---|---|
 | Left stick | Field-centric translation (scaled by the *Teleop Speed Scale* tunable — 25% by default for indoor testing) |
 | Right stick X | Rotate |
 | A (hold) | X-lock wheels (brake) |

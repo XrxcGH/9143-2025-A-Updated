@@ -385,9 +385,12 @@ public class Elevator extends SubsystemBase {
         if (Math.abs(speed) < ElevatorConstants.ELEVATOR_MANUAL_CONTROL_DEADBAND) {
             speed = 0;
         }
-        speed = Math.min(Math.max(speed * ElevatorConstants.ELEVATOR_MANUAL_SPEED_LIMIT, -1), 1);
-
-        leftMotor.set(speed);
+        // Gravity plus the stick, in volts. Plain duty cycle had no gravity
+        // term: with ~1.2 V needed just to hold, up-stick below ~27 % let the
+        // carriage SINK while the operator pushed up, and full down was twice
+        // as fast as full up.
+        speed = Math.min(Math.max(speed, -1), 1);
+        leftMotor.setVoltage(appliedKg + speed * ElevatorConstants.ELEVATOR_MANUAL_MAX_VOLTS);
     }
 
     /** Cuts output and drops any closed-loop target (used when disabling). */

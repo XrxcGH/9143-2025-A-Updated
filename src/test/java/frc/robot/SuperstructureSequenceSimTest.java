@@ -14,6 +14,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import edu.wpi.first.hal.HAL;
+import edu.wpi.first.math.geometry.Pose2d;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 import edu.wpi.first.wpilibj2.command.Command;
@@ -334,6 +336,53 @@ class SuperstructureSequenceSimTest {
         } finally {
             writeMetrics("sequence_metrics_offnominal.csv");
         }
+    }
+
+    /**
+     * The operator's cycle on the new mapping: level -> SCORE (gated on the measured pose) -> home
+     * by itself. After L3 / L4 the exit must wait until the drivetrain has backed away, because it
+     * swings the claw past the front bumper; after L2 it must not wait at all.
+     */
+    @Test
+    void scoreThenHomesByItself() throws IOException {
+        for (String level : new String[] {"L2", "L3", "L4"}) {
+            build(1.0, 1.0, 0.0);
+            Pose pose = poses().stream().filter(p -> p.name.equals(level)).findFirst().orElseThrow();
+            Pose base = poses().get(0);
+            run("score " + level + " (setup)", pose.go.get(), pose, 12.0, 0.0, false);
+            assertTrue(superstructure.readyToScore(), level + ": pose reached but not ready to score");
+
+            double[] robotX = {0.0};
+            Command score = superstructure.score(() -> new Pose2d(robotX[0], 0.0, Rotation2d.kZero));
+            CommandScheduler.getInstance().schedule(score);
+            boolean swingsForward = !level.equals("L2");
+            // One second at the reef: eject window over, robot has NOT moved
+            for (int i = 0; i < 50; i++) {
+                loop("score " + level, 0.0);
+            }
+            if (swingsForward) {
+                assertTrue(superstructure.isWaitingForBackOff(), level + ": should be waiting for the robot to back away");
+                assertTrue(Math.abs(carriage.axis.position - pose.height) < 0.3 && Math.abs(arm.axis.position - pose.angle) < 1.5,
+                    level + ": left the scoring pose before the robot backed away");
+                robotX[0] = -0.5; // the driver backs off
+            }
+            double elapsed = 0.0;
+            while (score.isScheduled() && elapsed < 12.0) {
+                loop("score " + level, 0.0);
+                elapsed += DT * PHYSICS_PER_LOOP;
+                // home() ends by running the intake until a coral is seen: the move itself is done at BASE
+                if (Math.abs(carriage.axis.position - base.height) < 0.3 && Math.abs(arm.axis.position) < 1.5) {
+                    break;
+                }
+            }
+            assertTrue(Math.abs(carriage.axis.position - base.height) < 0.3 && Math.abs(arm.axis.position) < 1.5,
+                String.format("%s: did not home after scoring (at %.2f in, %.1f deg)", level, carriage.axis.position, arm.axis.position));
+            metrics.add(String.format("score %s then home,%.2f,%d,%d,%d,0,%.2f,%.1f,%s,%s", level, elapsed,
+                carriage.setpoints.size(), reversals(carriage.setpoints), arm.setpoints.size(),
+                carriage.axis.position, arm.getPivotAngle(),
+                carriage.setpoints.toString().replace(", ", " "), arm.setpoints.toString().replace(", ", " ")));
+        }
+        writeMetrics("sequence_metrics_score.csv");
     }
 
     /** A second button mid-move: the new plan starts from wherever the mechanisms are, moving. */

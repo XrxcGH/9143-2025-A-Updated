@@ -12,8 +12,6 @@ import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.GravityTypeValue;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.MeasurementHealthValue;
-import com.ctre.phoenix6.signals.NeutralModeValue;
-import com.ctre.phoenix6.signals.UpdateModeValue;
 
 import edu.wpi.first.math.filter.Debouncer;
 import edu.wpi.first.math.system.plant.DCMotor;
@@ -29,6 +27,7 @@ import edu.wpi.first.wpilibj.simulation.SingleJointedArmSim;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.Constants.CorAlConstants;
+import frc.robot.Constants.TunablesConstants;
 import frc.robot.util.Tunables;
 
 /**
@@ -117,9 +116,8 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     // encoder has moved on its shaft: it is refused and this start's zero
     // is kept, with a dashboard alert.
     // ------------------------------------------------------------------
+    // Preferences key: stays here, as renaming it would lose the stored zero (range: CorAlConstants.PIVOT_BOOT_RESTORE_*)
     private static final String THROUGH_BORE_ZERO_KEY = "CorAl - Through Bore Zero (raw deg, set by zeroing)";
-    private static final double RESTORE_MIN_ANGLE = -10.0;
-    private static final double RESTORE_MAX_ANGLE = CorAlConstants.CORAL_PIVOT_MAX_ANGLE + 10.0;
     private boolean bootReferenceResolved = false;
     private boolean bootZeroRejected = false;
     private double bootRestoredAngle = 0.0;
@@ -134,13 +132,13 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     private double profileScale = 1.0;     // fraction of the tuned profile in effect (setProfileScale)
     private double appliedKg;              // V with the claw horizontal
     private double appliedBalanceAngle;    // deg where gravity does nothing
-    private final Timer tunablePollTimer = new Timer();
-    private static final double TUNABLE_POLL_SECONDS = 0.5;
+    private final Timer tunablePollTimer = new Timer(); // TunablesConstants.TUNABLE_POLL_SECONDS
 
     // ------------------------------------------------------------------
     // Desktop simulation (only constructed when running off-robot). The
     // physics model exists purely so the mechanism moves in the sim GUI /
-    // AdvantageScope; the values below affect simulation fidelity only.
+    // AdvantageScope; its length and mass estimates (CorAlConstants
+    // CORAL_SIM_*) affect simulation fidelity only.
     // Gravity is not simulated: SingleJointedArmSim takes 0 rad as
     // horizontal, which this arm's zero is not, and the real config ships
     // with kG = 0 until it has been measured (CORAL_PIVOT_kG). Enable
@@ -149,8 +147,6 @@ public class CorAl extends SubsystemBase implements ArmAxis {
     // In simulation the through bore reads disconnected, so getPivotAngle()
     // automatically falls back to the (simulated) motor sensor.
     // ------------------------------------------------------------------
-    private static final double SIM_ARM_LENGTH_METERS = 0.4; // Estimate - affects sim only
-    private static final double SIM_ARM_MASS_KG = 4.0;       // Estimate - affects sim only
     private SingleJointedArmSim armSim;
 
     public CorAl() {
@@ -178,8 +174,9 @@ public class CorAl extends SubsystemBase implements ArmAxis {
             armSim = new SingleJointedArmSim(
                 DCMotor.getKrakenX60(1),
                 CorAlConstants.CORAL_PIVOT_GEAR_RATIO,
-                SingleJointedArmSim.estimateMOI(SIM_ARM_LENGTH_METERS, SIM_ARM_MASS_KG),
-                SIM_ARM_LENGTH_METERS,
+                SingleJointedArmSim.estimateMOI(CorAlConstants.CORAL_SIM_ARM_LENGTH_METERS,
+                    CorAlConstants.CORAL_SIM_ARM_MASS_KG),
+                CorAlConstants.CORAL_SIM_ARM_LENGTH_METERS,
                 Units.degreesToRadians(CorAlConstants.CORAL_PIVOT_MIN_ANGLE),
                 Units.degreesToRadians(CorAlConstants.CORAL_PIVOT_MAX_ANGLE),
                 false, // No gravity - see class note above
@@ -233,7 +230,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         double stored = Preferences.getDouble(THROUGH_BORE_ZERO_KEY, 0.0);
         double angle = getRawThroughBoreAngle() - stored;
         angle -= range * Math.round(angle / range);
-        if (angle < RESTORE_MIN_ANGLE || angle > RESTORE_MAX_ANGLE) {
+        if (angle < CorAlConstants.PIVOT_BOOT_RESTORE_MIN_ANGLE || angle > CorAlConstants.PIVOT_BOOT_RESTORE_MAX_ANGLE) {
             bootZeroRejected = true; // keep this start's provisional zero
             applyZeroHere();
             return;
@@ -260,7 +257,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         config.MotorOutput.Inverted = CorAlConstants.CORAL_PIVOT_MOTOR_INVERTED
             ? InvertedValue.Clockwise_Positive
             : InvertedValue.CounterClockwise_Positive;
-        config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
+        config.MotorOutput.NeutralMode = CorAlConstants.CORAL_PIVOT_NEUTRAL_MODE;
 
         config.CurrentLimits.SupplyCurrentLimit = CorAlConstants.CORAL_PIVOT_CURRENT_LIMIT;
         config.CurrentLimits.SupplyCurrentLimitEnable = true;
@@ -360,8 +357,9 @@ public class CorAl extends SubsystemBase implements ArmAxis {
      */
     @Override
     public void setProfileScale(double scale) {
-        scale = Math.min(Math.max(scale, 0.3), 1.0);
-        if (Math.abs(scale - profileScale) < 0.01) {
+        // Never faster than the tuned profile itself (scale 1)
+        scale = Math.min(Math.max(scale, CorAlConstants.PIVOT_PROFILE_SCALE_MIN), 1.0);
+        if (Math.abs(scale - profileScale) < CorAlConstants.PIVOT_PROFILE_SCALE_DEADBAND) {
             return;
         }
         profileScale = scale;
@@ -374,7 +372,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         config.MotorOutput.Inverted = CorAlConstants.CORAL_INTAKE_MOTOR_INVERTED
             ? InvertedValue.Clockwise_Positive
             : InvertedValue.CounterClockwise_Positive;
-        config.MotorOutput.NeutralMode = NeutralModeValue.Brake;
+        config.MotorOutput.NeutralMode = CorAlConstants.CORAL_INTAKE_NEUTRAL_MODE;
 
         config.CurrentLimits.SupplyCurrentLimit = CorAlConstants.CORAL_INTAKE_CURRENT_LIMIT;
         config.CurrentLimits.SupplyCurrentLimitEnable = true;
@@ -390,9 +388,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         // smaller cone at a few centimeters anyway.
         config.FovParams.FOVRangeX = CorAlConstants.GAME_PIECE_FOV_DEGREES;
         config.FovParams.FOVRangeY = CorAlConstants.GAME_PIECE_FOV_DEGREES;
-        // Short-range mode at 100 Hz: the coral sits centimeters away, and
-        // short range is the more reliable mode at that distance.
-        config.ToFParams.UpdateMode = UpdateModeValue.ShortRange100Hz;
+        config.ToFParams.UpdateMode = CorAlConstants.GAME_PIECE_UPDATE_MODE;
         sensor.getConfigurator().apply(config);
     }
 
@@ -893,7 +889,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         // mid-move would stutter the arm - polled twice a second. Only the
         // MotionMagic group is sent, plus Slot 0 when kG or the balance
         // angle changed, so limits and the sensor ratio are untouched.
-        if (DriverStation.isDisabled() && tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)) {
+        if (DriverStation.isDisabled() && tunablePollTimer.advanceIfElapsed(TunablesConstants.TUNABLE_POLL_SECONDS)) {
             if (profileTunablesChanged() || gravityTunablesChanged()) {
                 boolean gravity = gravityTunablesChanged();
                 readProfileTunables();
@@ -924,6 +920,7 @@ public class CorAl extends SubsystemBase implements ArmAxis {
         pivotSimState.setSupplyVoltage(RobotController.getBatteryVoltage());
 
         armSim.setInputVoltage(pivotSimState.getMotorVoltage());
+        // 0.02 s: the 20 ms robot loop this method runs in (a WPILib timing fact, not a setting)
         armSim.update(0.02);
 
         pivotSimState.setRawRotorPosition(

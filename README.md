@@ -22,7 +22,7 @@ Everything described here has been run on the robot (September 2026) unless the 
 
 ## Controls
 
-One coral cycle is **LT, then a face button, then RT** on the operator's controller: index fingers and the right thumb. A pose button comes first; RT always releases the piece, coral or algae. Anything that drives the robot is a *hold*, never a toggle; the operator's manual sticks do nothing unless LB is held; anything rare or dangerous is disabled-only behind a 1 s hold, or Test-mode only. [RobotContainer.java](src/main/java/frc/robot/RobotContainer.java) is the single place where every binding is made.
+One coral cycle is **LT, then a face button, then RT** on the operator's controller: index fingers and the right thumb. A pose button comes first; RT always releases the piece, coral or algae. Anything that drives the robot is a *hold*, never a toggle; the operator's manual sticks do nothing unless LB is held; anything rare or dangerous is disabled-only behind a 1 s hold, or Test-mode only. [RobotContainer.java](src/main/java/frc/robot/RobotContainer.java) is the single place where every binding is made; the controller ports, the trigger thresholds, the zeroing hold time and the rumble cues are `Constants.ControlsConstants`.
 
 ### Driver (Xbox controller, port 0)
 | Input | Action |
@@ -37,11 +37,11 @@ One coral cycle is **LT, then a face button, then RT** on the operator's control
 | D-pad | Slow robot-centric nudges, all 8 directions |
 | B, Back/Start + X/Y | Point modules / SysId, **Test mode only** |
 
-- **Speed scaling.** Stick speed is scaled by the *Drive - Teleop Speed Scale* tunable (0.25 by default, for indoor testing) and automatically by carriage height: 100 % below 16.5", falling linearly to 40 % at 45" and above.
+- **Speed scaling.** Stick speed is scaled by the *Drive - Teleop Speed Scale* tunable (0.25 by default, for indoor testing) and automatically by carriage height: 100 % below 16.5", falling linearly to 40 % at 45" and above (`DriveConstants.SLOW_START_HEIGHT`, `SLOW_FULL_HEIGHT`, `SLOW_MIN_SCALE`).
 - **What the align triggers aim at** follows what the robot is doing. With a coral level selected, or with a coral in the claw and no level pressed yet: the LEFT / RIGHT reef branch. Stowed and empty: centered on the coral station (approached backward). Carrying an algae or at the barge pose: centered on the barge or processor tag, whichever is in view. For the centered targets either trigger does the same thing.
 - **Hold a trigger + RB** fires the instant the robot is aligned and the scoring pose is reached.
 - **Driver heading zero** moves only the driver's frame, never the pose estimator's heading, so it is safe at any time (point the robot away from you first). While disabled with no tag supplying a heading it also seeds the pose heading to alliance-forward; Back + left bumper forces that seed at any time.
-- **Heading re-seed (Y).** While enabled only MegaTag2 is fused, and MegaTag2 takes its heading *from* the pose, so it never corrects a pose heading that has drifted (a hard hit, a long match). Y fuses MegaTag1 (whose solve carries its own heading) for 2 s (`HEADING_RESEED_WINDOW_SECONDS`), with the same plausibility gates as the disabled seed; `Vision/Reseeding Heading` shows the window. With no tag in view it does nothing. Inactive in Test mode, where Back / Start + Y are SysId bindings.
+- **Heading re-seed (Y).** While enabled only MegaTag2 is fused, and MegaTag2 takes its heading *from* the pose, so it never corrects a pose heading that has drifted (a hard hit, a long match). Y fuses MegaTag1 (whose solve carries its own heading) for 2 s (`VisionConstants.HEADING_RESEED_WINDOW_SECONDS`), with the same plausibility gates as the disabled seed; `Vision/Reseeding Heading` shows the window. With no tag in view it does nothing. Inactive in Test mode, where Back / Start + Y are SysId bindings.
 - **SysId** applies open-loop voltage steps to the drivetrain, so those bindings (and B, point modules) exist only when Test mode is selected on the Driver Station.
 
 ### Operator (Xbox controller, port 1)
@@ -73,12 +73,12 @@ All position buttons run coordinated elevator + arm sequences through the Supers
 | Algae carry (HOME with an algae) | base | 100° |
 | Barge | 52" | 105° |
 
-**Score (RT), in detail.**
+**Score (RT), in detail.** The gate's tolerances, the eject times and the back-off distance are `SuperstructureConstants` (`SCORE_READY_*`, `CORAL_EJECT_*`, `ALGAE_EJECT_SECONDS`, `REEF_BACKOFF_METERS`); the roller speeds are `CorAlConstants`.
 
 - The gate is the *measured* pose: within 0.75" and 3° of the preset, with both mechanisms stopped. Pulled early, the trigger waits and fires on the loop the pose is reached, so it can never interrupt a move.
 - Chain slack can leave the arm resting a few degrees off its target. Once both mechanisms have been still for 0.6 s, an arm within 8° counts as *landed*, so the score button can never be locked out. The height gate is never relaxed.
 - Coral: the rollers run for at least 0.5 s and until the CANrange says the coral has left (1.5 s at most). If the coral is still detected, the pose is kept for a second try.
-- L2-L4 push the coral on through the claw (the intake's direction); L1 runs the rollers the other way (`CORAL_L1_SCORE_SPEED`, −0.3, a starting value), so the coral leaves the way it came in. The autos' `ejectCoral` follows the same rule.
+- L2-L4 push the coral on through the claw (the intake's direction); L1 runs the rollers the other way (`CorAlConstants.CORAL_L1_SCORE_SPEED`, −0.3, a starting value), so the coral leaves the way it came in. The autos' `ejectCoral` follows the same rule.
 - Algae: rollers out for 0.5 s.
 - Then the mechanism goes home by itself. After L3 / L4 it does so only once the drivetrain has moved 0.35 m from where it ejected, because that exit swings the claw 9-12" past the front bumper.
 
@@ -86,7 +86,7 @@ All position buttons run coordinated elevator + arm sequences through the Supers
 
 **Algae hold (D-pad left)** commands only the arm and the rollers. The carriage keeps the setpoint it already has: re-commanding the elevator to its own measured height would restart its motion profile for no reason.
 
-**Rumble.** Coral acquired: both pads, one long buzz (leave the station). Pose reached: operator, two short (RT is live). Aligned and pose reached: driver, steady (fire). Scored at L3/L4 and waiting for room, or a move waiting for the reef to be clear: driver, slow pulse (back away). RT with nothing to score from: operator, one tick.
+**Rumble.** Coral acquired: both pads, one long buzz (leave the station). Pose reached: operator, two short (RT is live). Aligned and pose reached: driver, steady (fire). Scored at L3/L4 and waiting for room, or a move waiting for the reef to be clear: driver, slow pulse (back away). RT with nothing to score from: operator, one tick. Strengths and timings: `ControlsConstants.RUMBLE_*`.
 
 ---
 
@@ -114,6 +114,7 @@ Why the gains are what they are:
 - **kS 0, on purpose.** The Spark MAX applies kS as +kS whenever the profile velocity is zero (it does not follow the sign of the error), so a non-zero kS steps the feedforward by 2 × kS at the instant every *descent* ends (kG − kS moving down, kG + kS at rest), straight into that lightly damped loop. Moving friction is ≈ 0.2 V, which the position loop covers with ≈ 0.04" of lag.
 - **Profile-error window 1.0".** This is how far the carriage may stray from the profile before the controller regenerates it from the measured state; it is not a settling tolerance. A sagging bus pushes the error past 0.5" near cruise, and a regenerated profile (built on a lagged velocity) is what then hunts. Every safety gate reads the measured height, so the wider window costs nothing.
 - **Velocity filter 16 ms × 2** (≈ 24 ms of lag) instead of the Spark MAX default 32 ms × 8 (≈ 130 ms), because MAXMotion restarts its profile from the measured velocity.
+- All of these, with the gearing, limits, presets and paces, are `ElevatorConstants`; the gains and the profile are also dashboard tunables (see [Live tuning](#live-tuning-without-redeploying-tunables)).
 - These values were chosen against a 1 kHz simulation of the loop and the CAD mass, across the plant uncertainty (mass 10-15 kg, friction, a held game piece, a sagging battery): worst case 0.24" of overshoot and no oscillation. On the robot the motion is smooth and continuous.
 
 **kG is still to be measured.** Nothing counterbalances this elevator (the constant-force springs in the CAD are not on the robot), so the motors hold the whole moving mass: ≈ 145 N at the carriage by the CAD estimate, ≈ 9 A per motor. kG ships at 1.0 V (the mass estimate spans 0.8-1.3 V). Set it from `Elevator/kG From Cruise`: the mean of the applied volts at steady cruise going up and going down, which does not depend on friction or on the gains already configured. Run one long move each way from the Testing tab with the arm at RAISE (100°). `Elevator/Hold Volts` (applied volts at rest, with kS taken off) is a cross-check only: inside the static-friction band it mostly echoes the gains already set.
@@ -125,12 +126,12 @@ Pivot arm + intake rollers (both Kraken X60). Motion Magic in degrees, closed-lo
 
 - **Angle reference.** The REV Through Bore absolute encoder is the angle reference: the motor's sensor is seeded from it at startup, at the start of a move from rest, and whenever the arm is idle, but never mid-move, because a seed taken at 300°/s is ≈ 3° stale and would step the closed loop's feedback.
 - **The zero survives a restart.** The raw through-bore reading at the zero position is stored on the roboRIO whenever the pivot is zeroed and restored at the next code start, so a restart with the arm raised (a brownout, a crash, a redeploy) does not take "wherever the arm is" as 0° and shift every gate and both soft limits. A restored angle outside the arm's travel is refused with a dashboard alert (the encoder has moved on its shaft: re-zero at the base).
-- **Landing correction.** The loop closes on the rotor and the chain has slack, so at the end of a sweep the arm's inertia and gravity carry it through the slack: the real arm rests a few degrees *past* the target with the rotor exactly on it. Once the arm has been still for 0.2 s, if the through bore is more than 0.75° off, the rotor is re-seeded from the through bore and the same target re-issued, so the loop drives out the difference. It does so at most three times per target, so it cannot hunt inside the slack.
+- **Landing correction.** The loop closes on the rotor and the chain has slack, so at the end of a sweep the arm's inertia and gravity carry it through the slack: the real arm rests a few degrees *past* the target with the rotor exactly on it. Once the arm has been still for 0.2 s, if the through bore is more than 0.75° off, the rotor is re-seeded from the through bore and the same target re-issued, so the loop drives out the difference. It does so at most three times per target, so it cannot hunt inside the slack (`CorAlConstants.PIVOT_LANDING_*`).
 - **Gravity feedforward** works although 0° is not horizontal (`GravityArmPositionOffset`, from the *Pivot - Balance Angle* tunable). *Pivot - kG* ships at 0 until measured, and the 33° balance angle is an estimate; see the tunables table for the procedure. Without kG the arm rests 2-3° low at RAISE and the algae poses.
 
 **Game piece detection is by signal strength, not distance.** Measured on this claw: a held coral returns 0.04-0.05 m at a saturated 65535 signal strength, while an empty claw returns *about the same distance* at 3000-4000. That is the first of the two setups in CTRE's CANrange tuning guide: the sensor looks into open air, so the distance reading means nothing when nothing is held, and the strength is what separates the two, by a factor of sixteen. So the strength gate does the work (*CorAl - Coral Min Signal Strength*, 15000: roughly four times the empty return and far below a held one) and the distance threshold is deliberately generous (0.30 m, well above the 0.05 m a coral reads), as the guide prescribes. CTRE's default strength gate of 2500 is below the empty claw's return and would report a coral that is not there.
 
-The verdict is formed in code rather than from the sensor's own proximity bit, which can only mean "closer than the threshold". It latches on both sides: a return that has counted as a coral keeps counting until the strength falls to 75 % of the gate, a distance reading inside the hysteresis band keeps the previous verdict, readings the sensor flags as compromised are rejected, and both edges are debounced for 0.3 s. A confirmed arrival stops the intake automatically.
+The verdict is formed in code rather than from the sensor's own proximity bit, which can only mean "closer than the threshold". It latches on both sides: a return that has counted as a coral keeps counting until the strength falls to 75 % of the gate, a distance reading inside the hysteresis band keeps the previous verdict, readings the sensor flags as compromised are rejected, and both edges are debounced for 0.3 s. A confirmed arrival stops the intake automatically. These settings are `CorAlConstants.GAME_PIECE_*`.
 
 **If it ever misreads**, read `CorAl/CANrange Distance` and `CorAl/CANrange Signal Strength` empty and holding a coral, and set whichever one separates them: *CorAl - Coral Min Signal Strength* if the strengths differ, *CorAl - Coral Detect Distance* (with *Coral Detect When Closer (1) Or Farther (0)*) if the distances do. *CorAl - Coral Detection Enabled (1) Or Off (0)* set to 0 runs the intake on the operator's button alone in the meantime, so a confused sensor never blocks the robot.
 
@@ -149,7 +150,7 @@ The command factory for all coordinated elevator + CorAl motion. The free region
 - **Algae poses (160°)** hit the bumper below ≈ 7.5", so the arm waits at 110° until the carriage is above 8"; leaving an algae pose for anything low, the arm comes back to RAISE before the carriage drops below 8".
 - **Stow** tucks to 0° once the descending carriage passes 8.5".
 
-**Why the arm-release height is 24" and not lower.** 75-100° is clear from the base to 36" by the table, so the release height is not a table limit. Below ≈ 22" the claw's tail bar passes the funnel's sheet-metal lips, which the CAD clearance model does not include; at RAISE it is well behind them, and at 24" it is ≈ 2.5" above them before the arm moves. **Do not lower `ARM_RELEASE_MIN_HEIGHT` without a jog check**: jog the arm to 75° and raise the carriage slowly from 12" to 24" with eyes on that gap.
+**Why the arm-release height is 24" and not lower** (`SuperstructureConstants.ARM_RELEASE_MIN_HEIGHT`). 75-100° is clear from the base to 36" by the table, so the release height is not a table limit. Below ≈ 22" the claw's tail bar passes the funnel's sheet-metal lips, which the CAD clearance model does not include; at RAISE it is well behind them, and at 24" it is ≈ 2.5" above them before the arm moves. **Do not lower `ARM_RELEASE_MIN_HEIGHT` without a jog check**: jog the arm to 75° and raise the carriage slowly from 12" to 24" with eyes on that gap.
 
 **Nothing waits.** The invariant is that the elevator, the CorAl, or both are always under way until the pose is reached: there is no phase where the mechanisms sit still. The gates between phases are conditions on *measured* state that release the next command; they never stop what is already moving. Where the corridors force one mechanism to hold (the carriage cannot climb past 48" until the arm is inside 22.5°), the other one is doing the work that opens the gate. Leaving a pose, the carriage travels toward the target (up *or* down) while the arm swings to RAISE; coming home, the arm starts round as soon as the carriage is inside the low box and finishes the tuck when it drops below 8.5".
 
@@ -164,7 +165,7 @@ Checked against every ordered pair of operator poses, L3 and L4 are the only pai
 
 Because each clamp reads the other mechanism's measured state, the pair stays inside the corridors at any relative speed, including one of them stalling, and the margins are nested (0.1" inside ½") so neither can wait on the other. `SuperstructureClampSimTest` steps both axes through the L3 climb, the L4 climb and the L4 exit (nominal, arm at half speed, carriage at 60 %, carriage stalled for a second mid-move) and fails if the pose ever leaves the table, the pre-top rule is broken, or the move does not finish.
 
-**Paced to travel together.** The arm is the long pole of every move into or out of an upper pose; at full pace the carriage reaches each clearance limit before the arm has opened it, brakes, and is released again: sequential and jerky even when nothing ever stops. So each move runs the carriage at a pace (`Pace`: FULL / BRISK 0.8 / EASY 0.6 / SLOW 0.4 of the tuned cruise *and* acceleration, one Spark MAX closed-loop slot each, so the pace is part of the setpoint) chosen so that it never has to brake for the arm. The arm is also released 0.2 s before the carriage reaches the 24" release height (held at 92.5° until it is actually there), which is the difference between braking for the 35.5" clamp and sailing through it. The choices come from `SuperstructureSequenceSimTest.pacesCompared` (`build/sim/paces.csv`: time, hitches and slowest mid-move speed for every pace), and the sim asserts that the scoring climbs have zero hitches:
+**Paced to travel together.** The arm is the long pole of every move into or out of an upper pose; at full pace the carriage reaches each clearance limit before the arm has opened it, brakes, and is released again: sequential and jerky even when nothing ever stops. So each move runs the carriage at a pace (`Pace`: FULL / BRISK 0.8 / EASY 0.6 / SLOW 0.4 of the tuned cruise *and* acceleration; FULL is the tuned profile itself and the other three are `ElevatorConstants.PACE_*`; one Spark MAX closed-loop slot each, so the pace is part of the setpoint) chosen so that it never has to brake for the arm; the pace for each kind of move is `SuperstructureConstants.*_PACE`. The arm is also released 0.2 s before the carriage reaches the 24" release height (held at 92.5° until it is actually there), which is the difference between braking for the 35.5" clamp and sailing through it. The choices come from `SuperstructureSequenceSimTest.pacesCompared` (`build/sim/paces.csv`: time, hitches and slowest mid-move speed for every pace), and the sim asserts that the scoring climbs have zero hitches:
 
 | Move | Pace | Sim time | Carriage |
 |---|---|---|---|
@@ -176,7 +177,7 @@ Because each clamp reads the other mechanism's measured state, the pair stays in
 
 A carriage at rest also does not set off on a short run (< 8") to a clamp, which it would only have to brake for; it waits the ≈ 0.2 s until the arm has opened a proper run.
 
-**Setpoints are latched.** MAXMotion regenerates its profile from the *measured* position and a lagged velocity every time a setpoint arrives, so a clamp re-sent every 20 ms restarts the profile fifty times a second, which shows up as hunting. A new height is therefore sent only when the clamp really moves (small advances are held back while the carriage is not yet braking for the old one), and `CorAl.setPivotAngle` ignores a repeat of its target. Arm-arrived waits end on at-target or stopped, so chain slack leaving the through bore a degree outside its window cannot park both mechanisms until a timeout. A second button press mid-move re-latches the arm as well as the carriage, and the roller commands (`ejectCoral`, `rollersRaw`) require no subsystem, so they never cancel a move.
+**Setpoints are latched.** MAXMotion regenerates its profile from the *measured* position and a lagged velocity every time a setpoint arrives, so a clamp re-sent every 20 ms restarts the profile fifty times a second, which shows up as hunting. A new height is therefore sent only when the clamp really moves (small advances are held back while the carriage is not yet braking for the old one; `SuperstructureConstants.LATCH_*`), and `CorAl.setPivotAngle` ignores a repeat of its target. Arm-arrived waits end on at-target or stopped, so chain slack leaving the through bore a degree outside its window cannot park both mechanisms until a timeout. A second button press mid-move re-latches the arm as well as the carriage, and the roller commands (`ejectCoral`, `rollersRaw`) require no subsystem, so they never cancel a move.
 
 Per-loop geometry is deliberately a table walk, not a search: a route search over a grid of the corridor map costs millions of lookups inside a command's initialization, which overruns the robot loop.
 
@@ -184,7 +185,7 @@ Per-loop geometry is deliberately a table walk, not a search: a route search ove
 
 **Reef safety.** The claw reaches 9-12" past the front bumper at 75-100° (CAD), at the height of the reef's branches, and every move into or out of L3 / L4 swings it through there. Three things follow:
 
-1. Such a move waits while a reef tag is right in front of the bumper (< 0.80 m ahead; `Superstructure/Near Reef`) and starts by itself once the robot is clear, with the driver's pad pulsing. Moves between L3 and L4, the low poses, the algae poses and the manual take-over are never held.
+1. Such a move waits while a reef tag is right in front of the bumper (< 0.80 m ahead, `VisionConstants.NEAR_REEF_DISTANCE`; `Superstructure/Near Reef`) and starts by itself once the robot is clear, with the driver's pad pulsing. Moves between L3 and L4, the low poses, the algae poses and the manual take-over are never held.
 2. The L3 / L4 alignment is two-stage: it lines up on the branch 0.40 m back from flush, waits there for the scoring pose, then closes to flush, and backs out to the standoff after the score (which is also what releases the automatic stow).
 3. The autos do not raise, eject and stow *in place* at the reef: `parallel[path, prepL4] -> ejectCoral -> parallel[path, stowAfterBackingOff]` has the arm through its sweep and behind the bumper with the robot still ≈ 0.7 m out, and is ≈ 3.5 s faster per scoring leg than doing all three in place.
 
@@ -197,7 +198,7 @@ Sends the estimated heading to each Limelight every loop and fuses the returned 
 
 - Each camera frame is fused once: the NT sample timestamp identifies a frame, and re-adding the same sample every loop would collapse the estimate onto the raw camera pose.
 - The cameras' estimates are inserted oldest-first (inserting an older measurement discards newer corrections).
-- Estimates are rejected when off-field, when a MegaTag2 solve averages more than 6 m to its tags, when a single-tag MegaTag1 solve is ambiguous (> 0.7) or far (> 3 m), and while the robot is spinning fast.
+- Estimates are rejected when off-field, when a MegaTag2 solve averages more than 6 m to its tags, when a single-tag MegaTag1 solve is ambiguous (> 0.7) or far (> 3 m), and while the robot is spinning fast. These gates, the fusion standard deviations and the heading-seed rules are `VisionConstants`.
 - Each camera's last fused pose is drawn on the Field widget.
 
 **Alignment** works in the robot frame: each camera's primary tag is converted from Limelight camera space into "where is the tag relative to the robot center" using that camera's mounting pose (lens offset, yaw, pitch; see `Vision.tagPositionInRobotFrame`, pinned by `VisionGeometryTest`), so the yawed reef camera and the rear funnel camera drive the same loop with no per-camera mirroring.
@@ -207,6 +208,7 @@ Sends the estimated heading to each Limelight every loop and fuses the returned 
 - Heading is a second P loop to the heading that is square to the tag's face.
 - Everything is slew-limited (3 m/s², 6 rad/s², including the ramp-down when the tag is lost).
 - "Told to move, not moving, nearly there" counts as arrived by contact rather than stalling against the reef.
+- The gains, deadbands, limits, filters and contact thresholds are `VisionConstants.TrackingGains` (the two kP are dashboard tunables).
 
 **The servo never drives on a raw camera solve.** A tag does not move, so each *new* camera frame is turned into a field position for the latched tag, computed with the pose the robot had when the image was captured (`samplePoseAt`), not the pose now. It is low-pass filtered there behind a 3-frame outlier gate, and every loop the tracker gets that point seen from the current odometry pose. Filtering a static point adds no control lag, and the 50-100 ms camera latency (which would otherwise appear as a phantom lateral error of *range × heading change* whenever the robot is turning), single-frame solve noise and dropped frames never reach the wheels.
 
@@ -243,7 +245,7 @@ The CAD has the barge camera's mount (front-left, ≈ 40.6" up, 13.4" forward) b
 
 One-time check after deploying: open `http://limelight-funnel.local:5801` and confirm the 3D preview shows the camera at the back, pointing rearward and tilted up; `http://limelight-reef.local:5801` should show the camera front-left, low, looking forward-right and down. If either points the wrong way, flip the pitch or yaw sign in the constant. With the funnel camera tilted 50°, the *Station Flush Distance* is still whatever `Vision/Distance` reads when the rear bumpers are flush: the tilt is accounted for in the robot-frame conversion.
 
-**Heat and fan noise.** The code does two things to keep the Limelights cool without giving up tracking performance. The LEDs are never turned on (AprilTags need no illumination, and the LED array is the camera's biggest heat source). Processing is throttled while the robot is disabled (one frame processed per 100 skipped, still ≈ 1 solve/s for the pre-match heading seed), with full rate restored the instant it enables. Selecting Test mode on the Driver Station lifts the throttle without enabling, so the dashboard's vision readouts are live when checking a camera on the bench; throttled, they can be a few seconds behind the camera's own stream. The rest is configured on each camera's web UI (`http://limelight-<name>.local:5801`), where these settings dominate CPU/GPU load and therefore fan speed:
+**Heat and fan noise.** The code does two things to keep the Limelights cool without giving up tracking performance. The LEDs are never turned on (AprilTags need no illumination, and the LED array is the camera's biggest heat source). Processing is throttled while the robot is disabled (one frame processed per 100 skipped, `VisionConstants.DISABLED_THROTTLE`, still ≈ 1 solve/s for the pre-match heading seed), with full rate restored the instant it enables. Selecting Test mode on the Driver Station lifts the throttle without enabling, so the dashboard's vision readouts are live when checking a camera on the bench; throttled, they can be a few seconds behind the camera's own stream. The rest is configured on each camera's web UI (`http://limelight-<name>.local:5801`), where these settings dominate CPU/GPU load and therefore fan speed:
 
 | Setting | Recommendation |
 |---|---|
@@ -257,7 +259,7 @@ One-time check after deploying: open `http://limelight-funnel.local:5801` and co
 If a camera still runs hot with those, check its mounting: the fan intake needs clear airflow, and a camera boxed in next to a motor or the roboRIO will run warm regardless of settings.
 
 ### LEDs ([LEDs.java](src/main/java/frc/robot/subsystems/LEDs.java)), commented out
-There is no CANdle on the robot, so the whole subsystem is commented out to keep the device off the CAN bus and the class out of the build: every line of `LEDs.java`, `LEDConstants` in `Constants.java`, and the lines marked "CANdle disabled" in `RobotContainer.java` and `Dashboard.java`. The dashboard's *LEDs/State* field reads "not installed". Restore all of them together when a CANdle is installed. What the code does when enabled (state derived automatically each loop, no commands needed):
+There is no CANdle on the robot, so the whole subsystem is commented out to keep the device off the CAN bus and the class out of the build: every line of `LEDs.java`, `LEDConstants` and its two imports in `Constants.java`, and the lines marked "CANdle disabled" in `RobotContainer.java` and `Dashboard.java`. The dashboard's *LEDs/State* field reads "not installed". Restore all of them together when a CANdle is installed. What the code does when enabled (state derived automatically each loop, no commands needed):
 
 | Priority | State | Pattern |
 |---|---|---|
@@ -268,7 +270,7 @@ There is no CANdle on the robot, so the whole subsystem is commented out to keep
 | 5 | Endgame (last 20 s) | Strobing yellow |
 | 6 | Teleop idle | Solid alliance color |
 
-Set `LEDConstants.LED_COUNT` to match the installed strip (8 onboard LEDs + strip length) and adjust `StripType` in LEDs.java if colors look swapped.
+Set `LEDConstants.LED_COUNT` to match the installed strip (8 onboard LEDs + strip length) and adjust `LEDConstants.STRIP_TYPE` if colors look swapped; the colors and animation rates are `LEDConstants` too.
 
 ### Telemetry ([Telemetry.java](src/main/java/frc/robot/Telemetry.java))
 Publishes drivetrain state to NetworkTables (for AdvantageScope/Elastic) and CTRE SignalLogger (.hoot logs) at the odometry rate, plus Mechanism2d module visualizations.
@@ -311,7 +313,7 @@ Two separate questions are answered on the dashboard, and they deliberately use 
 
 `Vision/Alignment Tag` = −1 while `Vision/Best Tag` shows an ID means the tag is seen but is not one that camera aligns on, for example anything seen only by the barge camera while its pose is unmeasured, or a reef tag seen by the funnel camera.
 
-- A camera whose tag list has not changed for 10 s is ignored by these readouts, because NetworkTables keeps the last value of a camera that lost power or its link.
+- A camera whose tag list has not changed for 10 s (`VisionConstants.SEEN_TAG_STALE_SECONDS`) is ignored by these readouts, because NetworkTables keeps the last value of a camera that lost power or its link.
 - While disabled the cameras are throttled to about one solve per second, so the readouts lag the streams. Select Test mode on the Driver Station (no need to enable) to lift the throttle for bench checks.
 - *Best Tag* and *Align Tag* sit side by side on the Setup tab, so a tag that is seen but not aligned on shows at a glance. `Vision/Best Tag Camera` has no widget in the shipped layout (*Visible Tags* already names the camera); drag it in from Elastic's topic list if you want it.
 - **After deploying this release, re-download the layout** (`File > Load Layout From Robot`) on every drive laptop: the *Best Tag* / *Align Tag* / *Visible Tags* widgets on the Setup tab appear only once the new `elastic-layout.json` is loaded.
@@ -322,35 +324,35 @@ The Testing tab drives each mechanism independently: set the *Elevator Setpoint*
 These single-mechanism moves still consult the collision model in [Superstructure.java](src/main/java/frc/robot/Superstructure.java), but instead of moving the *other* mechanism out of the way (as the preset buttons do), an unsafe request is refused with a toast notification that says why, for example "Elevator test move refused: 30.0 in is not reachable with the arm at 0 deg (CAD contact band). Put the arm at 100 deg (Pivot Setpoint 100 + Pivot Go) for full travel." With the arm at 100° the elevator can be run through its full travel on its own; the refusals come from the CAD corridor table.
 
 ### Live tuning without redeploying (Tunables)
-Empirically measured numbers live in [util/Tunables.java](src/main/java/frc/robot/util/Tunables.java), backed by WPILib Preferences: they appear in the Testing tab's *Tunables* widget, and the roboRIO persists them to disk: they survive reboots, power cycles, *and* code deploys. Every getter clamps its value to a sane range, so a typo on the dashboard cannot command something dangerous.
+Empirically measured numbers are dashboard tunables ([util/Tunables.java](src/main/java/frc/robot/util/Tunables.java)), backed by WPILib Preferences: they appear in the Testing tab's *Tunables* widget, and the roboRIO persists them to disk: they survive reboots, power cycles, *and* code deploys. Their factory defaults live in `Constants.java` with their mechanism (the table below names each one). Every numeric getter clamps its value to a range in `Constants.TunablesConstants` (the two tracking gains to 0 to `TRACKING_KP_MAX_MULTIPLE` times their default), and the two on/off tunables read as on at 0.5 or more, so a typo on the dashboard cannot command something dangerous.
 
 - **When an edit takes effect:** driving and vision values on the next loop; values the Superstructure reads at plan time on the next button press; elevator, pivot and CANrange controller values the next time the robot is disabled.
-- **Defaults vs. stored values.** The values in `Constants.java` are only the factory defaults; *Reset Tunables to Defaults* restores them. Because stored values survive a deploy, changing a default in `Constants.java` does nothing on a robot that already has the key stored. Bump `DEFAULTS_VERSION` in `Tunables.java` (which overwrites every tunable once at the next boot) or press *Reset Tunables*. When only a few defaults move, add a targeted migration block in `Tunables.init()` instead, so everything else tuned on the dashboard survives.
+- **Defaults vs. stored values.** The values in `Constants.java` are only the factory defaults; *Reset Tunables to Defaults* restores them. Because stored values survive a deploy, changing a default in `Constants.java` does nothing on a robot that already has the key stored. Bump `TunablesConstants.DEFAULTS_VERSION` in `Constants.java` (which overwrites every tunable once at the next boot) or press *Reset Tunables*. When only a few defaults move, add a targeted migration block in `Tunables.init()` instead, so everything else tuned on the dashboard survives.
 
-| Tunable | Default | What it sets |
-|---|---|---|
-| Drive - Teleop Speed Scale (0-1) | 0.25 | Fraction of top speed *and* rotation rate at full stick. 0.25 is for indoor testing; raise toward 1.0 for competition |
-| Elevator - Travel Ratio (measured / modeled) | 1.0 | Carriage inches per motor rotation = 0.733 × this. Confirmed 1.0 on the robot; it exists only for a re-check |
-| Elevator - Height At Hard Stop (in) | 1.000 | Where the carriage sits on its hard stop, in the preset height frame. The encoder is referenced to it and the reverse soft limit sits here |
-| Elevator - kP (duty per in) | 0.4 | Spark MAX position loop gain |
-| Elevator - kS (V) | 0 | Static feedforward; deliberately zero (see [Elevator](#elevator-elevatorjava)) |
-| Elevator - kG (V) | 1.0 | Gravity feedforward. Set it from `Elevator/kG From Cruise` |
-| Elevator - kV Scale (× free-speed model) | 1.0 | Multiplies the NEO back-EMF velocity feedforward, which is derived from the travel ratio. If it overshoots, lower it |
-| Elevator - kA (V per in/s²) | 0.0040 | Acceleration feedforward on the profile. If the carriage lags on the ramps, raise it; if it leads into the target, lower it |
-| Elevator - Cruise Velocity (in/s) / Max Acceleration (in/s²) | 40 / 200 | MAXMotion profile (full travel ≈ 1.5 s). The staged sequences are gated on measured state, so a change only alters their timing |
-| Elevator - Profile Error (in) | 1.0 | How far the carriage may stray from the profile before it is regenerated from the measured state. Not a settling tolerance |
-| Pivot - Cruise Velocity (deg/s) / Acceleration (deg/s²) / Jerk (deg/s³) | 300 / 800 / 6000 | CorAl Motion Magic profile |
-| Pivot - kG (V, claw horizontal) / Balance Angle (deg) | 0 / 33 | Pivot gravity feedforward. kG is 0 until measured and the balance angle is an estimate |
-| CorAl - Coral Min Signal Strength | 15000 | CANrange return strength above which a reading can count as a coral. This is what separates "holding" from "empty" on this claw |
-| CorAl - Coral Detect Distance (m) / Hysteresis (m) | 0.30 / 0.015 | Distance threshold and the band on both sides of it; deliberately generous, since the strength gate does the work |
-| CorAl - Coral Detect When Closer (1) Or Farther (0) | 1 | Which side of the distance threshold a held coral puts the reading on |
-| CorAl - Coral Detection Enabled (1) Or Off (0) | 1 | Master switch: 0 runs the intake on the operator's button alone |
-| Vision - Reef Flush Distance (m) | 0.47 | Robot center to the reef tag with the front bumpers flush (L2-L4 and algae) |
-| Vision - Station Flush Distance (m) | 0.47 | Robot center back to the station tag with the rear bumpers flush |
-| Vision - L1 Score Distance (m) | 1.0 | L1 standoff |
-| Vision - Barge Score Distance (m) / Processor Distance (m) | 1.2 / 0.55 | First guesses, unusable until the barge camera's pose is measured |
-| Vision - Reef Branch Offset (m) | 0.165 | Tag center to branch center |
-| Vision - Tracking Distance kP / Rotation kP | 1.5 / 0.06 | Alignment servo gains (m/s per m, rad/s per degree), clamped to 0 to 3× the default so a mistyped value cannot invert or destabilize the servo |
+| Tunable | Default | Default lives in (`Constants.java`) | What it sets |
+|---|---|---|---|
+| Drive - Teleop Speed Scale (0-1) | 0.25 | `DriveConstants.TELEOP_SPEED_SCALE` | Fraction of top speed *and* rotation rate at full stick. 0.25 is for indoor testing; raise toward 1.0 for competition |
+| Elevator - Travel Ratio (measured / modeled) | 1.0 | `ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO` | Carriage inches per motor rotation = 0.733 × this. Confirmed 1.0 on the robot; it exists only for a re-check |
+| Elevator - Height At Hard Stop (in) | 1.000 | `ElevatorConstants.ELEVATOR_ZERO_HEIGHT` | Where the carriage sits on its hard stop, in the preset height frame. The encoder is referenced to it and the reverse soft limit sits here |
+| Elevator - kP (duty per in) | 0.4 | `ElevatorConstants.ELEVATOR_kP` | Spark MAX position loop gain |
+| Elevator - kS (V) | 0 | `ElevatorConstants.ELEVATOR_kS` | Static feedforward; deliberately zero (see [Elevator](#elevator-elevatorjava)) |
+| Elevator - kG (V) | 1.0 | `ElevatorConstants.ELEVATOR_kG` | Gravity feedforward. Set it from `Elevator/kG From Cruise` |
+| Elevator - kV Scale (× free-speed model) | 1.0 | `ElevatorConstants.ELEVATOR_kV_SCALE` | Multiplies the NEO back-EMF velocity feedforward, which is derived from the travel ratio. If it overshoots, lower it |
+| Elevator - kA (V per in/s²) | 0.0040 | `ElevatorConstants.ELEVATOR_kA` | Acceleration feedforward on the profile. If the carriage lags on the ramps, raise it; if it leads into the target, lower it |
+| Elevator - Cruise Velocity (in/s) / Max Acceleration (in/s²) | 40 / 200 | `ElevatorConstants.ELEVATOR_MAX_VELOCITY` / `ELEVATOR_MAX_ACCELERATION` | MAXMotion profile (full travel ≈ 1.5 s). The staged sequences are gated on measured state, so a change only alters their timing |
+| Elevator - Profile Error (in) | 1.0 | `ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR` | How far the carriage may stray from the profile before it is regenerated from the measured state. Not a settling tolerance |
+| Pivot - Cruise Velocity (deg/s) / Acceleration (deg/s²) / Jerk (deg/s³) | 300 / 800 / 6000 | `CorAlConstants.CORAL_PIVOT_MAX_VELOCITY` / `CORAL_PIVOT_MAX_ACCELERATION` / `CORAL_PIVOT_MAX_JERK` | CorAl Motion Magic profile |
+| Pivot - kG (V, claw horizontal) / Balance Angle (deg) | 0 / 33 | `CorAlConstants.CORAL_PIVOT_kG` / `CORAL_PIVOT_BALANCE_ANGLE_DEG` | Pivot gravity feedforward. kG is 0 until measured and the balance angle is an estimate |
+| CorAl - Coral Min Signal Strength | 15000 | `CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH` | CANrange return strength above which a reading can count as a coral. This is what separates "holding" from "empty" on this claw |
+| CorAl - Coral Detect Distance (m) / Hysteresis (m) | 0.30 / 0.015 | `CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD` / `GAME_PIECE_DETECTION_HYSTERESIS` | Distance threshold and the band on both sides of it; deliberately generous, since the strength gate does the work |
+| CorAl - Coral Detect When Closer (1) Or Farther (0) | 1 | `CorAlConstants.GAME_PIECE_DETECT_WHEN_CLOSER` | Which side of the distance threshold a held coral puts the reading on |
+| CorAl - Coral Detection Enabled (1) Or Off (0) | 1 | `CorAlConstants.GAME_PIECE_DETECTION_ENABLED` | Master switch: 0 runs the intake on the operator's button alone |
+| Vision - Reef Flush Distance (m) | 0.47 | `VisionConstants.REEF_FLUSH_DISTANCE` | Robot center to the reef tag with the front bumpers flush (L2-L4 and algae) |
+| Vision - Station Flush Distance (m) | 0.47 | `VisionConstants.STATION_FLUSH_DISTANCE` | Robot center back to the station tag with the rear bumpers flush |
+| Vision - L1 Score Distance (m) | 1.0 | `VisionConstants.L1_SCORE_DISTANCE` | L1 standoff |
+| Vision - Barge Score Distance (m) / Processor Distance (m) | 1.2 / 0.55 | `VisionConstants.BARGE_SCORE_DISTANCE` / `PROCESSOR_DISTANCE` | First guesses, unusable until the barge camera's pose is measured |
+| Vision - Reef Branch Offset (m) | 0.165 | `VisionConstants.REEF_BRANCH_OFFSET` | Tag center to branch center |
+| Vision - Tracking Distance kP / Rotation kP | 1.5 / 0.06 | `VisionConstants.TrackingGains.DISTANCE_kP` / `ROTATION_kP` | Alignment servo gains (m/s per m, rad/s per degree), clamped to 0 to 3× the default so a mistyped value cannot invert or destabilize the servo |
 
 Notes on the table:
 
@@ -359,9 +361,9 @@ Notes on the table:
 - **Measuring pivot kG.** First find the balance angle: disabled, pivot in Coast (Tuner X), the through-bore angle where the claw balances straight up (≈ 33°). Then, at balance + 90° (≈ 123°, claw horizontal), creep up and down at ≈ 5°/s reading `CorAl/Pivot Volts`: kG = the average of the two magnitudes, kS = half their difference. Expect ≈ 0.3 V.
 - **Vision distances** are taken by magnitude, so a pasted negative `Vision/Distance` (a station tag reads negative) cannot invert a goal.
 
-**At-target tolerances** (not tunables: they are what "arrived" means): the elevator is 0.25" and the CorAl pivot is 1.0° measured on the through bore, which is 0.27" at the claw. The elevator's rest band is (friction + kG error) / (12 × kP) ≈ 0.03-0.11", so a tighter window would sit inside it and the light would flicker; it is a "pose reached" flag only, and no safety gate reads it. Because the pivot's closed loop runs on the motor sensor while its tolerance is checked on the through bore, that window also has to cover the chain's backlash, so the Superstructure's settle ends when both mechanisms are at target or have stopped moving, whichever comes first: once motion has ceased, the loops are holding their latched setpoints and waiting longer cannot improve the pose. A separate 0.25" threshold (half of one skipped chain tooth at the carriage) drives the elevator's out-of-sync alert.
+**At-target tolerances** (not tunables: they are what "arrived" means): the elevator is 0.25" (`ElevatorConstants.ELEVATOR_ALLOWED_ERROR`) and the CorAl pivot is 1.0° (`CorAlConstants.CORAL_PIVOT_ALLOWED_ERROR`) measured on the through bore, which is 0.27" at the claw. The elevator's rest band is (friction + kG error) / (12 × kP) ≈ 0.03-0.11", so a tighter window would sit inside it and the light would flicker; it is a "pose reached" flag only, and no safety gate reads it. Because the pivot's closed loop runs on the motor sensor while its tolerance is checked on the through bore, that window also has to cover the chain's backlash, so the Superstructure's settle ends when both mechanisms are at target or have stopped moving, whichever comes first: once motion has ceased, the loops are holding their latched setpoints and waiting longer cannot improve the pose. A separate 0.25" threshold (`ELEVATOR_SIDE_SYNC_TOLERANCE`, half of one skipped chain tooth at the carriage) drives the elevator's out-of-sync alert.
 
-Mechanism contact geometry (tuck / low-box limits, the corridor table) is deliberately not tunable: those are physical facts. The CorAl pivot's Phoenix gains (kP/kS/kV/kA) are constants applied at boot and can be tried live in Phoenix Tuner X; the elevator's Spark MAX gains *are* tunables because the elevator is the mechanism that needs on-robot calibration most.
+Mechanism contact geometry (tuck / low-box limits, the corridor table: `SuperstructureConstants`) is deliberately not tunable: those are physical facts. The CorAl pivot's Phoenix gains (kP/kS/kV/kA, `CorAlConstants.CORAL_PIVOT_k*`) are constants applied at boot and can be tried live in Phoenix Tuner X; the elevator's Spark MAX gains *are* tunables because the elevator is the mechanism that needs on-robot calibration most.
 
 ### Calibrating the elevator height
 Heights are measured from the top of the base-stage 2×1 to the bottom of the carriage 2×1, with the middle stage between them.
@@ -376,7 +378,7 @@ A closed-loop problem looks different from a calibration problem: the dashboard 
 4. If the dashboard itself stops short, the problem is the closed loop: fix *kG* first (`Elevator/kG From Cruise`), then raise *kP* (rest error ≈ friction volts ÷ (12 × kP) inches). Leave *kS* at 0. For overshoot, lower *kV Scale* first, then *kA*. All re-apply the next time the robot is disabled.
 5. Repeat at 40": dashboard and tape should agree within ⅛" at both heights. Then run L4 (51.5") once before touching *Cruise Velocity* / *Max Acceleration*.
 6. If the elevator overshoots or hunts after a change, work in this order: (a) run one long move each way and set kG from `Elevator/kG From Cruise`; (b) watch `Elevator/Velocity` against the commanded cruise during a long move: if the carriage is still short of cruise when the profile says it should be there, raise *kA*; (c) if it rests short of the target, raise *kP* (or fix kG); if it buzzes or wobbles at rest, lower *kP*; (d) only then touch the profile. Overshoot that grows with the move length is kA; overshoot that is the same at every target is kP/kG.
-7. A climb that stutters and slows down, especially with the *Elevator sides out of sync* alert showing, means one side is dragging: a binding stage, or a follower controller that has been given soft limits of its own (this code deliberately gives it none; see [Elevator](#elevator-elevatorjava)). `Elevator/Left Current` climbing toward the 50 A limit during a move confirms it; a healthy climb draws a few amps.
+7. A climb that stutters and slows down, especially with the *Elevator sides out of sync* alert showing, means one side is dragging: a binding stage, or a follower controller that has been given soft limits of its own (this code deliberately gives it none; see [Elevator](#elevator-elevatorjava)). `Elevator/Left Current` climbing toward the 50 A limit (`ElevatorConstants.ELEVATOR_CURRENT_LIMIT`) during a move confirms it; a healthy climb draws a few amps.
 
 ### One-time setup on each drive station laptop
 1. Install Elastic (the version shipped with the WPILib 2026 installer, or newer) and connect to the robot.
@@ -384,15 +386,15 @@ A closed-loop problem looks different from a calibration problem: the dashboard 
 3. Every laptop now has the identical layout. Repeat step 2 whenever a deploy changes the layout: Elastic keeps the copy it downloaded until told otherwise.
 
 ### Alerts and notifications
-Persistent problems (through bore disconnected, elevator sides out of sync, elevator zeroed with the carriage raised, a calibration edit waiting to apply, motor/through-bore disagreement, a refused or restored pivot zero, a preset outside the CAD corridors, low resting battery, PathPlanner not configured, logging to internal storage) appear in the Alerts widget via the WPILib Alerts API; a mid-match through-bore failure additionally fires an Elastic toast notification.
+Persistent problems (through bore disconnected, elevator sides out of sync, elevator zeroed with the carriage raised, a calibration edit waiting to apply, motor/through-bore disagreement, a refused or restored pivot zero, a preset outside the CAD corridors, low resting battery, PathPlanner not configured, logging to internal storage) appear in the Alerts widget via the WPILib Alerts API; a mid-match through-bore failure additionally fires an Elastic toast notification. Alert thresholds belong to their mechanism's constants (for example `ElevatorConstants.ELEVATOR_BELOW_ZERO_ALERT`); the low-battery threshold is `DashboardConstants.LOW_BATTERY_VOLTS`.
 
 ### Logging and analysis (AdvantageKit and AdvantageScope)
 Logging runs through AdvantageKit (`Robot` extends `LoggedRobot`):
 
 - Driver Station data, joysticks, and console output are captured automatically.
 - Structured outputs are recorded every loop from `Dashboard.update()`: robot `Pose2d`, `ChassisSpeeds`, swerve module states/targets, elevator/arm positions and targets, game-piece state, the best and alignment tag IDs, and the 3D component poses (below).
-- `.wpilog` files land on a USB stick (`/U/logs`) if one is mounted on the roboRIO, otherwise `/home/lvuser/logs`, where the oldest logs are pruned to keep 100 MB free and the dashboard shows a warning (in simulation: `./logs`). Open them in AdvantageScope. Every logged output is also published live over NetworkTables under `/AdvantageKit` (NT4Publisher).
-- Live streaming: in AdvantageScope, *Connect to Robot* with the RLOG source on port 5810 (5800 is taken by the Elastic layout server). NetworkTables live viewing works too: all dashboard topics are plain NT.
+- `.wpilog` files land on a USB stick (`/U/logs`) if one is mounted on the roboRIO, otherwise `/home/lvuser/logs`, where the oldest logs are pruned to keep 100 MB free (`LoggingConstants.INTERNAL_LOG_*`) and the dashboard shows a warning (in simulation: `./logs`). Open them in AdvantageScope. Every logged output is also published live over NetworkTables under `/AdvantageKit` (NT4Publisher).
+- Live streaming: in AdvantageScope, *Connect to Robot* with the RLOG source on port 5810 (`LoggingConstants.RLOG_PORT`; 5800 is taken by the Elastic layout server). NetworkTables live viewing works too: all dashboard topics are plain NT.
 - The auto chooser is a `LoggedDashboardChooser`, so every log records which auto was selected.
 - CTRE's SignalLogger (`.hoot` files) runs alongside for Phoenix signals and SysId (open hoot logs in Tuner X or convert for SysId).
 - Full AdvantageKit log replay would additionally require IO-layer hardware abstraction in every subsystem, which is not done here; this integration provides logging, not deterministic replay.
@@ -405,7 +407,7 @@ The articulated robot model lives in [advantageScopeAssets/Robot_Leviathan](adva
 1. *Help > Use Custom Assets Folder* and select this repository's `advantageScopeAssets` folder (or copy `Robot_Leviathan/` into the folder opened by *Help > Show Assets Folder*).
 2. Select the Leviathan - 9143A robot model, then bind its components to the `AdvantageKit/RealOutputs/RobotState/ComponentPoses` field. Live-over-NT and log viewing both use the same field.
 
-The `components` order in `config.json` **must** match the `Pose3d[]` order (index 0 is the middle stage, 1 the carriage, 2 the arm; `Constants.LoggingConstants`). `zeroedPosition`/`zeroedRotations` describe each part's CAD origin at rest. The mounting offsets in `Dashboard.java` (`ELEVATOR_X_OFFSET`, `ARM_PIVOT_HEIGHT`) come from the CAD pivot axis (12.01" forward, 13.875" up), while the `config.json` zeroed positions are still all zero. If a part floats or swings the wrong way in the 3D view, adjust `config.json` (or the arm's rotation sign in `Dashboard.update()`) until the model lines up.
+The `components` order in `config.json` **must** match the `Pose3d[]` order (index 0 is the middle stage, 1 the carriage, 2 the arm; `Constants.LoggingConstants`). `zeroedPosition`/`zeroedRotations` describe each part's CAD origin at rest. The mounting offsets in `Constants.LoggingConstants` (`ELEVATOR_X_OFFSET`, `ARM_PIVOT_HEIGHT`, with `ARM_LENGTH`) come from the CAD pivot axis (12.01" forward, 13.875" up), while the `config.json` zeroed positions are still all zero. If a part floats or swings the wrong way in the 3D view, adjust `config.json` (or the arm's rotation sign in `Dashboard.update()`) until the model lines up.
 
 ### Glass
 Everything Glass needs is already on NetworkTables: the `Field` widget (`SmartDashboard/Field`), the superstructure `Mechanism2d`, the command scheduler, all `SmartDashboard` numeric topics for plotting, and the `DriveState` struct topics from `Telemetry`.
@@ -452,9 +454,9 @@ Two path-authoring tools feed the same auto chooser (`SmartDashboard/Auto Mode`)
 | Command | What it does |
 |---|---|
 | `prepL4` / `prepL3` / `prepL2` | Go to the scoring pose. Use as an event marker or parallel group on the approach path, so the pose is reached as the robot arrives |
-| `ejectCoral` | Rollers out for 0.5 s at the current pose (reversed at L1) |
-| `stowAfterBackingOff` | Waits until the robot has moved 0.35 m, then stows. Put it at the start of the departing path |
-| `intakeCoral` | Stow, then rollers until the CANrange confirms a coral; the 3 s timeout covers the roller wait only, so an empty station cannot stall the routine |
+| `ejectCoral` | Rollers out for 0.5 s (`SuperstructureConstants.CORAL_EJECT_SECONDS`) at the current pose (reversed at L1) |
+| `stowAfterBackingOff` | Waits until the robot has moved 0.35 m (`SuperstructureConstants.REEF_BACKOFF_METERS`), then stows. Put it at the start of the departing path |
+| `intakeCoral` | Stow, then rollers until the CANrange confirms a coral; the 3 s timeout (`AutoConstants.AUTO_INTAKE_TIMEOUT_SECONDS`) covers the roller wait only, so an empty station cannot stall the routine |
 | `stow` | Stow |
 | `scoreL4` / `scoreL3` / `scoreL2` | Raise, eject and stow in place, **only with the robot clear of the reef** |
 
@@ -464,7 +466,7 @@ Leaving L3 / L4 puts the claw 9-12" past the front bumper, so a stow in place ag
 - Autos live in `src/main/deploy/pathplanner/autos`, paths in `.../paths` (2025.X file format, which PathPlanner 2026 uses as well).
 - **Match autos**: `Left Wall - 3 Piece` and `Right Wall - 3 Piece` are three L4 cycles, each `parallel[path, prepL4] -> ejectCoral -> parallel[path, stowAfterBackingOff]`, with `intakeCoral` at the station. Trim in the GUI if the full routine does not fit in 15 s at your cycle times.
 - `Practice - Two Piece Front Left` / `Front Right` start at a coral station (not a legal match start) and `Test - 180 Curve` / `Test - Circle` are drivetrain checks: none of them belongs in a match.
-- Every auto resets odometry to the path's starting pose (`resetOdom: true`) through `Swerve.resetPoseForAuto`. It keeps the vision-seeded heading (resetting only the translation) when a two-or-more-tag MegaTag1 solve was fused in the last 3 s, the estimator heading has converged on it (within 3°), and it agrees with the nominal heading within 20°; otherwise the full nominal pose is used. `Vision/Auto Kept Heading` shows which happened. MegaTag2 trusts that heading absolutely for the whole period, so overwriting a good one with the nominal placement would bias every vision pose.
+- Every auto resets odometry to the path's starting pose (`resetOdom: true`) through `Swerve.resetPoseForAuto`. It keeps the vision-seeded heading (resetting only the translation) when a two-or-more-tag MegaTag1 solve was fused in the last 3 s, the estimator heading has converged on it (within 3°), and it agrees with the nominal heading within 20° (`VisionConstants.HEADING_SEED_*` and `MT1_STRONG_SEED_MIN_TAGS`); otherwise the full nominal pose is used. `Vision/Auto Kept Heading` shows which happened. MegaTag2 trusts that heading absolutely for the whole period, so overwriting a good one with the nominal placement would bias every vision pose.
 - `FlippingUtil` is set to the 2025 field (17.548 × 8.052 m) before AutoBuilder is configured: PathPlannerLib 2026 otherwise mirrors red-alliance paths, odometry resets and Choreo start poses about the 2026 field's centerline, about 1 m off.
 - If `settings.json` cannot be loaded, the chooser offers only `None` and an error alert says so, instead of the robot program crashing on the chooser build.
 - Path constraints: 3 m/s, 4 m/s² (robot max is ≈ 5.96 m/s).
@@ -482,7 +484,9 @@ Leaving L3 / L4 puts the claw 9-12" past the front bumper, so a stow in place ag
 
 ## Configuration
 
-Constants are grouped by subsystem in [Constants.java](src/main/java/frc/robot/Constants.java): `ElevatorConstants`, `CorAlConstants`, `SuperstructureConstants`, `DriveConstants`, `AutoConstants`, `VisionConstants`, `LoggingConstants` (plus the commented-out `LEDConstants`), with a CAN ID / DIO map at the top of the file. Every value is commented with its unit; values marked TUNE are starting points and values marked VERIFY are physical measurements to confirm on the robot.
+**One constants file.** Every number and setting a person might change (gains, tolerances, timeouts, speeds, margins, thresholds, rumble strengths, IDs, ports, the dashboard tunables' defaults and clamp ranges) lives only in [Constants.java](src/main/java/frc/robot/Constants.java); every other class is logic only, so the robot is tuned in one file. What stays elsewhere: NetworkTables, Preferences and log keys, which stay with the code that publishes them (the Elastic layout, AdvantageScope and the stored values are bound to them, so renaming one breaks its widget or loses its value); true mathematical, unit and framework constants; the topic names, strides and indices of an external data format (Limelight's arrays); the drawing geometry of the dashboard widgets; and the vendor files (`TunerConstants.java`, `LimelightHelpers.java`, `util/Elastic.java`).
+
+Constants are grouped in nested classes, listed with what each configures and which classes read it in a table of contents at the top of the file: `ElevatorConstants`, `CorAlConstants`, `SuperstructureConstants`, `ControlsConstants` (controller ports, align trigger threshold, zeroing hold, rumble cues), `DriveConstants`, `AutoConstants`, `VisionConstants`, `DashboardConstants`, `TunablesConstants` (the dashboard tunables' defaults version, poll period and clamp ranges) and `LoggingConstants` (plus the commented-out `LEDConstants`), with a CAN ID / DIO / USB map at the top of the file. Every value is commented with its unit; values marked TUNE are starting points and values marked MEASURE or VERIFY are physical measurements to confirm on the robot.
 
 Swerve hardware constants are in [TunerConstants.java](src/main/java/frc/robot/generated/TunerConstants.java), in CTRE Tuner X's generated format, with the per-module steer ratios set by hand for the mixed MK4i / MK4n modules.
 
@@ -558,7 +562,7 @@ Reading it:
 - The only clear columns at the top of travel are ≤ 22.5° and ≥ 97°.
 - The bottom-left corner (angles > 130° below ≈ 7") is the bumper.
 
-`SuperstructureConstants.FREE_CORRIDORS` is this map with a 1" margin, and the staged sequences were simulated against the full map. Two things are not in the model: the funnel's sheet-metal lips below ≈ 22" (the reason `ARM_RELEASE_MIN_HEIGHT` is 24") and the reef. At the L4 angle the claw stays inside the bumper plane (the game manual gives branch tips at 31.875"/47.625"/72", inset 1⅝"/1⅝"/1⅛" from the reef face), so only the coral itself reaches the branch.
+`SuperstructureConstants.FREE_CORRIDORS` is this map with a 1" margin, and the staged sequences were simulated against the full map. Two things are not in the model: the funnel's sheet-metal lips below ≈ 22" (the reason `SuperstructureConstants.ARM_RELEASE_MIN_HEIGHT` is 24") and the reef. At the L4 angle the claw stays inside the bumper plane (the game manual gives branch tips at 31.875"/47.625"/72", inset 1⅝"/1⅝"/1⅛" from the reef face), so only the coral itself reaches the branch.
 
 The analysis scripts and the STEP exports are not part of this repository. If the claw, the elevator tubes or the spring hardware change, the analysis has to be repeated with the method above and `FREE_CORRIDORS` updated; `SuperstructureCorridorTest` will then check the presets and staged waypoints against the new table.
 
@@ -569,19 +573,19 @@ The analysis scripts and the STEP exports are not part of this repository. If th
 The motion profiles, the controller mapping, reef and coral-station alignment, the gated score with auto-home, the algae hold and the L1 eject have all been run on the robot. What remains open:
 
 1. **Measure the barge Limelight's mounting pose.** `VisionConstants.LIMELIGHT_POSES[1]` is a placeholder with `measured = false`, so barge / processor alignment supplies nothing until it is measured. Then tune *Vision - Barge Score Distance* (1.2 m) and *Processor Distance* (0.55 m), which are first guesses: push the robot into position and copy `Vision/Distance`.
-2. **Set the elevator kG from `Elevator/kG From Cruise`** (one long move each way from the Testing tab, arm at 100°). It ships at the CAD estimate, 1.0 V.
-3. **Measure the pivot kG and balance angle** (*Pivot - kG* ships at 0, the 33° balance angle is an estimate); the procedure is under the tunables table. Until then the arm rests 2-3° low at RAISE and the algae poses.
-4. **Do not lower `ARM_RELEASE_MIN_HEIGHT` (24") without a jog check.** The funnel sheet metal below ≈ 22" is not in the CAD clearance model; see [Superstructure](#superstructure-superstructurejava).
-5. **Confirm the L1 eject speed.** `CORAL_L1_SCORE_SPEED` (−0.3) is a starting value; L1 ejects against the intake direction.
-6. **Re-check the vision goal tunables on a real field.** Push the robot flush on the reef base and copy `Vision/Distance` into *Vision - Reef Flush Distance*; center it on a branch and copy the magnitude of `Vision/Lateral` into *Reef Branch Offset*. For the station, the funnel camera loses the tag about 0.55 m from the wall (its +50° pitch), so keep *Station Flush Distance* at the geometric 0.47 m: the tracker finishes the last stretch on odometry. All readouts are robot-frame, so the camera that sees the tag does not matter. If an axis ever drives the wrong way, the camera pose (not a sign flag) is what to check, in the camera's web-UI 3D preview.
+2. **Set the elevator kG from `Elevator/kG From Cruise`** (one long move each way from the Testing tab, arm at 100°). It ships at the CAD estimate, 1.0 V (`ElevatorConstants.ELEVATOR_kG`).
+3. **Measure the pivot kG and balance angle** (*Pivot - kG* ships at 0, the 33° balance angle is an estimate; defaults `CorAlConstants.CORAL_PIVOT_kG` and `CORAL_PIVOT_BALANCE_ANGLE_DEG`); the procedure is under the tunables table. Until then the arm rests 2-3° low at RAISE and the algae poses.
+4. **Do not lower `SuperstructureConstants.ARM_RELEASE_MIN_HEIGHT` (24") without a jog check.** The funnel sheet metal below ≈ 22" is not in the CAD clearance model; see [Superstructure](#superstructure-superstructurejava).
+5. **Confirm the L1 eject speed.** `CorAlConstants.CORAL_L1_SCORE_SPEED` (−0.3) is a starting value; L1 ejects against the intake direction.
+6. **Re-check the vision goal tunables on a real field** (defaults in `VisionConstants`). Push the robot flush on the reef base and copy `Vision/Distance` into *Vision - Reef Flush Distance*; center it on a branch and copy the magnitude of `Vision/Lateral` into *Reef Branch Offset*. For the station, the funnel camera loses the tag about 0.55 m from the wall (its +50° pitch), so keep *Station Flush Distance* at the geometric 0.47 m: the tracker finishes the last stretch on odometry. All readouts are robot-frame, so the camera that sees the tag does not matter. If an axis ever drives the wrong way, the camera pose (not a sign flag) is what to check, in the camera's web-UI 3D preview.
 7. **Verify a 20" and a 40" elevator move with a tape** after any mechanical work on the elevator; see [Calibrating the elevator height](#calibrating-the-elevator-height). The hard-stop height is 1.000" and the travel ratio should stay at 1.0.
-8. **Sanity-check the CorAl pivot angle** against the through bore encoder after any work on the pivot. The 65.41:1 ratio is derived from the real gear train (10:58, then 18:58, then 12:42), and the through bore must be mounted 1:1 on the pivot shaft.
-9. **Re-check the coral's landing on each branch** if a preset is changed. Every preset is inside the CAD corridors with a full inch of model clearance: L3 is (30.5", 25°), and 27.5° at the same height has 1¾" if it ever rubs; L2 is 12.5° rather than the geometric 5° so the arm keeps an inch to the cross bar even when chain slack lets it sag 2.5°.
+8. **Sanity-check the CorAl pivot angle** against the through bore encoder after any work on the pivot. The 65.41:1 ratio (`CorAlConstants.CORAL_PIVOT_GEAR_RATIO`) is derived from the real gear train (10:58, then 18:58, then 12:42), and the through bore must be mounted 1:1 on the pivot shaft.
+9. **Re-check the coral's landing on each branch** if a preset is changed (`ElevatorConstants.PresetHeights`, `CorAlConstants.PivotPresetAngles`). Every preset is inside the CAD corridors with a full inch of model clearance: L3 is (30.5", 25°), and 27.5° at the same height has 1¾" if it ever rubs; L2 is 12.5° rather than the geometric 5° so the arm keeps an inch to the cross bar even when chain slack lets it sag 2.5°.
 10. **CANcoder offsets: `TunerConstants.java` is the source of truth.** It holds the values the robot runs with (the mixed per-module steer ratios, MK4i front and MK4n back; the offsets; and the 12.375" module positions confirmed from the CAD), and no Tuner X project file is kept in the repository. A project regenerated in Tuner X with one module type for all four would overwrite the per-module steer ratios. After any module work, re-measure the offsets in Tuner X with the wheels aligned straight forward and enter them by hand.
 11. **Firmware**: 2026 firmware on all CTRE devices (TalonFX, CANcoder, Pigeon 2, CANrange), current Spark MAX firmware via the REV Hardware Client, the 2026 roboRIO image, Limelight OS 2026.0+.
 12. **CAN IDs** must match the map at the top of `Constants.java` (the CANrange is ID 3). Phoenix device IDs must be 0-62.
 13. **Reload the Elastic layout** on every drive laptop after deploying (`File > Load Layout From Robot`).
-14. **Raise the Drive - Teleop Speed Scale tunable** on the Testing tab (0.25 for indoor testing) as the drivers are ready; no redeploy needed. Tune `AutoConstants` path-following kP and the autos' timing on a full field.
+14. **Raise the Drive - Teleop Speed Scale tunable** on the Testing tab (0.25 for indoor testing, default `DriveConstants.TELEOP_SPEED_SCALE`) as the drivers are ready; no redeploy needed. Tune `AutoConstants` path-following kP and the autos' timing on a full field.
 15. **LEDs**: skip while the CANdle code is commented out. When one is installed, un-comment the subsystem and set `LEDConstants.LED_COUNT` to the actual LED strip length.
 
 ---

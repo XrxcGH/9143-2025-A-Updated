@@ -79,16 +79,16 @@ public class Robot extends LoggedRobot {
 		// key under /AdvantageKit, so AdvantageScope's NT4 live source (and
 		// the README's ComponentPoses binding) sees RobotState/* in real time.
 		Logger.addDataReceiver(new NT4Publisher());
-		// Live stream for AdvantageScope's "Connect to Robot" (RLOG). Port
-		// 5810 because the Elastic layout WebServer already owns 5800; both
-		// are inside the field-legal 5800-5810 range.
-		Logger.addDataReceiver(new RLOGServer(5810));
+		// Live stream for AdvantageScope's "Connect to Robot" (RLOG), on
+		// LoggingConstants.RLOG_PORT (the Elastic layout WebServer owns 5800).
+		Logger.addDataReceiver(new RLOGServer(LoggingConstants.RLOG_PORT));
 		Logger.start();
 		DriverStation.silenceJoystickConnectionWarning(true);
 
 		// Serve the deploy directory over HTTP (port 5800). Elastic uses this
 		// to fetch deploy/elastic-layout.json via File -> "Load Layout From
 		// Robot", so every drive station computer gets the same dashboard.
+		// 5800 stays here: it is the port Elastic fetches from, not a setting.
 		WebServer.start(5800, Filesystem.getDeployDirectory().getPath());
 
 		// Seed the dashboard-editable tunables (vision distances and tracking

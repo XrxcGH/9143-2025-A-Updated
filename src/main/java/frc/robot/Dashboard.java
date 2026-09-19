@@ -1,5 +1,7 @@
 package frc.robot;
 
+import java.math.BigDecimal;
+
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
@@ -29,6 +31,9 @@ import edu.wpi.first.wpilibj.util.Color;
 import edu.wpi.first.wpilibj.util.Color8Bit;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
+import frc.robot.Constants.ControlsConstants;
+import frc.robot.Constants.CorAlConstants;
+import frc.robot.Constants.DashboardConstants;
 import frc.robot.Constants.ElevatorConstants;
 import frc.robot.Constants.LoggingConstants;
 import frc.robot.Constants.VisionConstants;
@@ -65,6 +70,11 @@ import frc.robot.util.Tunables;
  *
  * Subsystems expose plain getters and know nothing about the dashboard;
  * update() polls them once per loop from Robot.robotPeriodic().
+ *
+ * The string keys in this class ("Testing/Intake Speed", "Vision/Best Tag",
+ * "RobotState/ComponentPoses", ...) are identifiers, not settings: the
+ * Elastic layout and AdvantageScope bind to them, so they stay here with
+ * the code that publishes them, and renaming one breaks its widget.
  */
 public class Dashboard {
     private final Swerve swerve;
@@ -104,29 +114,19 @@ public class Dashboard {
     // Glass and AdvantageScope (both live over NT). Drawing conventions:
     // the elevator ligament points straight up; the arm ligament's angle is
     // relative to the elevator, drawn so 0 deg (tucked) points down along
-    // the elevator, 90 deg (safe) points out horizontally.
+    // the elevator, 90 deg (safe) points out horizontally. The canvas size,
+    // root position, line widths and colors are drawing geometry only, not
+    // robot settings; the mechanism dimensions are LoggingConstants.
     private final Mechanism2d superstructureMech = new Mechanism2d(1.5, 2.5);
     private final MechanismLigament2d elevatorLigament;
     private final MechanismLigament2d armLigament;
-
-    // Arm length for both visualizations (meters): pivot axis (through-bore
-    // centerline) to the far intake roller axes, 13.9 in in the CAD
-    // (9143-2025-A-0000 Leviathan STEP).
-    private static final double ARM_LENGTH = 0.352;
 
     // 3D component-pose model for AdvantageScope's 3D field view: attach a
     // glTF CAD model (File > Import CAD or the online converter) and map
     // these array entries to its articulated components in the 3D config.
     // Robot-relative coordinate frame: X forward, Y left, Z up, origin at
-    // the robot center on the floor. The offsets below come from the CAD
-    // (9143-2025-A-0000 Leviathan STEP, carriage on its hard stop, floor at
-    // the wheel contact): the pivot axis (through-bore centerline) is
-    // 12.01 in forward of the frame center and 13.875 in above the floor.
-    // They have not been checked against an exported glTF model: when one
-    // is attached, confirm they match its component origins (AdvantageScope
-    // docs: "Custom Assets > Articulated components").
-    private static final double ELEVATOR_X_OFFSET = 0.305;  // Meters forward of robot center
-    private static final double ARM_PIVOT_HEIGHT = 0.352;   // Pivot height above the floor at the elevator hard stop (meters)
+    // the robot center on the floor. The CAD offsets (and the arm length)
+    // are LoggingConstants.ELEVATOR_X_OFFSET, ARM_PIVOT_HEIGHT and ARM_LENGTH.
     @AutoLogOutput (key = "Draggables/Components3d")
     private final Pose3d[] componentPoses = {new Pose3d(), new Pose3d(), new Pose3d()};
 
@@ -134,6 +134,10 @@ public class Dashboard {
     // Persistent alerts - shown in the Alerts widget on every tab that has
     // one, and logged automatically. set(true) shows, set(false) clears.
     // ------------------------------------------------------------------
+    /** How to zero the pivot, as the pivot alerts quote it: built from the binding's hold time, so the two agree. */
+    private static final String PIVOT_ZERO_HINT = "operator Start, "
+        + new BigDecimal(Double.toString(ControlsConstants.ZERO_HOLD_SECONDS)).stripTrailingZeros().toPlainString()
+        + " s, disabled";
     private final Alert throughBoreAlert = new Alert(
         "CorAl through bore encoder disconnected - pivot is running on the motor encoder only.",
         AlertType.kError);
@@ -142,11 +146,11 @@ public class Dashboard {
         AlertType.kWarning);
     private final Alert coralBootZeroAlert = new Alert(
         "CorAl pivot: the stored through-bore zero put the arm outside its travel at startup and was refused "
-            + "(has the encoder moved on its shaft?). Put the arm on its base stop and zero it (operator Start, 1 s, disabled).",
+            + "(has the encoder moved on its shaft?). Put the arm on its base stop and zero it (" + PIVOT_ZERO_HINT + ").",
         AlertType.kError);
     private final Alert coralBootAngleAlert = new Alert(
         "CorAl pivot started away from its base: the angle was restored from the stored through-bore zero. "
-            + "If the arm IS on its base stop, the encoder has shifted - zero it (operator Start, 1 s, disabled).",
+            + "If the arm IS on its base stop, the encoder has shifted - zero it (" + PIVOT_ZERO_HINT + ").",
         AlertType.kInfo);
     private final Alert coralFeedbackAlert = new Alert(
         "CorAl motor encoder disagrees with the through bore - it will re-sync when the arm is idle.",
@@ -197,7 +201,7 @@ public class Dashboard {
         testPivotSetpoint = smartDashboard.getEntry("Testing/Pivot Setpoint (deg)");
         testPivotSetpoint.setDefaultDouble(0.0);
         testIntakeSpeed = smartDashboard.getEntry("Testing/Intake Speed");
-        testIntakeSpeed.setDefaultDouble(0.1);
+        testIntakeSpeed.setDefaultDouble(DashboardConstants.TEST_INTAKE_SPEED_DEFAULT);
 
         // Go/Run/Stop buttons: each moves exactly one mechanism (the
         // Superstructure refuses - with a toast - any single-mechanism move
@@ -222,10 +226,10 @@ public class Dashboard {
 
         // --- Superstructure Mechanism2d (Glass / AdvantageScope) ---
         elevatorLigament = superstructureMech.getRoot("Superstructure", 0.75, 0.05)
-            .append(new MechanismLigament2d("Elevator", ARM_PIVOT_HEIGHT, 90, 8,
+            .append(new MechanismLigament2d("Elevator", LoggingConstants.ARM_PIVOT_HEIGHT, 90, 8,
                 new Color8Bit(Color.kOrange)));
         armLigament = elevatorLigament
-            .append(new MechanismLigament2d("Arm", ARM_LENGTH, -180, 6,
+            .append(new MechanismLigament2d("Arm", LoggingConstants.ARM_LENGTH, -180, 6,
                 new Color8Bit(Color.kCyan)));
 
         // --- Sendables (registered once; NT keeps them updated) ---
@@ -283,6 +287,7 @@ public class Dashboard {
         // Registers each Limelight's MJPEG stream under /CameraPublisher so
         // Elastic's Camera Stream widget can display it. The dashboard pulls
         // video straight from the camera; nothing streams through the roboRIO.
+        // (The URL is Limelight's own stream address, not a setting.)
         for (String name : VisionConstants.LIMELIGHT_NAMES) {
             CameraServer.addCamera(new HttpCamera(
                 "limelight-" + name,
@@ -322,21 +327,22 @@ public class Dashboard {
 
         // Mechanism2d: elevator ligament grows with height; arm ligament is
         // drawn relative to the elevator (0 deg tucked = down, 90 = out).
-        elevatorLigament.setLength(ARM_PIVOT_HEIGHT + heightMeters);
+        elevatorLigament.setLength(LoggingConstants.ARM_PIVOT_HEIGHT + heightMeters);
         armLigament.setAngle(armAngleDeg - 180.0);
 
         // 3D component poses for AdvantageScope (robot-relative: X forward,
-        // Y left, Z up). Cascade rigging: the middle stage rises at half the
-        // carriage speed. The arm pitches about the Y axis; the sign and
-        // zero must match the orientation the CAD component was modeled in -
-        // when a 3D model is attached, check it in AdvantageScope and flip or
-        // offset the rotation here if the arm swings backward.
-        componentPoses[LoggingConstants.MIDDLE_STAGE_INDEX] =
-            new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters / 2.0, Rotation3d.kZero);
+        // Y left, Z up). Cascade rigging: the middle stage rises at the
+        // carriage travel divided by the cascade ratio (half). The arm pitches
+        // about the Y axis; the sign and zero must match the orientation the
+        // CAD component was modeled in - when a 3D model is attached, check it
+        // in AdvantageScope and flip or offset the rotation here if the arm
+        // swings backward.
+        componentPoses[LoggingConstants.MIDDLE_STAGE_INDEX] = new Pose3d(LoggingConstants.ELEVATOR_X_OFFSET, 0,
+            heightMeters / ElevatorConstants.ELEVATOR_CASCADE_RATIO, Rotation3d.kZero);
         componentPoses[LoggingConstants.CARRIAGE_INDEX] =
-            new Pose3d(ELEVATOR_X_OFFSET, 0, heightMeters, Rotation3d.kZero);
+            new Pose3d(LoggingConstants.ELEVATOR_X_OFFSET, 0, heightMeters, Rotation3d.kZero);
         componentPoses[LoggingConstants.ARM_INDEX] =
-            new Pose3d(ELEVATOR_X_OFFSET, 0, ARM_PIVOT_HEIGHT + heightMeters,
+            new Pose3d(LoggingConstants.ELEVATOR_X_OFFSET, 0, LoggingConstants.ARM_PIVOT_HEIGHT + heightMeters,
                 new Rotation3d(0, -Units.degreesToRadians(armAngleDeg), 0));
 
         // --- AdvantageKit structured outputs (.wpilog + RLOG live stream) ---
@@ -505,11 +511,11 @@ public class Dashboard {
         elevatorRatioPendingAlert.set(elevator.isTravelRatioChangePending());
         coralFeedbackAlert.set(throughBoreConnected && !coral.isMotorFeedbackValid());
         coralBootZeroAlert.set(coral.isBootZeroRejected());
-        coralBootAngleAlert.set(Math.abs(coral.getBootRestoredAngle()) > 3.0);
+        coralBootAngleAlert.set(Math.abs(coral.getBootRestoredAngle()) > CorAlConstants.PIVOT_BOOT_RESTORED_ALERT_DEG);
         // Resting-voltage check only while disabled - voltage sags under
         // load during a match are normal and would nag the drive team.
         lowBatteryAlert.set(DriverStation.isDisabled()
-            && RobotController.getBatteryVoltage() < 12.0);
+            && RobotController.getBatteryVoltage() < DashboardConstants.LOW_BATTERY_VOLTS);
 
         // --- One-shot toast when the through bore drops out ---
         if (throughBoreWasConnected && !throughBoreConnected) {

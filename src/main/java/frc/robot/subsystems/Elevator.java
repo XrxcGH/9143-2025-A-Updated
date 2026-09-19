@@ -10,7 +10,6 @@ import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkClosedLoopController;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
-import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
 import edu.wpi.first.math.system.plant.DCMotor;
@@ -23,6 +22,7 @@ import edu.wpi.first.wpilibj.simulation.ElevatorSim;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
 import frc.robot.Constants.ElevatorConstants;
+import frc.robot.Constants.TunablesConstants;
 import frc.robot.util.Tunables;
 
 /**
@@ -80,6 +80,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     private boolean positionControlEnabled = false;
     // The pace of the setpoint in effect (one Spark MAX closed-loop slot each)
     private Pace currentPace = Pace.FULL;
+    // Hardware slot identifiers, one per Pace in declaration order (not a setting: the scales are in Pace)
     private static final ClosedLoopSlot[] PACE_SLOTS = {
         ClosedLoopSlot.kSlot0, ClosedLoopSlot.kSlot1, ClosedLoopSlot.kSlot2, ClosedLoopSlot.kSlot3};
 
@@ -105,16 +106,14 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     /** Filtered applied volts at steady cruise, up and down (NaN until seen); see sampleCruiseVolts(). */
     private double cruiseVoltsUp = Double.NaN;
     private double cruiseVoltsDown = Double.NaN;
-    /** Paces the tunable poll so the Preferences reads do not run every loop. */
+    /** Paces the tunable poll (TunablesConstants.TUNABLE_POLL_SECONDS) so the Preferences reads do not run every loop. */
     private final Timer tunablePollTimer = new Timer();
-    private static final double TUNABLE_POLL_SECONDS = 0.5;
 
     // ------------------------------------------------------------------
     // Desktop simulation (only constructed when running off-robot). The
     // physics model exists purely so the mechanism moves in the sim GUI /
-    // AdvantageScope; the values below affect simulation fidelity only.
+    // AdvantageScope; its mass estimate affects simulation fidelity only.
     // ------------------------------------------------------------------
-    private static final double SIM_CARRIAGE_MASS_KG = 6.0; // Estimate - affects sim only
     private SparkMaxSim leftMotorSim;
     private ElevatorSim elevatorSim;
 
@@ -148,7 +147,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
             elevatorSim = new ElevatorSim(
                 DCMotor.getNEO(2),
                 ElevatorConstants.ELEVATOR_GEAR_RATIO,
-                SIM_CARRIAGE_MASS_KG,
+                ElevatorConstants.ELEVATOR_SIM_CARRIAGE_MASS_KG,
                 drumRadiusMeters,
                 Units.inchesToMeters(appliedZeroHeight),
                 Units.inchesToMeters(ElevatorConstants.ELEVATOR_MAX_POSITION),
@@ -202,7 +201,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
 
         leaderConfig
             .inverted(ElevatorConstants.ELEVATOR_LEFT_INVERTED)
-            .idleMode(IdleMode.kBrake)
+            .idleMode(ElevatorConstants.ELEVATOR_IDLE_MODE)
             .smartCurrentLimit(ElevatorConstants.ELEVATOR_CURRENT_LIMIT)
             .voltageCompensation(ElevatorConstants.ELEVATOR_NOMINAL_VOLTAGE);
 
@@ -303,23 +302,26 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
      * kG + kV x v + friction, going down it is kG - kV x v - friction, so
      * their mean is kG. (The hold voltage cannot tell you: inside the static
      * friction band it only echoes the gains already configured.) Samples
-     * are taken only under position control within 5 % of the cruise
-     * velocity, and low-pass filtered per direction. Run a long move each
-     * way - Testing tab, arm at RAISE - and read Elevator/kG From Cruise.
+     * are taken only under position control within
+     * ELEVATOR_CRUISE_SAMPLE_WINDOW of the cruise velocity, and low-pass
+     * filtered per direction. Run a long move each way - Testing tab, arm at
+     * RAISE - and read Elevator/kG From Cruise.
      */
     private void sampleCruiseVolts() {
         if (!positionControlEnabled || appliedCruiseVelocity <= 0) {
             return;
         }
         double velocity = getVelocity();
-        if (Math.abs(Math.abs(velocity) - appliedCruiseVelocity) > 0.05 * appliedCruiseVelocity) {
+        if (Math.abs(Math.abs(velocity) - appliedCruiseVelocity)
+                > ElevatorConstants.ELEVATOR_CRUISE_SAMPLE_WINDOW * appliedCruiseVelocity) {
             return;
         }
         double volts = leftMotor.getAppliedOutput() * leftMotor.getBusVoltage();
+        double filter = ElevatorConstants.ELEVATOR_CRUISE_VOLTS_FILTER;
         if (velocity > 0) {
-            cruiseVoltsUp = Double.isNaN(cruiseVoltsUp) ? volts : cruiseVoltsUp + 0.1 * (volts - cruiseVoltsUp);
+            cruiseVoltsUp = Double.isNaN(cruiseVoltsUp) ? volts : cruiseVoltsUp + filter * (volts - cruiseVoltsUp);
         } else {
-            cruiseVoltsDown = Double.isNaN(cruiseVoltsDown) ? volts : cruiseVoltsDown + 0.1 * (volts - cruiseVoltsDown);
+            cruiseVoltsDown = Double.isNaN(cruiseVoltsDown) ? volts : cruiseVoltsDown + filter * (volts - cruiseVoltsDown);
         }
     }
 
@@ -356,7 +358,8 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     @Override
     public void periodic() {
         sampleCruiseVolts();
-        if (!DriverStation.isDisabled() || !tunablePollTimer.advanceIfElapsed(TUNABLE_POLL_SECONDS)) {
+        if (!DriverStation.isDisabled()
+                || !tunablePollTimer.advanceIfElapsed(TunablesConstants.TUNABLE_POLL_SECONDS)) {
             return;
         }
 
@@ -436,7 +439,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
         // pointless, and it moves the hold by the resting error.
         if (positionControlEnabled
                 && Math.abs(currentTargetPosition - getCurrentPosition()) <= ElevatorConstants.ELEVATOR_HOLD_KEEP_WINDOW
-                && Math.abs(getVelocity()) <= 1.0) {
+                && Math.abs(getVelocity()) <= ElevatorConstants.ELEVATOR_HOLD_KEEP_MAX_SPEED) {
             return;
         }
         setPosition(getCurrentPosition());
@@ -624,6 +627,7 @@ public class Elevator extends SubsystemBase implements CarriageAxis {
     @Override
     public void simulationPeriodic() {
         elevatorSim.setInput(leftMotorSim.getAppliedOutput() * RobotController.getBatteryVoltage());
+        // 0.02 s: the 20 ms robot loop this method runs in (a WPILib timing fact, not a setting)
         elevatorSim.update(0.02);
 
         leftMotorSim.iterate(

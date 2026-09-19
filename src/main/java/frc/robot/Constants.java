@@ -1,20 +1,82 @@
 package frc.robot;
 
+import com.ctre.phoenix6.signals.NeutralModeValue;
+import com.ctre.phoenix6.signals.UpdateModeValue;
+import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
+// CANdle disabled (no CANdle on the robot): import com.ctre.phoenix6.signals.RGBWColor;
+// CANdle disabled (no CANdle on the robot): import com.ctre.phoenix6.signals.StripTypeValue;
+import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
+
 import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.geometry.Translation2d;
 
+import frc.robot.subsystems.Pace;
+
 /**
- * Robot-wide numerical and boolean constants, grouped by subsystem.
- * This class should not be used for any other purpose - all constants are
- * declared globally (public static) and nothing in here is functional code.
+ * Every changeable number and setting on the robot, grouped by what it
+ * configures. A value a person might change (a gain, a tolerance, a timeout,
+ * a speed, a margin, a threshold, a rumble strength, an ID, a port) lives
+ * only in this file, and every other class holds logic only, so the robot is
+ * tuned in one place. What stays in other classes: NetworkTables,
+ * Preferences and log keys, which stay with the code that publishes them
+ * (they are identifiers the Elastic layout, AdvantageScope and the stored
+ * values are bound to, so renaming one breaks its widget or loses its
+ * value); true mathematical, unit and framework constants; the topic names,
+ * strides and indices of an external data format (Limelight's arrays); the
+ * drawing geometry of the dashboard widgets; and the vendor files
+ * (generated/TunerConstants.java from CTRE Tuner X, LimelightHelpers.java,
+ * util/Elastic.java).
  *
  * Conventions used throughout this file:
  *  - Every value carries its unit in the comment (inches, degrees, amps, ...)
  *  - Phoenix 6 (TalonFX) closed-loop gains are voltage-based; Spark MAX PID
  *    gains are duty-cycle-based with voltage feedforward, as noted per section
  *  - Values marked TUNE are safe starting points for on-robot testing;
- *    values marked VERIFY are physical measurements that must be confirmed
- *    before the gains on top of them mean anything
+ *    values marked MEASURE or VERIFY are physical measurements that must be
+ *    confirmed before the gains on top of them mean anything
+ *  - A value that is also a dashboard tunable (util/Tunables.java) is only
+ *    the factory default: see TunablesConstants.DEFAULTS_VERSION
+ *
+ * =========================== TABLE OF CONTENTS ===========================
+ * Nested class (in file order): what it configures / which classes read it
+ *
+ *   ElevatorConstants        elevator IDs, gearing, gains and profile defaults,
+ *                            limits, tolerances, presets, carriage paces
+ *                            read by: Elevator, Pace, Superstructure, Tunables, Dashboard
+ *   CorAlConstants           pivot and roller IDs, gearing, gains and profile
+ *                            defaults, coral detection, through bore, landing
+ *                            correction, roller speeds, presets
+ *                            read by: CorAl, Superstructure, Tunables, RobotContainer, Dashboard
+ *   SuperstructureConstants  CAD clearance table, handoff heights and angles,
+ *                            table walks, setpoint latch, paces per move,
+ *                            score gate, eject timing, reef back-off
+ *                            read by: Superstructure
+ *   LEDConstants             CANdle strip, colors, animations (commented out:
+ *                            no CANdle on the robot)
+ *                            read by: LEDs (commented out)
+ *   ControlsConstants        controller ports, driver and operator trigger
+ *                            thresholds, zeroing hold, rumble cues
+ *                            read by: RobotContainer
+ *   DriveConstants           teleop speed and rotation rate, deadband, speed
+ *                            scaling by carriage height, nudges, teleop drive
+ *                            request type, SysId, swerve sim
+ *                            read by: RobotContainer, Swerve, Tunables
+ *   AutoConstants            PathPlanner feedback gains, path drive request
+ *                            type, auto intake timeout
+ *                            read by: Swerve, RobotContainer
+ *   VisionConstants          cameras and their poses, field, pose-fusion gates
+ *                            and std devs, heading seed, tag classes,
+ *                            alignment goals, tracking gains and drive
+ *                            request type
+ *                            read by: Vision, Swerve, RobotContainer, Dashboard, Tunables
+ *   DashboardConstants       Testing-tab intake default, low-battery alert
+ *                            read by: Dashboard
+ *   TunablesConstants        dashboard tunables' defaults version, poll period
+ *                            and clamp ranges
+ *                            read by: Tunables, Elevator, CorAl
+ *   LoggingConstants         log storage, RLOG port, AdvantageScope component
+ *                            poses and mechanism geometry
+ *                            read by: Robot, Dashboard
  *
  * ============================== CAN ID MAP ==============================
  *   2       Pigeon 2 IMU                     (rio bus)
@@ -29,6 +91,10 @@ import edu.wpi.first.math.geometry.Translation2d;
  *
  * ============================== DIO MAP =================================
  *   0       CorAl through bore encoder (absolute, duty cycle)
+ *
+ * ============================== USB MAP =================================
+ *   0       Driver Xbox controller           (ControlsConstants)
+ *   1       Operator Xbox controller         (ControlsConstants)
  * ========================================================================
  *
  * Swerve drivetrain constants live separately in generated/TunerConstants.java
@@ -49,6 +115,11 @@ public final class Constants {
 		// --- Motor Inversion ---
 		public static final boolean ELEVATOR_LEFT_INVERTED = false;      // True if positive output should be flipped (positive must move the carriage up)
 		public static final boolean ELEVATOR_RIGHT_OPPOSES_LEFT = true; // True if the right motor spins opposite the left
+
+		// --- Idle Mode (both controllers; the follower copies the leader) ---
+		// Brake holds the carriage with the output off. Through 15:1 it still
+		// creeps down about 3 in/s at height, so stow before disabling.
+		public static final IdleMode ELEVATOR_IDLE_MODE = IdleMode.kBrake;
 
 		// --- Current Limits (amps) ---
 		public static final int ELEVATOR_CURRENT_LIMIT = 50; // Spark MAX smart current limit per NEO
@@ -119,7 +190,7 @@ public final class Constants {
 		// ramp, so a full-speed climb peaks near 9 V and keeps ~3 V of headroom
 		// for the position loop on a sagging battery. Full 52 in of travel
 		// takes ~1.5 s. (The Tunables getters clamp the live values to 60 in/s
-		// and 500 in/s^2.)
+		// and 500 in/s^2: TunablesConstants.)
 		// Acceleration is the mast's comfort limit, not the motors': the
 		// trapezoidal profile changes commanded acceleration in a step at the
 		// end of every move (MAXMotion has no S-curve in REVLib 2026, so there
@@ -223,6 +294,13 @@ public final class Constants {
 		// counterbalance is ever added, re-measure - kG drops by whatever
 		// share it carries.
 		public static final double ELEVATOR_kG = 1.0;
+		// "Elevator/kG From Cruise" samples the applied volts only while the
+		// measured speed is within this fraction of the cruise velocity
+		// (steady cruise, off the ramps), and low-pass filters each direction
+		// with this factor per 20 ms loop. TUNE: a wider window lets the
+		// ramps' kA x acceleration into the reading.
+		public static final double ELEVATOR_CRUISE_SAMPLE_WINDOW = 0.05; // Fraction of cruise velocity
+		public static final double ELEVATOR_CRUISE_VOLTS_FILTER = 0.1;   // Filter factor per loop, 0-1
 
 		/** NEO back-EMF velocity feedforward (volts per in/s) for a given carriage travel per motor rotation. */
 		public static double modelKv(double inchesPerRotation) {
@@ -281,10 +359,28 @@ public final class Constants {
 		// --- Manual Control (unitless stick values) ---
 		public static final double ELEVATOR_MANUAL_CONTROL_DEADBAND = 0.2; // Stick deadband
 		// "Hold here" keeps the setpoint the carriage already has when it is at
-		// rest within this of it, instead of issuing a new one at the measured
-		// height (a zero-length profile).
-		public static final double ELEVATOR_HOLD_KEEP_WINDOW = 0.5; // Inches
+		// rest (slower than ELEVATOR_HOLD_KEEP_MAX_SPEED) within this of it,
+		// instead of issuing a new one at the measured height (a zero-length
+		// profile). TUNE.
+		public static final double ELEVATOR_HOLD_KEEP_WINDOW = 0.5;    // Inches
+		public static final double ELEVATOR_HOLD_KEEP_MAX_SPEED = 1.0; // in/s
 		public static final double ELEVATOR_MANUAL_MAX_VOLTS = 3.0;        // Full stick = kG +/- this (about 17 in/s either way)
+
+		// --- Paces (fraction of the tuned cruise velocity and acceleration) ---
+		// One Spark MAX closed-loop slot per Pace (subsystems/Pace.java); a
+		// move at scale s takes 1 / s as long. The Superstructure picks the
+		// pace per move (SuperstructureConstants.*_PACE). FULL is the tuned
+		// profile itself (1.0 by definition, in Pace.java, not a setting).
+		// TUNE the others with SuperstructureSequenceSimTest.pacesCompared
+		// (build/sim/paces.csv), and keep each below 1.0: the scale multiplies
+		// the live profile after the Tunables clamp, so a pace above FULL
+		// could run the carriage past that clamp.
+		public static final double PACE_BRISK_SCALE = 0.8;
+		public static final double PACE_EASY_SCALE = 0.6;
+		public static final double PACE_SLOW_SCALE = 0.4;
+
+		// --- Desktop Simulation (affects the sim GUI only, never the robot) ---
+		public static final double ELEVATOR_SIM_CARRIAGE_MASS_KG = 6.0; // kg; estimate (MEASURE only if sim fidelity matters)
 
 		// --- Preset Heights (inches; bottom of carriage 2x1 to top of base stage 2x1) ---
 		public enum PresetHeights {
@@ -339,6 +435,10 @@ public final class Constants {
 		public static final boolean CORAL_PIVOT_MOTOR_INVERTED = false; // True if positive output should be flipped (positive must raise the arm)
 		public static final boolean CORAL_INTAKE_MOTOR_INVERTED = true; // True if positive output should be flipped (positive must intake coral)
 
+		// --- Neutral Modes ---
+		public static final NeutralModeValue CORAL_PIVOT_NEUTRAL_MODE = NeutralModeValue.Brake;  // Holds the arm with the output off
+		public static final NeutralModeValue CORAL_INTAKE_NEUTRAL_MODE = NeutralModeValue.Brake; // Rollers stop at once and grip a held piece
+
 		// --- Current Limits (amps) ---
 		public static final int CORAL_PIVOT_CURRENT_LIMIT = 30;  // Pivot supply current limit (breaker protection)
 		// Stator limit caps the pivot's torque (a Kraken through 65:1 can
@@ -391,6 +491,13 @@ public final class Constants {
 		public static final double CORAL_PIVOT_MAX_VELOCITY = 300.0;     // Cruise velocity (deg/s)
 		public static final double CORAL_PIVOT_MAX_ACCELERATION = 800.0; // Acceleration (deg/s^2)
 		public static final double CORAL_PIVOT_MAX_JERK = 6000.0;        // Jerk limit (deg/s^3); 0.13 s to reach full accel
+		// ArmAxis.setProfileScale runs the whole profile slower (cruise x s,
+		// acceleration x s^2, jerk x s^3) so a sweep can be paced to the
+		// carriage. Never below this fraction of the tuned profile (TUNE), and
+		// a change smaller than the deadband is not sent, since each send is
+		// a CAN config write.
+		public static final double PIVOT_PROFILE_SCALE_MIN = 0.3;       // Fraction of the tuned profile
+		public static final double PIVOT_PROFILE_SCALE_DEADBAND = 0.01; // Fraction of the tuned profile
 
 		// --- Closed-Loop Gains (Phoenix 6 slot 0; voltage-based, error in mechanism rotations) ---
 		// TUNE - procedure after any mechanical change:
@@ -507,6 +614,9 @@ public final class Constants {
 		// itself, which looks like a dead button.
 		public static final boolean GAME_PIECE_DETECTION_ENABLED = true;
 		public static final double GAME_PIECE_FOV_DEGREES = 13.5;                // Field of view, both axes (6.75 min, 27 max); narrow keeps claw structure out of the beam
+		// Short-range mode at 100 Hz: the coral sits centimeters away, and
+		// short range is the more reliable mode at that distance.
+		public static final UpdateModeValue GAME_PIECE_UPDATE_MODE = UpdateModeValue.ShortRange100Hz;
 
 		// --- Roller Speeds (duty cycle, -1 to 1; positive = coral intake direction) ---
 		public static final double CORAL_INTAKE_SPEED = 0.1;   // Intaking coral (auto-stops on detection)
@@ -526,6 +636,17 @@ public final class Constants {
 		// shaft, scale this by that stage's ratio.
 		public static final double THROUGH_BORE_DEGREES_PER_ROTATION = 360.0;
 		public static final double THROUGH_BORE_ALLOWED_DISCREPANCY = 2.0; // Max motor-vs-through-bore disagreement before re-sync
+		// The through-bore zero is stored on the roboRIO and restored at every
+		// start, so a restart with the arm raised keeps the real angle. A
+		// restored angle outside this range is refused (the encoder has moved
+		// on its shaft) and the dashboard raises an alert; the range reaches
+		// a little past each end of travel. VERIFY after any work on the
+		// through bore mount.
+		public static final double PIVOT_BOOT_RESTORE_MIN_ANGLE = -10.0; // Degrees
+		public static final double PIVOT_BOOT_RESTORE_MAX_ANGLE = CORAL_PIVOT_MAX_ANGLE + 10.0; // Degrees
+		// A restored angle farther than this from the base raises the
+		// dashboard's "started away from its base" info alert. TUNE.
+		public static final double PIVOT_BOOT_RESTORED_ALERT_DEG = 3.0; // Degrees
 		// The rotor is re-seeded from the through bore at the start of a move
 		// only if the arm is slower than this: a seed taken at speed is stale
 		// by the sensor + CAN latency and steps the closed loop's feedback.
@@ -547,6 +668,10 @@ public final class Constants {
 		public static final int PIVOT_LANDING_MAX_CORRECTIONS = 3;
 		public static final double PIVOT_LANDING_STEADY_DEG = 0.5;   // Through bore must stay inside this band to count as still
 		public static final double PIVOT_LANDING_END_ZONE_DEG = 3.0; // No corrections this close to either end of travel
+
+		// --- Desktop Simulation (affects the sim GUI only, never the robot) ---
+		public static final double CORAL_SIM_ARM_LENGTH_METERS = 0.4; // Meters; estimate (MEASURE only if sim fidelity matters)
+		public static final double CORAL_SIM_ARM_MASS_KG = 4.0;       // kg; estimate (MEASURE only if sim fidelity matters)
 
 		// --- Preset Angles (degrees) ---
 		// 0 deg is the CAD's intake pose: the claw points up and ~33 deg past
@@ -830,12 +955,137 @@ public final class Constants {
 		// Same idea for a mid-sequence "arm has arrived" wait: the S-curve
 		// takes ~0.1 s to get the arm above the stopped threshold.
 		public static final double ARM_ARRIVED_MIN_SECONDS = 0.15;
+
+		// --- Table walks (Superstructure) ---
+		// Resolution of the single-mechanism path checks (elevatorPathClear /
+		// pivotPathClear, used by the Testing-tab moves). VERIFY they stay
+		// finer than the table (rows 5 deg apart, band edges on 0.5 in), so a
+		// check cannot step over a blocked band.
+		public static final double PATH_CHECK_HEIGHT_STEP = 0.25; // Inches
+		public static final double PATH_CHECK_ANGLE_STEP = 0.5;   // Degrees
+		// The carriage clamp (ceilingForSweep / floorForSweep) samples the
+		// arm's remaining sweep every SWEEP_STEP, half a table row.
+		// The scoring poses sit ON row edges (L4 is 20.0 deg, L3 25.0), so an
+		// arm at rest reads either side of the edge from one loop to the next
+		// - and the two rows' limits differ by 2 to 5.5 in, which would send
+		// the carriage back and forth between them. Where the arm IS, the walk
+		// therefore takes the tighter of the rows within EDGE_WINDOW of it:
+		// constant while the arm sits on the edge, and conservative.
+		// A blocked row within IMMINENT_SWEEP of the arm is one the arm is
+		// about to enter. A measured angle is nudged in SNAP_ANGLE_STEP steps
+		// (at most SAFE_ANGLE_TOLERANCE) onto a row that holds the height
+		// (snapIntoTable). VERIFY with SuperstructureCorridorTest and
+		// SuperstructureSequenceSimTest after any change.
+		public static final double SWEEP_STEP = 2.5;      // Degrees
+		public static final double EDGE_WINDOW = 1.5;     // Degrees
+		public static final double IMMINENT_SWEEP = 5.0;  // Degrees
+		public static final double SNAP_ANGLE_STEP = 1.0; // Degrees
+
+		// --- Carriage setpoint latch (Superstructure.commandCarriage) ---
+		// Every new setpoint restarts the MAXMotion profile, so the latch
+		// sends one only when the clamp has moved far enough. TUNE with
+		// SuperstructureSequenceSimTest, which fails a move whose setpoints
+		// alternate or flood the controller.
+		// raiseArm puts the carriage back only if an exit moved it at least
+		// this far (never a zero-length move).
+		public static final double RAISE_ARM_PUT_BACK_MIN = 0.5; // Inches
+		// Targets closer than this to the commanded height do not change the
+		// ratchet's direction.
+		public static final double DIRECTION_EPSILON = 0.01; // Inches
+		// Smallest clamp advance worth a profile restart while the carriage is
+		// moving. As the arm sweeps, the clamp climbs the table one row at a
+		// time (1-1.5 in every 20-40 ms); sending each stair would give the L4
+		// climb some fifteen setpoints, a dozen of them within 0.4 s, every one
+		// a profile restart - a visibly jumpy climb. Waiting for a run worth
+		// having makes it four or five.
+		public static final double LATCH_MIN_STEP = 4.0; // Inches
+		// A carriage at rest waits rather than start a run to a clamp shorter
+		// than this (see commandCarriage).
+		public static final double LATCH_MIN_RUN = 8.0; // Inches
+		// Below this speed the carriage is waiting on the arm: any real
+		// advance of at least LATCH_CRAWL_MIN_STEP is sent, so it keeps moving.
+		public static final double LATCH_CRAWL_SPEED = 3.0;    // in/s
+		public static final double LATCH_CRAWL_MIN_STEP = 0.5; // Inches
+		// A clamp that moves back by less than this is ignored (arm-angle
+		// chatter at a gate).
+		public static final double LATCH_RETREAT_MIN = 0.25; // Inches
+		// A carriage that is past its clamp by no more than this comes back to
+		// the clamp; further than that it stops. Coming back matters: the
+		// arm-side clamp only opens a row once the carriage is inside it, so a
+		// carriage that arrived half an inch high and held there would leave
+		// each mechanism waiting for the other.
+		public static final double LATCH_RETREAT_MAX = 1.5; // Inches
+		// L4 exit: the carriage is re-targeted from L4_RETURN_SHAPE_HEIGHT to
+		// the drop height, and paced, this far before it reaches the shaping
+		// height, so it never stops at that waypoint. TUNE with
+		// SuperstructureSequenceSimTest.pacesCompared.
+		public static final double L4_RETURN_SHAPE_WINDOW = 1.0; // Inches
+
+		// --- Carriage pace per move (ElevatorConstants.PACE_*) ---
+		// The arm is the long pole of every move into or out of an upper pose;
+		// at full pace the carriage reaches each clearance limit before the arm
+		// has opened it, brakes, and is released again. TUNE with
+		// SuperstructureSequenceSimTest.pacesCompared (build/sim/paces.csv):
+		// each is the fastest pace at which the carriage never has to slow
+		// for the arm.
+		// (Superstructure copies them into fields that test varies.)
+		// L4 climb: BRISK. With the arm's 0.2 s release lead the sim runs it
+		// hitch-free even at FULL (1.66 s), but barely - the carriage reaches
+		// its 35.5 in clamp as the arm opens it - and a real arm lags its
+		// profile; BRISK (1.96 s) has ~0.15 s in hand and never drops below
+		// cruise.
+		public static final Pace CLIMB_TO_L4_PACE = Pace.BRISK;
+		// L3 climb: FULL - the carriage has no clamp to wait at once the roof
+		// has opened.
+		public static final Pace CLIMB_TO_L3_PACE = Pace.FULL;
+		// L4 exit, from the shaping height to the station: SLOW, so the
+		// carriage is still moving when the arm opens the drop height and the
+		// station (2.02 s, never under ~7 in/s; at FULL it is 2.00 s with two
+		// dead stops).
+		public static final Pace L4_EXIT_PACE = Pace.SLOW;
+		// From an algae pose the arm has 140 deg to come round before L4.
+		public static final Pace ALGAE_TO_L4_PACE = Pace.EASY;
+
+		// --- Score gate (Superstructure.readyToScore) ---
+		// How close to the preset the measured pose must be, and how still
+		// both mechanisms must be, before a score is released. TUNE.
+		public static final double SCORE_READY_HEIGHT_TOL = 0.75;        // Inches
+		public static final double SCORE_READY_ANGLE_TOL = 3.0;          // Degrees
+		public static final double SCORE_READY_MAX_ELEVATOR_SPEED = 2.0; // in/s
+		public static final double SCORE_READY_MAX_PIVOT_SPEED = 15.0;   // deg/s
+		// "Landed": once both mechanisms have been still this long the pose is
+		// as good as it is going to get, and a wider angle window counts. The
+		// loop closes on the rotor and the chain has slack, so the through
+		// bore can come to rest a few degrees past the target; CorAl's landing
+		// correction normally pulls it back in, but the score button must
+		// NEVER be locked out by it - with only the tight window, the one way
+		// left to score would be by hand. The height gate is NOT relaxed: above
+		// the 48 in pre-top height the carriage only gets there with the arm
+		// inside 22.5 deg.
+		public static final double SCORE_READY_LANDED_ANGLE_TOL = 8.0; // Degrees
+		public static final double SCORE_READY_LANDED_SECONDS = 0.6;   // Seconds
+
+		// --- Eject and back-off (Superstructure.score, ejectCoral, scoreAlgae) ---
+		// A coral eject runs the rollers at least CORAL_EJECT_SECONDS and then
+		// until the CANrange no longer sees the coral, for at most
+		// CORAL_EJECT_CLEAR_TIMEOUT_SECONDS more; still detected, the score
+		// keeps the pose for a second try. An algae eject is timed only. TUNE.
+		public static final double CORAL_EJECT_SECONDS = 0.5;               // Seconds
+		public static final double CORAL_EJECT_CLEAR_TIMEOUT_SECONDS = 1.0; // Seconds
+		public static final double ALGAE_EJECT_SECONDS = 0.5;               // Seconds
+		// Distance the drivetrain must travel from where it ejected before an
+		// L3/L4 exit may start. Leaving those poses swings the claw through
+		// 75-110 deg, where it reaches 9-12 in (8.9-11.7 in the CAD) past the
+		// front bumper face - into the reef if the robot is still flush
+		// against it. VERIFY against the claw's reach if the arm changes.
+		public static final double REEF_BACKOFF_METERS = 0.35;
 	}
 
 	// CANdle disabled (Sept 2026): there is no CANdle on the robot, so the LED
 	// subsystem (subsystems/LEDs.java) and its constants are commented out.
-	// To restore: uncomment this block, every line of LEDs.java, and the lines
-	// marked "CANdle disabled" in RobotContainer.java and Dashboard.java.
+	// To restore: uncomment this block, the two imports marked "CANdle
+	// disabled" at the top of this file, every line of LEDs.java, and the
+	// lines marked "CANdle disabled" in RobotContainer.java and Dashboard.java.
 	//
 	// /**
 	//  * Constants for the LED subsystem (CTRE CANdle).
@@ -849,13 +1099,71 @@ public final class Constants {
 	// 	// --- Strip Configuration ---
 	// 	public static final int LED_COUNT = 68;       // Total LEDs: 8 onboard + strip (VERIFY - set to actual strip length)
 	// 	public static final double BRIGHTNESS = 0.6;  // Global brightness scalar 0-1 (limits current draw on long strips)
+	// 	// GRB is the byte order of common WS2812 / NeoPixel strips. VERIFY on
+	// 	// the installed strip: change it if colors appear swapped.
+	// 	public static final StripTypeValue STRIP_TYPE = StripTypeValue.GRB;
 	//
 	// 	// --- Timing (seconds) ---
 	// 	public static final double ENDGAME_WARNING_TIME = 20.0; // Teleop time remaining when the endgame pattern starts
+	//
+	// 	// --- Colors (RGBW, 0-255; the white channel is 0 for standard RGB strips; TUNE) ---
+	// 	public static final RGBWColor RED_ALLIANCE_COLOR = new RGBWColor(255, 0, 0);
+	// 	public static final RGBWColor BLUE_ALLIANCE_COLOR = new RGBWColor(0, 0, 255);
+	// 	public static final RGBWColor NO_ALLIANCE_COLOR = new RGBWColor(120, 0, 255); // Purple: the alliance is not known yet
+	// 	public static final RGBWColor GAME_PIECE_COLOR = new RGBWColor(0, 255, 0);    // Green: game piece held
+	// 	public static final RGBWColor TRACKING_COLOR = new RGBWColor(0, 200, 255);    // Cyan: vision tracking
+	// 	public static final RGBWColor ENDGAME_COLOR = new RGBWColor(255, 180, 0);     // Yellow: endgame
+	//
+	// 	// --- Animations (frames per second; Larson size in LEDs; TUNE) ---
+	// 	public static final int STROBE_FRAME_RATE = 8;
+	// 	public static final int LARSON_SIZE = 6;
+	// 	public static final int LARSON_FRAME_RATE = 30;
+	// 	public static final int RAINBOW_FRAME_RATE = 40;
 	// }
 
 	/**
-	 * Constants for teleop driving.
+	 * Constants for the driver and operator controllers (RobotContainer).
+	 */
+	public static final class ControlsConstants {
+		// --- Driver Station USB ports (VERIFY in the Driver Station's USB tab) ---
+		public static final int DRIVER_CONTROLLER_PORT = 0;
+		public static final int OPERATOR_CONTROLLER_PORT = 1;
+
+		// Driver trigger travel (0-1) that starts a hold-to-align. TUNE.
+		public static final double ALIGN_TRIGGER_THRESHOLD = 0.3;
+		// Operator trigger travel (0-1) that counts as a pull: LT (HOME), RT
+		// (score) and, under the manual take-over, LT / RT (rollers in / out).
+		// 0.5 is WPILib's default. TUNE with the operator.
+		public static final double OPERATOR_TRIGGER_THRESHOLD = 0.5;
+		// Operator Back / Start must be held this long, disabled only, to zero
+		// the elevator / the pivot, so a brushed button zeroes nothing. TUNE.
+		public static final double ZERO_HOLD_SECONDS = 1.0; // Seconds
+
+		// --- Rumble cues (strength 0-1, seconds; TUNE with the drive team) ---
+		// Coral acquired: both controllers, one long buzz (leave the station).
+		public static final double RUMBLE_ACQUIRED_STRENGTH = 1.0;
+		public static final double RUMBLE_ACQUIRED_SECONDS = 0.4;
+		// Pose reached: operator, short buzzes (the score trigger is live).
+		public static final int RUMBLE_POSE_READY_COUNT = 2;
+		public static final double RUMBLE_POSE_READY_STRENGTH = 0.8;
+		public static final double RUMBLE_POSE_READY_ON_SECONDS = 0.12;
+		public static final double RUMBLE_POSE_READY_OFF_SECONDS = 0.10;
+		// Aligned and pose reached: driver, steady light buzz (fire).
+		public static final double RUMBLE_ALIGNED_STRENGTH = 0.5;
+		// Scored at L3 / L4 and waiting for room, or a move waiting for the
+		// reef to be clear: driver, slow pulses, repeated (back away).
+		public static final int RUMBLE_BACK_AWAY_COUNT = 2;
+		public static final double RUMBLE_BACK_AWAY_STRENGTH = 0.6;
+		public static final double RUMBLE_BACK_AWAY_ON_SECONDS = 0.15;
+		public static final double RUMBLE_BACK_AWAY_OFF_SECONDS = 0.35;
+		// Score pulled with nothing to score from: operator, one tick.
+		public static final double RUMBLE_NO_SCORE_STRENGTH = 0.4;
+		public static final double RUMBLE_NO_SCORE_SECONDS = 0.08;
+	}
+
+	/**
+	 * Constants for teleop driving (RobotContainer) and the drivetrain's
+	 * SysId routines and desktop simulation (Swerve).
 	 */
 	public static final class DriveConstants {
 		// Fraction of the drivetrain's theoretical top speed (and top
@@ -865,9 +1173,46 @@ public final class Constants {
 		// indoor testing, raise toward 1.0 for competition driving.
 		public static final double TELEOP_SPEED_SCALE = 0.25;
 
+		// Rotation rate at full stick before the speed scale: 3/4 rotation
+		// per second. TUNE with the drivers.
+		public static final double MAX_ANGULAR_RATE_ROT_PER_SEC = 0.75; // Rotations per second
+
 		// Stick deadband as a fraction of the scaled top speed (so it stays
 		// 20% of stick travel at every speed scale).
 		public static final double STICK_DEADBAND = 0.2;
+
+		// --- Speed scaling by carriage height ---
+		// Above SLOW_START_HEIGHT the driver's speed (and rotation rate) is
+		// scaled down linearly, reaching SLOW_MIN_SCALE at SLOW_FULL_HEIGHT
+		// and above. TUNE with the drivers.
+		public static final double SLOW_START_HEIGHT = 16.5; // Inches (the low box roof)
+		public static final double SLOW_FULL_HEIGHT = 45.0;  // Inches
+		public static final double SLOW_MIN_SCALE = 0.40;    // Fraction of the scaled speed
+
+		// D-pad nudges: robot-centric, in all eight directions. TUNE.
+		public static final double NUDGE_SPEED = 0.5; // m/s
+
+		// How the modules drive the teleop sticks and the nudges. Closed-loop
+		// velocity: every module tracks the requested ground speed regardless
+		// of battery sag, and teleop feels the same as autonomous path
+		// following. OpenLoopVoltage is the alternative (the sticks set power,
+		// so the robot slows as the battery sags). TUNE with the drivers.
+		public static final DriveRequestType TELEOP_DRIVE_REQUEST_TYPE = DriveRequestType.Velocity;
+
+		// --- SysId (Test mode only; logged by SignalLogger) ---
+		// TUNE if a test browns out the robot or barely moves it.
+		// Translation: dynamic step reduced to 4 V to prevent a brownout.
+		public static final double SYSID_TRANSLATION_STEP_VOLTS = 4; // Volts
+		public static final double SYSID_STEER_STEP_VOLTS = 7;       // Volts
+		// Rotation runs in rad/s, which SysId only accepts as "volts": the
+		// ramp is rad/s per second (passed as V/s), the step rad/s (as V).
+		public static final double SYSID_ROTATION_RAMP_RATE = Math.PI / 6; // rad/s per second
+		public static final double SYSID_ROTATION_STEP = Math.PI;          // rad/s
+
+		// Desktop simulation: the swerve sim thread runs at this period,
+		// faster than the 20 ms robot loop, so the PID gains behave more
+		// reasonably. Affects the sim only.
+		public static final double SIM_LOOP_PERIOD_SECONDS = 0.005; // Seconds (5 ms)
 	}
 
 	/**
@@ -888,6 +1233,12 @@ public final class Constants {
 		public static final double ROTATION_kP = 5.0; // TUNE - PathPlanner's recommended starting point
 		public static final double ROTATION_kI = 0.0;
 		public static final double ROTATION_kD = 0.0;
+
+		// How the modules drive the path follower's commands. Closed-loop
+		// velocity: PathPlanner's feedforward is a ground speed, and each
+		// module reaches it regardless of battery voltage, which the gains
+		// above assume. VERIFY the paths again after any change.
+		public static final DriveRequestType PATH_DRIVE_REQUEST_TYPE = DriveRequestType.Velocity;
 
 		// Named-command timeout: how long an auto waits at a coral station for
 		// the CANrange to confirm a coral before moving on
@@ -1038,11 +1389,19 @@ public final class Constants {
 		// unambiguous and close; these are Limelight's documented thresholds.
 		public static final double MT1_SINGLE_TAG_MAX_AMBIGUITY = 0.7;
 		public static final double MT1_SINGLE_TAG_MAX_DISTANCE_METERS = 3.0;
+		// Tag count from which a MegaTag1 solve is a strong heading seed: its
+		// heading is fused with MT1_MULTI_TAG_ROTATION_STD_DEV, and it may set
+		// the auto-start heading (Swerve.resetPoseForAuto, with the
+		// HEADING_SEED_* rules) and the driver's forward before the first
+		// driver zero. A single-tag solve carries the pose-flip ambiguity.
+		// TUNE: 3 trusts only solves with a wider tag spread.
+		public static final int MT1_STRONG_SEED_MIN_TAGS = 2;
 		// Heading std devs (rad) for MegaTag1 while seeding. The estimator only
 		// closes part of the heading error per fused solve (about 2/3 at 0.05
 		// against its 0.1 rad state std dev), and the disabled throttle yields
-		// ~1 solve/s, so 2+ tag solves are trusted tightly to converge in a
-		// few seconds; a lone tag (already gated on ambiguity/distance) less so.
+		// ~1 solve/s, so strong (2+ tag) solves are trusted tightly to converge
+		// in a few seconds; fewer tags (a lone tag is already gated on
+		// ambiguity/distance) less so.
 		public static final double MT1_MULTI_TAG_ROTATION_STD_DEV = 0.05;
 		public static final double MT1_SINGLE_TAG_ROTATION_STD_DEV = 0.3;
 		// MegaTag2 translations from distant tags add little and can jump
@@ -1060,6 +1419,24 @@ public final class Constants {
 		// MegaTag1 is fused for this long so the pose heading corrects from
 		// tag geometry
 		public static final double HEADING_RESEED_WINDOW_SECONDS = 2.0;
+		// Spin rejection (Swerve): vision poses are dropped while the robot
+		// turns faster than this, and for a short time after the spin ends
+		// (motion blur and rolling shutter corrupt the solve, and the image
+		// was captured 25-100 ms before it arrives, so the last smeared
+		// frames come in after the spin). TUNE.
+		public static final double VISION_MAX_OMEGA_RAD_PER_SEC = 2.0;     // rad/s
+		public static final double VISION_REJECT_AFTER_SPIN_SECONDS = 0.2; // Seconds
+
+		// --- Pose-estimate standard deviations (Vision.updateRobotPosition) ---
+		// Translation std dev = XY_STD_DEV_BASE + XY_STD_DEV_PER_DISTANCE_SQUARED
+		// x (average tag distance)^2 / tag count: confidence grows with tag
+		// count and closeness. MegaTag2's heading is the robot's own gyro
+		// echoed back, so its rotation std dev is effectively infinite. TUNE.
+		public static final double XY_STD_DEV_BASE = 0.3;                 // Meters
+		public static final double XY_STD_DEV_PER_DISTANCE_SQUARED = 0.4; // Meters per m^2 of average tag distance
+		public static final double MT2_ROTATION_STD_DEV = 9999999;        // Radians (heading ignored)
+		// The Field widget draws each camera's last fused pose for this long.
+		public static final double FUSED_POSE_DISPLAY_SECONDS = 1.0; // Seconds
 
 		// --- Tag Classes (2025 Reefscape field) ---
 		// Which tag IDs belong to each alignment class. A tag in none of these
@@ -1128,6 +1505,11 @@ public final class Constants {
 			public static final double MIN_LINEAR_VELOCITY = 0.12; // m/s
 			public static final double MAX_LINEAR_VELOCITY = 2.0;  // m/s command clamp while tracking
 			public static final double MAX_ANGULAR_VELOCITY = 1.0; // rad/s command clamp while tracking
+			// How the modules drive the tracking commands. Closed-loop
+			// velocity: open loop, the small commands the servo produces near
+			// its deadbands would never overcome static friction. VERIFY the
+			// alignment again after any change.
+			public static final DriveRequestType DRIVE_REQUEST_TYPE = DriveRequestType.Velocity;
 
 			// Commands are slew-limited: an unlimited P output steps (0 to
 			// 2 m/s on the first loop, and to zero the instant a frame is
@@ -1137,6 +1519,11 @@ public final class Constants {
 			// does not cause overshoot on the way in.
 			public static final double MAX_LINEAR_ACCELERATION = 3.0;  // m/s^2
 			public static final double MAX_ANGULAR_ACCELERATION = 6.0; // rad/s^2
+			// The slew limiter's time step is clamped to this range, so a loop
+			// overrun (or the first loop of a new command) cannot let a step
+			// through. TUNE.
+			public static final double SLEW_MIN_DT_SECONDS = 0.005; // Seconds
+			public static final double SLEW_MAX_DT_SECONDS = 0.05;  // Seconds
 
 			// Once inside the deadbands the robot holds still until an error
 			// grows past deadband x this. Without the gap, an error sitting ON
@@ -1166,6 +1553,10 @@ public final class Constants {
 			public static final double CONTACT_FORWARD_ERROR = 0.10; // Meters
 			public static final double CONTACT_MAX_SPEED = 0.04;     // m/s measured
 			public static final double CONTACT_SECONDS = 0.3;
+			// "Told to move" = the slewed command is at least this fraction of
+			// MIN_LINEAR_VELOCITY: a little under the floor, so a command
+			// resting on the floor always counts. TUNE.
+			public static final double CONTACT_MIN_COMMAND_FRACTION = 0.9;
 
 			// The tracker keeps its first tag, and while that tag is out of
 			// view carries its last sighting on odometry, for this long: the
@@ -1178,7 +1569,125 @@ public final class Constants {
 	}
 
 	/**
-	 * Constants for AdvantageKit / AdvantageScope logging output.
+	 * Constants for the Elastic dashboard (Dashboard): the Testing tab's
+	 * defaults and the alert thresholds that are not a mechanism's own.
+	 */
+	public static final class DashboardConstants {
+		// Roller duty cycle the Testing tab's Intake Speed slider starts at
+		// (seeded only while no value is stored). TUNE.
+		public static final double TEST_INTAKE_SPEED_DEFAULT = 0.1; // Duty cycle, -1 to 1
+		// The low-battery alert fires while disabled below this resting
+		// voltage (sags under load in a match are normal). VERIFY against the
+		// team's battery beak readings.
+		public static final double LOW_BATTERY_VOLTS = 12.0; // Volts
+	}
+
+	/**
+	 * Constants for the dashboard tunables (util/Tunables.java): the factory
+	 * defaults version, the poll period, and the clamp range of every
+	 * numeric tunable. The defaults themselves live with their mechanism
+	 * above.
+	 */
+	public static final class TunablesConstants {
+		// Version stamp of the factory defaults in Constants. Stored values
+		// survive deploys, so changing a default does nothing on a robot that
+		// already has the key stored - unless this number is bumped. On the
+		// first boot after a bump, Tunables.init() does one of two things:
+		//   - if it has a targeted migration block for the stored version, it
+		//     overwrites only the keys named there and keeps everything else
+		//     the team has tuned on the dashboard;
+		//   - otherwise it overwrites every tunable with the new defaults.
+		// Bump it when a default changes and must take effect on the robot
+		// (and add a migration block when only a few defaults moved); leave it
+		// alone to preserve values tuned on the dashboard.
+		// Version 15 is the set of defaults as released (Sept 2026); earlier
+		// versions were pre-release tuning rounds.
+		public static final int DEFAULTS_VERSION = 15;
+
+		// The Elevator and the CorAl check the tunables this often while
+		// disabled, and re-apply an edit to their controllers. TUNE.
+		public static final double TUNABLE_POLL_SECONDS = 0.5; // Seconds (twice a second)
+
+		// --- Clamp ranges ---
+		// Every numeric getter clamps its live value to [MIN, MAX], so a typo
+		// on the dashboard cannot command something dangerous (the tracking
+		// gains' ceiling is a multiple of their default, below; the two on/off
+		// tunables read as on at 0.5 or more and need no range). VERIFY that
+		// a new default lies inside its range.
+		// Drive: can neither disable driving nor exceed the drivetrain.
+		public static final double TELEOP_SPEED_SCALE_MIN = 0.05;          // Fraction
+		public static final double TELEOP_SPEED_SCALE_MAX = 1.0;           // Fraction
+		// Elevator calibration: a typo cannot scale the encoder by more than
+		// ~3x either way; a hard-stop height beyond a few inches is a
+		// measurement error.
+		public static final double ELEVATOR_TRAVEL_RATIO_MIN = 0.33;       // Measured / modeled
+		public static final double ELEVATOR_TRAVEL_RATIO_MAX = 3.0;        // Measured / modeled
+		public static final double ELEVATOR_ZERO_HEIGHT_MIN = 0.0;         // Inches
+		public static final double ELEVATOR_ZERO_HEIGHT_MAX = 6.0;         // Inches
+		// Elevator gains and profile. kA's ceiling is about three times the
+		// CAD model: more would mean the carriage weighs far more than the
+		// CAD says.
+		public static final double ELEVATOR_KP_MIN = 0.0;                  // Duty per inch
+		public static final double ELEVATOR_KP_MAX = 2.0;                  // Duty per inch
+		public static final double ELEVATOR_KS_MIN = 0.0;                  // Volts
+		public static final double ELEVATOR_KS_MAX = 3.0;                  // Volts
+		public static final double ELEVATOR_KV_SCALE_MIN = 0.0;            // x free-speed model
+		public static final double ELEVATOR_KV_SCALE_MAX = 2.0;            // x free-speed model
+		public static final double ELEVATOR_KA_MIN = 0.0;                  // V per in/s^2
+		public static final double ELEVATOR_KA_MAX = 0.012;                // V per in/s^2
+		public static final double ELEVATOR_KG_MIN = 0.0;                  // Volts
+		public static final double ELEVATOR_KG_MAX = 3.0;                  // Volts
+		public static final double ELEVATOR_CRUISE_VELOCITY_MIN = 0.5;     // in/s
+		public static final double ELEVATOR_CRUISE_VELOCITY_MAX = 60.0;    // in/s
+		public static final double ELEVATOR_MAX_ACCELERATION_MIN = 1.0;    // in/s^2
+		public static final double ELEVATOR_MAX_ACCELERATION_MAX = 500.0;  // in/s^2
+		public static final double ELEVATOR_PROFILE_ERROR_MIN = 0.05;      // Inches
+		public static final double ELEVATOR_PROFILE_ERROR_MAX = 5.0;       // Inches
+		// Pivot profile (cruise below the ~550 deg/s free speed) and gravity.
+		// Phoenix clamps the gravity offset to +/-0.25 rot silently, hence the
+		// 1-179 deg balance angle; kG's ceiling is about three times the CAD
+		// estimate (~0.3 V). Jerk 0 disables the limit (a plain trapezoid).
+		public static final double PIVOT_CRUISE_VELOCITY_MIN = 10.0;       // deg/s
+		public static final double PIVOT_CRUISE_VELOCITY_MAX = 500.0;      // deg/s
+		public static final double PIVOT_MAX_ACCELERATION_MIN = 20.0;      // deg/s^2
+		public static final double PIVOT_MAX_ACCELERATION_MAX = 3000.0;    // deg/s^2
+		public static final double PIVOT_MAX_JERK_MIN = 0.0;               // deg/s^3
+		public static final double PIVOT_MAX_JERK_MAX = 50000.0;           // deg/s^3
+		public static final double PIVOT_KG_MIN = 0.0;                     // Volts
+		public static final double PIVOT_KG_MAX = 1.0;                     // Volts
+		public static final double PIVOT_BALANCE_ANGLE_MIN = 1.0;          // Degrees
+		public static final double PIVOT_BALANCE_ANGLE_MAX = 179.0;        // Degrees
+		// Coral detection (CANrange)
+		public static final double CORAL_DETECT_DISTANCE_MIN = 0.02;       // Meters
+		public static final double CORAL_DETECT_DISTANCE_MAX = 4.0;        // Meters
+		public static final double CORAL_DETECT_HYSTERESIS_MIN = 0.0;      // Meters
+		public static final double CORAL_DETECT_HYSTERESIS_MAX = 0.1;      // Meters
+		public static final double CORAL_MIN_SIGNAL_STRENGTH_MIN = 0.0;    // Unitless
+		public static final double CORAL_MIN_SIGNAL_STRENGTH_MAX = 30000.0; // Unitless
+		// Vision goals (by magnitude: a pasted negative Vision/Distance cannot
+		// invert a goal)
+		public static final double REEF_FLUSH_DISTANCE_MIN = 0.3;          // Meters
+		public static final double REEF_FLUSH_DISTANCE_MAX = 2.0;          // Meters
+		public static final double STATION_FLUSH_DISTANCE_MIN = 0.3;       // Meters
+		public static final double STATION_FLUSH_DISTANCE_MAX = 2.0;       // Meters
+		public static final double L1_SCORE_DISTANCE_MIN = 0.3;            // Meters
+		public static final double L1_SCORE_DISTANCE_MAX = 3.0;            // Meters
+		public static final double BARGE_SCORE_DISTANCE_MIN = 0.3;         // Meters
+		public static final double BARGE_SCORE_DISTANCE_MAX = 3.0;         // Meters
+		public static final double PROCESSOR_DISTANCE_MIN = 0.3;           // Meters
+		public static final double PROCESSOR_DISTANCE_MAX = 2.0;           // Meters
+		public static final double REEF_BRANCH_OFFSET_MIN = 0.0;           // Meters
+		public static final double REEF_BRANCH_OFFSET_MAX = 0.5;           // Meters
+		// Tracking gains: 0 to this multiple of the default, so a mistyped
+		// value cannot invert or destabilize the servo.
+		public static final double TRACKING_DISTANCE_KP_MIN = 0.0;         // m/s per m
+		public static final double TRACKING_ROTATION_KP_MIN = 0.0;         // rad/s per deg
+		public static final double TRACKING_KP_MAX_MULTIPLE = 3.0;         // x the default
+	}
+
+	/**
+	 * Constants for AdvantageKit logging and the AdvantageScope / Glass
+	 * mechanism visualizations.
 	 */
 	public static final class LoggingConstants {
 		// When no USB stick is mounted the .wpilog files go to the roboRIO's
@@ -1186,6 +1695,27 @@ public final class Constants {
 		// logs (never the newest few), so a full disk cannot break Preferences.
 		public static final long INTERNAL_LOG_MIN_FREE_BYTES = 100L * 1024 * 1024;
 		public static final int INTERNAL_LOG_KEEP_NEWEST = 5;
+
+		// Live stream for AdvantageScope's "Connect to Robot" (RLOG). 5800 is
+		// taken by the Elastic layout WebServer; both are inside the
+		// field-legal 5800-5810 range. VERIFY AdvantageScope's RLOG port
+		// setting matches.
+		public static final int RLOG_PORT = 5810;
+
+		// --- Mechanism geometry for the visualizations (meters, from the CAD) ---
+		// Arm length for both visualizations: pivot axis (through-bore
+		// centerline) to the far intake roller axes, 13.9 in in the CAD
+		// (9143-2025-A-0000 Leviathan STEP).
+		public static final double ARM_LENGTH = 0.352;
+		// 3D component poses (robot frame: X forward, Y left, Z up, origin at
+		// the robot center on the floor), from the CAD with the carriage on
+		// its hard stop and the floor at the wheel contact: the pivot axis is
+		// 12.01 in forward of the frame center and 13.875 in above the floor.
+		// VERIFY against an exported glTF model when one is attached: the
+		// offsets must match its component origins (AdvantageScope docs:
+		// "Custom Assets > Articulated components").
+		public static final double ELEVATOR_X_OFFSET = 0.305;  // Meters forward of robot center
+		public static final double ARM_PIVOT_HEIGHT = 0.352;   // Pivot height above the floor at the elevator hard stop (meters)
 
 		// Indices into the component Pose3d array (RobotState/ComponentPoses)
 		// published for AdvantageScope's articulated 3D robot model. This

@@ -113,6 +113,7 @@ public class Superstructure {
         ALGAE_CARRY
     }
 
+    // Short names for two Constants values (no number of their own).
     /** Safe travel angle in degrees (RAISE preset): clear at every height. */
     private static final double SAFE_ANGLE = PivotPresetAngles.RAISE.getAngle();
     private static final double TOL = SuperstructureConstants.SAFE_ANGLE_TOLERANCE;
@@ -121,25 +122,15 @@ public class Superstructure {
     private final ArmAxis coral;
 
     // ------------------------------------------------------------------
-    // Paces: how fast the carriage runs each kind of move (see Pace). The
-    // arm is the long pole of every move into or out of an upper pose; at
-    // full pace the carriage reaches each clearance limit before the arm has
-    // opened it, brakes, and is released again. Chosen with
-    // SuperstructureSequenceSimTest.pacesCompared (build/sim/paces.csv) as
-    // the fastest pace at which the carriage never has to slow for the arm.
-    // Package-private and not final only so that test can vary them.
+    // Paces: how fast the carriage runs each kind of move (see Pace), from
+    // SuperstructureConstants.*_PACE, where the choice of each is explained.
+    // Package-private and not final only so that
+    // SuperstructureSequenceSimTest.pacesCompared can vary them.
     // ------------------------------------------------------------------
-    // L4 climb: BRISK. With the arm's 0.2 s release lead the sim runs it hitch-free even at FULL
-    // (1.66 s), but barely - the carriage reaches its 35.5 in clamp as the arm opens it - and a
-    // real arm lags its profile; BRISK (1.96 s) has ~0.15 s in hand and never drops below cruise.
-    static Pace climbToL4Pace = Pace.BRISK;
-    // L3 climb: FULL - the carriage has no clamp to wait at once the roof has opened.
-    static Pace climbToL3Pace = Pace.FULL;
-    // L4 exit, from the shaping height to the station: SLOW, so the carriage is still moving when
-    // the arm opens the drop height and the station (2.02 s, never under ~7 in/s; at FULL it is
-    // 2.00 s with two dead stops).
-    static Pace l4ExitPace = Pace.SLOW;
-    static Pace algaeToL4Pace = Pace.EASY;
+    static Pace climbToL4Pace = SuperstructureConstants.CLIMB_TO_L4_PACE;
+    static Pace climbToL3Pace = SuperstructureConstants.CLIMB_TO_L3_PACE;
+    static Pace l4ExitPace = SuperstructureConstants.L4_EXIT_PACE;
+    static Pace algaeToL4Pace = SuperstructureConstants.ALGAE_TO_L4_PACE;
     /** L4 exit: full pace down to here (just under the arm's 43 in release gate), paced from here on. */
     static double l4ExitShapeHeight = SuperstructureConstants.L4_RETURN_SHAPE_HEIGHT;
     /** How long before the carriage reaches the release height the arm is let go (see approach). */
@@ -227,10 +218,10 @@ public class Superstructure {
         return false;
     }
 
-    /** True if every height from {@code from} to {@code to} (0.25 in steps) is clear at {@code angle}. */
+    /** True if every height from {@code from} to {@code to} (PATH_CHECK_HEIGHT_STEP steps) is clear at {@code angle}. */
     public static boolean elevatorPathClear(double from, double to, double angle) {
         double lo = Math.min(from, to), hi = Math.max(from, to);
-        for (double h = lo; h <= hi + 1e-9; h += 0.25) {
+        for (double h = lo; h <= hi + 1e-9; h += SuperstructureConstants.PATH_CHECK_HEIGHT_STEP) {
             if (!poseClear(Math.min(h, hi), angle)) {
                 return false;
             }
@@ -238,10 +229,10 @@ public class Superstructure {
         return poseClear(hi, angle);
     }
 
-    /** True if every angle from {@code from} to {@code to} (0.5 deg steps) is clear at {@code height}. */
+    /** True if every angle from {@code from} to {@code to} (PATH_CHECK_ANGLE_STEP steps) is clear at {@code height}. */
     public static boolean pivotPathClear(double from, double to, double height) {
         double lo = Math.min(from, to), hi = Math.max(from, to);
-        for (double a = lo; a <= hi + 1e-9; a += 0.5) {
+        for (double a = lo; a <= hi + 1e-9; a += SuperstructureConstants.PATH_CHECK_ANGLE_STEP) {
             if (!poseClear(height, Math.min(a, hi))) {
                 return false;
             }
@@ -418,6 +409,7 @@ public class Superstructure {
     // unchanged and its direction within a stage is known: the limit only
     // moves in the carriage's favour as the arm advances.
 
+    // "No band here" marker (NaN), not a setting
     private static final double NO_BAND = Double.NaN;
 
     /**
@@ -483,17 +475,18 @@ public class Superstructure {
     private static double sweepCeiling(double from, double to, double height) {
         double ceiling = ElevatorConstants.ELEVATOR_MAX_POSITION;
         double start = snapIntoTable(from, height);
-        double step = to >= start ? SWEEP_STEP : -SWEEP_STEP;
+        double step = to >= start ? SuperstructureConstants.SWEEP_STEP : -SuperstructureConstants.SWEEP_STEP;
         double angle = start;
         boolean first = true;
         while (true) {
             double rowCeiling = bandCeiling(angle, height);
             if (first) {
-                rowCeiling = tighter(rowCeiling, bandCeiling(angle - EDGE_WINDOW, height), true);
-                rowCeiling = tighter(rowCeiling, bandCeiling(angle + EDGE_WINDOW, height), true);
+                rowCeiling = tighter(rowCeiling, bandCeiling(angle - SuperstructureConstants.EDGE_WINDOW, height), true);
+                rowCeiling = tighter(rowCeiling, bandCeiling(angle + SuperstructureConstants.EDGE_WINDOW, height), true);
             }
             if (Double.isNaN(rowCeiling)) {
-                if (first || (Math.abs(angle - start) <= IMMINENT_SWEEP && !rowOpensToward(angle, height, true))) {
+                if (first || (Math.abs(angle - start) <= SuperstructureConstants.IMMINENT_SWEEP
+                        && !rowOpensToward(angle, height, true))) {
                     return Double.NaN;
                 }
                 break;
@@ -520,17 +513,18 @@ public class Superstructure {
     private static double sweepFloor(double from, double to, double height) {
         double floor = ElevatorConstants.ELEVATOR_ZERO_HEIGHT;
         double start = snapIntoTable(from, height);
-        double step = to >= start ? SWEEP_STEP : -SWEEP_STEP;
+        double step = to >= start ? SuperstructureConstants.SWEEP_STEP : -SuperstructureConstants.SWEEP_STEP;
         double angle = start;
         boolean first = true;
         while (true) {
             double rowFloor = bandFloor(angle, height);
             if (first) {
-                rowFloor = tighter(rowFloor, bandFloor(angle - EDGE_WINDOW, height), false);
-                rowFloor = tighter(rowFloor, bandFloor(angle + EDGE_WINDOW, height), false);
+                rowFloor = tighter(rowFloor, bandFloor(angle - SuperstructureConstants.EDGE_WINDOW, height), false);
+                rowFloor = tighter(rowFloor, bandFloor(angle + SuperstructureConstants.EDGE_WINDOW, height), false);
             }
             if (Double.isNaN(rowFloor)) {
-                if (first || (Math.abs(angle - start) <= IMMINENT_SWEEP && !rowOpensToward(angle, height, false))) {
+                if (first || (Math.abs(angle - start) <= SuperstructureConstants.IMMINENT_SWEEP
+                        && !rowOpensToward(angle, height, false))) {
                     return Double.NaN;
                 }
                 break;
@@ -548,17 +542,6 @@ public class Superstructure {
         return floor;
     }
 
-    private static final double SWEEP_STEP = 2.5;
-    /**
-     * The scoring poses sit ON row edges (L4 is 20.0 deg, L3 25.0), so an arm
-     * at rest reads either side of the edge from one loop to the next - and
-     * the two rows' limits differ by 2 to 5.5 in, which would send the
-     * carriage back and forth between them. Where the arm IS, the walk
-     * therefore takes the tighter of the rows within this window of it:
-     * constant while the arm sits on the edge, and conservative.
-     */
-    private static final double EDGE_WINDOW = 1.5; // degrees
-
     /** The tighter of two limits (min of ceilings / max of floors); a NaN side - that row does not hold this height - is ignored. */
     private static double tighter(double a, double b, boolean ceilings) {
         if (Double.isNaN(a)) {
@@ -569,9 +552,6 @@ public class Superstructure {
         }
         return ceilings ? Math.min(a, b) : Math.max(a, b);
     }
-
-    /** A blocked row this close (deg) to the arm is one the arm is about to enter. */
-    private static final double IMMINENT_SWEEP = 5.0;
 
     /**
      * The measured arm angle, nudged by at most SAFE_ANGLE_TOLERANCE onto a
@@ -587,7 +567,8 @@ public class Superstructure {
         if (!Double.isNaN(bandCeiling(angle, height))) {
             return angle;
         }
-        for (double d = 1.0; d <= SuperstructureConstants.SAFE_ANGLE_TOLERANCE + 1e-9; d += 1.0) {
+        for (double d = SuperstructureConstants.SNAP_ANGLE_STEP; d <= SuperstructureConstants.SAFE_ANGLE_TOLERANCE + 1e-9;
+                d += SuperstructureConstants.SNAP_ANGLE_STEP) {
             if (!Double.isNaN(bandCeiling(angle + d, height))) {
                 return angle + d;
             }
@@ -636,36 +617,9 @@ public class Superstructure {
     // setpoint every 20 ms at a clamp and restart the profile fifty times a
     // second, which shows up as the carriage hunting. The latch sends a new
     // setpoint only when the clamp has actually moved, and holds off small
-    // steps while the carriage is still far from needing them.
-
-    /** raiseArm puts the carriage back only if an exit moved it at least this far (never a zero-length move). */
-    private static final double RAISE_ARM_PUT_BACK_MIN = 0.5; // inches
-    /** Targets closer than this to the commanded height do not change the ratchet's direction. */
-    private static final double DIRECTION_EPSILON = 0.01; // inches
-    /**
-     * Smallest clamp advance worth a profile restart while the carriage is
-     * moving. As the arm sweeps, the clamp climbs the table one row at a
-     * time (1-1.5 in every 20-40 ms); sending each stair would give the L4
-     * climb some fifteen setpoints, a dozen of them within 0.4 s, every one
-     * a profile restart - a visibly jumpy climb. Waiting for a run worth
-     * having makes it four or five.
-     */
-    private static final double LATCH_MIN_STEP = 4.0;   // inches
-    /** A carriage at rest waits rather than start a run to a clamp shorter than this (see commandCarriage). */
-    private static final double LATCH_MIN_RUN = 8.0;    // inches
-    /** Below this speed the carriage is waiting on the arm: any real advance is sent, so it keeps moving. */
-    private static final double LATCH_CRAWL_SPEED = 3.0;   // in/s
-    private static final double LATCH_CRAWL_MIN_STEP = 0.5; // inches
-    /** A clamp that moves back by less than this is ignored (arm-angle chatter at a gate). */
-    private static final double LATCH_RETREAT_MIN = 0.25; // inches
-    /**
-     * A carriage that is past its clamp by no more than this comes back to
-     * the clamp; further than that it stops. Coming back matters: the
-     * arm-side clamp only opens a row once the carriage is inside it, so a
-     * carriage that arrived half an inch high and held there would leave
-     * each mechanism waiting for the other.
-     */
-    private static final double LATCH_RETREAT_MAX = 1.5;  // inches
+    // steps while the carriage is still far from needing them. Its steps and
+    // windows are SuperstructureConstants.LATCH_*, DIRECTION_EPSILON and
+    // RAISE_ARM_PUT_BACK_MIN.
 
     /** Where the carriage comes to rest if told to stop now (no overshoot-and-return, unlike "hold the measured height"). */
     private double stoppingPoint() {
@@ -683,7 +637,7 @@ public class Superstructure {
     private double withinReach(double desired, boolean up, Pace pace) {
         double height = elevator.getCurrentPosition();
         double past = up ? height - desired : desired - height;
-        if (past <= 0 || past <= LATCH_RETREAT_MAX) {
+        if (past <= 0 || past <= SuperstructureConstants.LATCH_RETREAT_MAX) {
             return desired;
         }
         double stop = stoppingPoint(pace);
@@ -720,7 +674,8 @@ public class Superstructure {
             // is moving meanwhile, so nothing stands still.
             double run = up ? desired - elevator.getCurrentPosition() : elevator.getCurrentPosition() - desired;
             boolean clamped = up ? desired < finalTarget - 1e-6 : desired > finalTarget + 1e-6;
-            if (clamped && run >= 0 && run < LATCH_MIN_RUN && Math.abs(elevator.getVelocity()) <= LATCH_CRAWL_SPEED) {
+            if (clamped && run >= 0 && run < SuperstructureConstants.LATCH_MIN_RUN
+                    && Math.abs(elevator.getVelocity()) <= SuperstructureConstants.LATCH_CRAWL_SPEED) {
                 return;
             }
             latch[0] = withinReach(desired, up, pace);
@@ -731,17 +686,18 @@ public class Superstructure {
         double advance = up ? desired - latch[0] : latch[0] - desired;
         if (advance > 1e-6) {
             boolean reachesTarget = up ? desired >= finalTarget - 1e-6 : desired <= finalTarget + 1e-6;
-            boolean crawling = Math.abs(elevator.getVelocity()) <= LATCH_CRAWL_SPEED && advance >= LATCH_CRAWL_MIN_STEP;
-            if (reachesTarget || advance >= LATCH_MIN_STEP || crawling || pace != lastCarriagePace) {
+            boolean crawling = Math.abs(elevator.getVelocity()) <= SuperstructureConstants.LATCH_CRAWL_SPEED
+                && advance >= SuperstructureConstants.LATCH_CRAWL_MIN_STEP;
+            if (reachesTarget || advance >= SuperstructureConstants.LATCH_MIN_STEP || crawling || pace != lastCarriagePace) {
                 latch[0] = desired;
                 lastCarriagePace = pace;
                 elevator.setPosition(desired, pace);
             }
-        } else if (advance < -LATCH_RETREAT_MIN) {
+        } else if (advance < -SuperstructureConstants.LATCH_RETREAT_MIN) {
             // The clamp moved back (a gate re-closed, or the carriage arrived
             // past it). One new setpoint, not a chase of the measured height.
             double backTo = withinReach(desired, up, pace);
-            if (Math.abs(backTo - latch[0]) > LATCH_RETREAT_MIN) {
+            if (Math.abs(backTo - latch[0]) > SuperstructureConstants.LATCH_RETREAT_MIN) {
                 latch[0] = backTo;
                 elevator.setPosition(backTo, pace);
             }
@@ -821,10 +777,11 @@ public class Superstructure {
             // every 20 ms, which shakes the elevator on the L4 exit and
             // keeps it from getting down.
             double reference = Double.isNaN(latch[0]) ? elevator.getCurrentPosition() : latch[0];
-            boolean up = target > reference + DIRECTION_EPSILON ? true
-                : target < reference - DIRECTION_EPSILON ? false
+            double epsilon = SuperstructureConstants.DIRECTION_EPSILON;
+            boolean up = target > reference + epsilon ? true
+                : target < reference - epsilon ? false
                 : wasUp[0];
-            if (Double.isNaN(latch[0]) && Math.abs(target - reference) <= DIRECTION_EPSILON) {
+            if (Double.isNaN(latch[0]) && Math.abs(target - reference) <= epsilon) {
                 up = target >= elevator.getCurrentPosition(); // nothing commanded yet and already there
             }
             if (up != wasUp[0]) {
@@ -1394,14 +1351,15 @@ public class Superstructure {
                 // Arm still near the L4 angle. The first leg runs at full pace
                 // to a height just under the arm's release gate, and only the
                 // last stretch to the drop height is paced to the arm.
-                return elevator.getCurrentPosition() > l4ExitShapeHeight + 1.0
+                return elevator.getCurrentPosition() > l4ExitShapeHeight + SuperstructureConstants.L4_RETURN_SHAPE_WINDOW
                     ? l4ExitShapeHeight : SuperstructureConstants.L4_RETURN_DROP_HEIGHT;
             }, () -> SAFE_ANGLE,
             // Paced while the arm is on its way round (so the carriage arrives
             // at the drop height and the station as the arm opens them, rather
             // than stopping at each); full pace once band A is cleared.
             () -> armAtLeast(SuperstructureConstants.BAND_PASS_MIN_ANGLE)
-                || elevator.getCurrentPosition() > l4ExitShapeHeight + 1.0 ? Pace.FULL : l4ExitPace));
+                || elevator.getCurrentPosition() > l4ExitShapeHeight + SuperstructureConstants.L4_RETURN_SHAPE_WINDOW
+                ? Pace.FULL : l4ExitPace));
     }
 
     /**
@@ -1582,7 +1540,7 @@ public class Superstructure {
                 .andThen(Commands.either(
                     both(stay, SAFE_ANGLE),
                     armTo(SAFE_ANGLE),
-                    () -> Math.abs(elevator.getCurrentPosition() - stay) > RAISE_ARM_PUT_BACK_MIN))
+                    () -> Math.abs(elevator.getCurrentPosition() - stay) > SuperstructureConstants.RAISE_ARM_PUT_BACK_MIN))
                 .andThen(armArrived());
         }, Set.of(elevator, coral));
     }
@@ -1664,7 +1622,7 @@ public class Superstructure {
 
     /**
      * Ejects the held coral at the current pose: run the rollers at the
-     * current goal's {@link #scoreSpeed} for half a second, then stop them.
+     * current goal's {@link #scoreSpeed} for CORAL_EJECT_SECONDS, then stop them.
      * It only handles the rollers and is not gated on the pose; the autos'
      * named commands use it. Teleop scoring goes through {@link #score}.
      */
@@ -1676,7 +1634,7 @@ public class Superstructure {
         // eject.
         return Commands.sequence(
             Commands.runOnce(() -> coral.ejectRollers(scoreSpeed(currentGoal))),
-            Commands.waitSeconds(0.5),
+            Commands.waitSeconds(SuperstructureConstants.CORAL_EJECT_SECONDS),
             Commands.runOnce(coral::stopIntake)
         ).handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
     }
@@ -1716,7 +1674,7 @@ public class Superstructure {
 
     /**
      * Moves to the algae scoring pose (52 in, 105 deg), ejects for
-     * half a second, then stops the rollers (mirroring ejectCoral - without
+     * ALGAE_EJECT_SECONDS, then stops the rollers (mirroring ejectCoral - without
      * the stop they would spin at 50% duty until another roller command).
      * A one-shot for autos or custom bindings; the operator's barge flow is
      * {@link #goToBarge} followed by the score trigger ({@link #score}).
@@ -1725,7 +1683,7 @@ public class Superstructure {
         return setGoal(Goal.ALGAE_SCORE)
             .andThen(moveTo(PresetHeights.ALGAE_SCORE, PivotPresetAngles.ALGAE_SCORE))
             .andThen(Commands.runOnce(() -> coral.ejectRollers(CorAlConstants.ALGAE_SCORE_SPEED), coral))
-            .andThen(Commands.waitSeconds(0.5))
+            .andThen(Commands.waitSeconds(SuperstructureConstants.ALGAE_EJECT_SECONDS))
             .andThen(Commands.runOnce(() -> {
                 coral.stopIntake();
                 algaeHeld = false; // released: the next home() stows and intakes instead of carrying
@@ -1737,31 +1695,10 @@ public class Superstructure {
     // Operator workflow: gated score, auto-home, manual take-over
     // ==================================================================
 
-    /** How close to the preset the measured pose must be before a score is released. */
-    private static final double SCORE_READY_HEIGHT_TOL = 0.75;   // in
-    private static final double SCORE_READY_ANGLE_TOL = 3.0;     // deg
-    /**
-     * "Landed": once both mechanisms have been still this long the pose is as
-     * good as it is going to get, and a wider angle window counts. The loop
-     * closes on the rotor and the chain has slack, so the through bore can
-     * come to rest a few degrees past the target; CorAl's landing correction
-     * normally pulls it back in, but the score button must NEVER be locked
-     * out by it - with only the tight window, the one way left to score
-     * would be by hand. The height gate is NOT relaxed: above the 48 in pre-top height the
-     * carriage only gets there with the arm inside 22.5 deg.
-     */
-    private static final double SCORE_READY_LANDED_ANGLE_TOL = 8.0; // deg
-    private static final double SCORE_READY_LANDED_SECONDS = 0.6;
+    // The score gate's tolerances and the back-off distance are
+    // SuperstructureConstants.SCORE_READY_* and REEF_BACKOFF_METERS.
+    /** FPGA time the pose was first measured reached and still (NaN = not now): the "landed" timer. */
     private double landedSince = Double.NaN;
-    private static final double SCORE_READY_MAX_ELEVATOR_SPEED = 2.0;  // in/s
-    private static final double SCORE_READY_MAX_PIVOT_SPEED = 15.0;    // deg/s
-    /**
-     * Distance the drivetrain must travel from where it ejected before an
-     * L3/L4 exit may start. Leaving those poses swings the claw through
-     * 75-110 deg, where it reaches 9-12 in (8.9-11.7 in the CAD) past the
-     * front bumper face - into the reef if the robot is still flush against it.
-     */
-    private static final double REEF_BACKOFF_METERS = 0.35;
 
     /** True while a finished L3/L4 score is waiting for the robot to back away before its exit. */
     private boolean waitingForBackOff = false;
@@ -1803,9 +1740,10 @@ public class Superstructure {
             return false;
         }
         double height = Math.max(preset[0], ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
-        boolean atHeightAndStill = Math.abs(elevator.getCurrentPosition() - height) <= SCORE_READY_HEIGHT_TOL
-            && Math.abs(elevator.getVelocity()) <= SCORE_READY_MAX_ELEVATOR_SPEED
-            && Math.abs(coral.getPivotVelocity()) <= SCORE_READY_MAX_PIVOT_SPEED;
+        boolean atHeightAndStill =
+            Math.abs(elevator.getCurrentPosition() - height) <= SuperstructureConstants.SCORE_READY_HEIGHT_TOL
+            && Math.abs(elevator.getVelocity()) <= SuperstructureConstants.SCORE_READY_MAX_ELEVATOR_SPEED
+            && Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SCORE_READY_MAX_PIVOT_SPEED;
         double now = Timer.getFPGATimestamp();
         if (!atHeightAndStill) {
             landedSince = Double.NaN;
@@ -1815,17 +1753,20 @@ public class Superstructure {
             landedSince = now;
         }
         double angleError = Math.abs(coral.getPivotAngle() - preset[1]);
-        return angleError <= SCORE_READY_ANGLE_TOL
-            || (angleError <= SCORE_READY_LANDED_ANGLE_TOL && now - landedSince >= SCORE_READY_LANDED_SECONDS);
+        return angleError <= SuperstructureConstants.SCORE_READY_ANGLE_TOL
+            || (angleError <= SuperstructureConstants.SCORE_READY_LANDED_ANGLE_TOL
+                && now - landedSince >= SuperstructureConstants.SCORE_READY_LANDED_SECONDS);
     }
 
 
     /**
      * Releases the game piece at the current scoring pose, then goes home by
      * itself. Bind it behind {@link #readyToScore()}.
-     *   - Coral: rollers out for at least 0.5 s and until the CANrange says
-     *     the coral has left (capped at 1.5 s). If it is still detected the
+     *   - Coral: rollers out for at least CORAL_EJECT_SECONDS and until the
+     *     CANrange says the coral has left (for at most
+     *     CORAL_EJECT_CLEAR_TIMEOUT_SECONDS more). If it is still detected the
      *     command ends without stowing, so the pose is kept for a second try.
+     *     Algae: rollers out for ALGAE_EJECT_SECONDS.
      *   - L3 / L4: the exit waits until the drivetrain has backed away
      *     REEF_BACKOFF_METERS from where it ejected (see the constant).
      *   - Then home(): stow and restart the intake, or carry for an algae.
@@ -1842,12 +1783,13 @@ public class Superstructure {
                 () -> coral.ejectRollers(scoreSpeed(scored)), // L1 runs the rollers the other way
                 coral::stopIntake, coral);
             Command ejectWindow = algae
-                ? Commands.waitSeconds(0.5)
-                : Commands.waitSeconds(0.5)
-                    .andThen(Commands.waitUntil(() -> !coral.isGamePieceDetected()).withTimeout(1.0));
+                ? Commands.waitSeconds(SuperstructureConstants.ALGAE_EJECT_SECONDS)
+                : Commands.waitSeconds(SuperstructureConstants.CORAL_EJECT_SECONDS)
+                    .andThen(Commands.waitUntil(() -> !coral.isGamePieceDetected())
+                        .withTimeout(SuperstructureConstants.CORAL_EJECT_CLEAR_TIMEOUT_SECONDS));
             Command backedOff = exitSwingsForward
                 ? Commands.waitUntil(() -> robotPose.get().getTranslation()
-                        .getDistance(ejectedAt.getTranslation()) >= REEF_BACKOFF_METERS)
+                        .getDistance(ejectedAt.getTranslation()) >= SuperstructureConstants.REEF_BACKOFF_METERS)
                     .beforeStarting(() -> waitingForBackOff = true)
                     .finallyDo(() -> waitingForBackOff = false)
                 : Commands.none();
@@ -1869,7 +1811,7 @@ public class Superstructure {
         return Commands.defer(() -> {
             Pose2d from = robotPose.get();
             return Commands.waitUntil(() -> robotPose.get().getTranslation()
-                    .getDistance(from.getTranslation()) >= REEF_BACKOFF_METERS)
+                    .getDistance(from.getTranslation()) >= SuperstructureConstants.REEF_BACKOFF_METERS)
                 .andThen(stow());
         }, Set.of(elevator, coral));
     }

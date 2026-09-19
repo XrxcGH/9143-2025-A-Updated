@@ -94,6 +94,11 @@ import frc.robot.util.Tunables;
  * Dashboard note: this subsystem publishes nothing itself. All telemetry is
  * read through the public getters by the central {@link frc.robot.Dashboard}
  * class, which owns every NetworkTables/Elastic publication for the robot.
+ *
+ * Limelight format note: the topic names read here ("targetpose_cameraspace",
+ * "botpose_wpiblue", "rawfiducials") and the array lengths, strides and
+ * indices used on them are Limelight's published data format, not settings.
+ * Each use names the array's layout where it is read.
  */
 public class Vision extends SubsystemBase {
 
@@ -221,7 +226,7 @@ public class Vision extends SubsystemBase {
 
     // Heading seed bookkeeping
     private double lastHeadingSeedTime = -1e9;        // FPGA time any trusted MegaTag1 solve was fused
-    private double lastStrongHeadingSeedTime = -1e9;  // FPGA time a two-or-more-tag MegaTag1 solve was fused
+    private double lastStrongHeadingSeedTime = -1e9;  // FPGA time a strong (MT1_STRONG_SEED_MIN_TAGS+) MegaTag1 solve was fused
     private Rotation2d lastStrongSeedHeading = null;  // that solve's own heading
     private double reseedUntil = -1.0;                // FPGA time until which MegaTag1 is fused while enabled
 
@@ -556,7 +561,10 @@ public class Vision extends SubsystemBase {
         }
     }
 
-    /** Values per tag in a Limelight "rawfiducials" array: id, txnc, tync, ta, distToCamera, distToRobot, ambiguity. */
+    /**
+     * Values per tag in a Limelight "rawfiducials" array: id, txnc, tync, ta, distToCamera, distToRobot, ambiguity.
+     * The stride of Limelight's data format, not a setting.
+     */
     private static final int RAW_FIDUCIAL_STRIDE = 7;
 
     /**
@@ -820,9 +828,10 @@ public class Vision extends SubsystemBase {
             if (tagClass == TagClass.NONE || !cameraSupplies(i, tagClass)) {
                 continue; // not a class this camera is mounted for
             }
-            // Raw camera-space array: an empty array (no 3D solve / topic
-            // absent) or an all-zero one (3D solve disabled) must not become
-            // a "0 m away" target that wins the closest-tag selection.
+            // Raw camera-space array, Limelight's layout: [x, y, z, roll,
+            // pitch, yaw], meters and degrees. An empty array (no 3D solve /
+            // topic absent) or an all-zero one (3D solve disabled) must not
+            // become a "0 m away" target that wins the closest-tag selection.
             // Read atomically with its NT timestamp: the timestamp identifies
             // the camera frame, and minus the pipeline + capture latency it
             // is when the image was taken.
@@ -962,8 +971,8 @@ public class Vision extends SubsystemBase {
     }
 
     /**
-     * True when the pose heading is converged on a strong seed: a
-     * two-or-more-tag MegaTag1 solve was fused within
+     * True when the pose heading is converged on a strong seed: a MegaTag1
+     * solve of at least MT1_STRONG_SEED_MIN_TAGS tags was fused within
      * HEADING_SEED_FRESHNESS_SECONDS and the estimator's heading now agrees
      * with that solve's own heading within HEADING_SEED_AGREEMENT_DEGREES.
      * (One fused solve only closes part of the heading error, so freshness
@@ -978,9 +987,10 @@ public class Vision extends SubsystemBase {
         return Math.abs(current.minus(lastStrongSeedHeading).getDegrees()) <= VisionConstants.HEADING_SEED_AGREEMENT_DEGREES;
     }
 
-    /** The last pose fused from the given camera, if it was fused within the last second. */
+    /** The last pose fused from the given camera, if it was fused within FUSED_POSE_DISPLAY_SECONDS. */
     public Optional<Pose2d> getLastFusedPose(int index) {
-        if (lastFusedPose[index] == null || Timer.getFPGATimestamp() - lastFusedTime[index] > 1.0) {
+        if (lastFusedPose[index] == null
+                || Timer.getFPGATimestamp() - lastFusedTime[index] > VisionConstants.FUSED_POSE_DISPLAY_SECONDS) {
             return Optional.empty();
         }
         return Optional.of(lastFusedPose[index]);
@@ -1003,7 +1013,7 @@ public class Vision extends SubsystemBase {
             return false;
         }
         if (megaTag1) {
-            if (estimate.tagCount < 2) {
+            if (estimate.tagCount < 2) { // one tag: the pose-flip ambiguity exists only for a single tag (not a setting)
                 if (estimate.rawFiducials == null || estimate.rawFiducials.length == 0) {
                     return false;
                 }
@@ -1096,17 +1106,18 @@ public class Vision extends SubsystemBase {
             PoseEstimate estimate = batch.get(k);
             int camera = batchCameras.get(k);
             // Confidence scales with tag count and closeness
-            double xyStdDev = 0.3
-                + 0.4 * (estimate.avgTagDist * estimate.avgTagDist) / Math.max(1, estimate.tagCount);
-            // MegaTag1 heading is trusted while seeding - tightly with 2+
-            // tags so the stationary heading collapses onto the solve in a
-            // few frames even at the disabled throttle's ~1 Hz - and
-            // MegaTag2's heading never is.
+            double xyStdDev = VisionConstants.XY_STD_DEV_BASE
+                + VisionConstants.XY_STD_DEV_PER_DISTANCE_SQUARED * (estimate.avgTagDist * estimate.avgTagDist)
+                    / Math.max(1, estimate.tagCount);
+            // MegaTag1 heading is trusted while seeding - tightly for a
+            // strong (2+ tag) solve so the stationary heading collapses onto
+            // the solve in a few frames even at the disabled throttle's
+            // ~1 Hz - and MegaTag2's heading never is.
             double rotStdDev = seedingHeading
-                ? (estimate.tagCount >= 2
+                ? (estimate.tagCount >= VisionConstants.MT1_STRONG_SEED_MIN_TAGS
                     ? VisionConstants.MT1_MULTI_TAG_ROTATION_STD_DEV
                     : VisionConstants.MT1_SINGLE_TAG_ROTATION_STD_DEV)
-                : 9999999;
+                : VisionConstants.MT2_ROTATION_STD_DEV;
 
             swerve.addVisionMeasurement(
                 estimate.pose,
@@ -1117,7 +1128,7 @@ public class Vision extends SubsystemBase {
             lastFusedTime[camera] = now;
             if (seedingHeading) {
                 lastHeadingSeedTime = now;
-                if (estimate.tagCount >= 2) {
+                if (estimate.tagCount >= VisionConstants.MT1_STRONG_SEED_MIN_TAGS) {
                     lastStrongHeadingSeedTime = now;
                     lastStrongSeedHeading = estimate.pose.getRotation();
                 }

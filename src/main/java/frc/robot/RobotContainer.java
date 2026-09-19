@@ -4,7 +4,6 @@ import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.RadiansPerSecond;
 import static edu.wpi.first.units.Units.RotationsPerSecond;
 
-import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
 import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.auto.NamedCommands;
@@ -30,6 +29,7 @@ import edu.wpi.first.wpilibj2.command.button.Trigger;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
 import frc.robot.generated.TunerConstants;
+import frc.robot.Constants.ControlsConstants;
 import frc.robot.Constants.DriveConstants;
 
 import frc.robot.subsystems.Swerve;
@@ -98,36 +98,37 @@ import frc.robot.util.Tunables;
 public class RobotContainer {
     /** Top speed from swerve characterization, used to scale driver input. */
     private double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
-    /** Max rotation rate for driver input: 3/4 rotation per second. */
-    private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond);
+    /** Max rotation rate for driver input (DriveConstants.MAX_ANGULAR_RATE_ROT_PER_SEC). */
+    private double MaxAngularRate = RotationsPerSecond.of(DriveConstants.MAX_ANGULAR_RATE_ROT_PER_SEC).in(RadiansPerSecond);
 
     // ------------------------------------------------------------------
     // Reusable swerve requests for teleop driving (allocated once)
     // ------------------------------------------------------------------
-    // Drive requests use closed-loop velocity, not open-loop voltage:
-    // every module tracks the true requested ground speed regardless of
-    // battery sag, and teleop behavior matches autonomous path following.
+    // The drive request type (closed-loop velocity, and why) is
+    // DriveConstants.TELEOP_DRIVE_REQUEST_TYPE.
     /**
      * Standard field-centric drive. Speed scaling and the matching deadbands
      * are applied per loop in the default command (the scale is a dashboard
      * tunable), so nothing speed-dependent is baked in here.
      */
     private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
-        .withDriveRequestType(DriveRequestType.Velocity);
+        .withDriveRequestType(DriveConstants.TELEOP_DRIVE_REQUEST_TYPE);
     /** X-locks the wheels to resist being pushed. */
     private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
     /** Points all modules in a direction without driving (alignment/testing). */
     private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
     /** Robot-centric drive used for the slow D-pad nudges. */
     private final SwerveRequest.RobotCentric forwardStraight = new SwerveRequest.RobotCentric()
-        .withDriveRequestType(DriveRequestType.Velocity);
+        .withDriveRequestType(DriveConstants.TELEOP_DRIVE_REQUEST_TYPE);
 
     /** Publishes swerve state to NetworkTables/SignalLogger every odometry update. */
     private final Telemetry logger = new Telemetry(MaxSpeed);
 
     // Controllers: driver handles the drivetrain, operator handles mechanisms
-    private final CommandXboxController driver_controller = new CommandXboxController(0);
-    private final CommandXboxController operator_controller = new CommandXboxController(1);
+    private final CommandXboxController driver_controller =
+        new CommandXboxController(ControlsConstants.DRIVER_CONTROLLER_PORT);
+    private final CommandXboxController operator_controller =
+        new CommandXboxController(ControlsConstants.OPERATOR_CONTROLLER_PORT);
     /** Haptic cues (coral acquired, pose reached, aligned, back away). */
     private final Rumble driverRumble = new Rumble(driver_controller);
     private final Rumble operatorRumble = new Rumble(operator_controller);
@@ -267,17 +268,14 @@ public class RobotContainer {
     // Driver bindings (drivetrain + align + score)
     // ==================================================================
 
-    /** Above this carriage height the driver's speed starts to be scaled down... */
-    private static final double SLOW_START_HEIGHT = 16.5;   // in (the low box roof)
-    /** ...reaching the minimum scale at this height. */
-    private static final double SLOW_FULL_HEIGHT = 45.0;    // in
-    private static final double SLOW_MIN_SCALE = 0.40;
-
-    /** 1.0 with the carriage low, falling linearly to SLOW_MIN_SCALE as it rises. */
+    /**
+     * 1.0 with the carriage low, falling linearly to SLOW_MIN_SCALE as it
+     * rises from SLOW_START_HEIGHT to SLOW_FULL_HEIGHT (DriveConstants).
+     */
     private double heightSpeedScale() {
-        double t = MathUtil.clamp((elevator.getCurrentPosition() - SLOW_START_HEIGHT)
-            / (SLOW_FULL_HEIGHT - SLOW_START_HEIGHT), 0.0, 1.0);
-        return MathUtil.interpolate(1.0, SLOW_MIN_SCALE, t);
+        double t = MathUtil.clamp((elevator.getCurrentPosition() - DriveConstants.SLOW_START_HEIGHT)
+            / (DriveConstants.SLOW_FULL_HEIGHT - DriveConstants.SLOW_START_HEIGHT), 0.0, 1.0);
+        return MathUtil.interpolate(1.0, DriveConstants.SLOW_MIN_SCALE, t);
     }
 
     /**
@@ -327,7 +325,8 @@ public class RobotContainer {
         // so bindings on those alone would ignore a 45-degree press).
         new Trigger(() -> driver_controller.getHID().getPOV() >= 0).whileTrue(swerve.applyRequest(() -> {
             double pov = Math.toRadians(driver_controller.getHID().getPOV()); // 0 = up, clockwise
-            return forwardStraight.withVelocityX(0.5 * Math.cos(pov)).withVelocityY(-0.5 * Math.sin(pov));
+            return forwardStraight.withVelocityX(DriveConstants.NUDGE_SPEED * Math.cos(pov))
+                .withVelocityY(-DriveConstants.NUDGE_SPEED * Math.sin(pov));
         }));
 
         // Driver heading zero on left bumper: "the way the robot faces now is
@@ -354,8 +353,10 @@ public class RobotContainer {
             .onTrue(Commands.runOnce(() -> swerve.getVision().requestHeadingReseed()).ignoringDisable(true));
 
         // Hold a trigger to align on that side's branch; release = sticks.
-        driver_controller.leftTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.LEFT));
-        driver_controller.rightTrigger(0.3).whileTrue(alignTo(Vision.BranchSide.RIGHT));
+        driver_controller.leftTrigger(ControlsConstants.ALIGN_TRIGGER_THRESHOLD)
+            .whileTrue(alignTo(Vision.BranchSide.LEFT));
+        driver_controller.rightTrigger(ControlsConstants.ALIGN_TRIGGER_THRESHOLD)
+            .whileTrue(alignTo(Vision.BranchSide.RIGHT));
 
         swerve.registerTelemetry(logger::telemeterize);
     }
@@ -379,14 +380,16 @@ public class RobotContainer {
 
         // ---- Triggers: game piece in / game piece out ----
         // HOME: stow (+ intake rollers if empty), or algae carry if one is held.
-        operator_controller.leftTrigger().and(auto).onTrue(superstructure.home());
+        operator_controller.leftTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto)
+            .onTrue(superstructure.home());
 
         // SCORE: gated on the measured pose. Pulled early it waits -
         // the rising edge of (trigger AND ready) is what fires - so it can
         // never interrupt a staged move that is still on its way to the pose.
         Trigger ready = new Trigger(superstructure::readyToScore);
         Command score = superstructure.score(() -> swerve.getStateCopy().Pose);
-        operator_controller.rightTrigger().and(auto).and(ready).onTrue(score);
+        operator_controller.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto).and(ready)
+            .onTrue(score);
         // Driver's copy: also waits for the aligner when the aligner is in use.
         driver_controller.rightBumper().and(auto).and(ready) // not while the operator holds the manual take-over
             .and(() -> !swerve.isVisionTrackingEnabled() || swerve.isAligned())
@@ -409,10 +412,10 @@ public class RobotContainer {
         // enables would fire an enabled binding without a fresh press.
         operator_controller.povRight().and(auto).onTrue(superstructure.raiseArm());
 
-        // ---- Encoder zeroing: DISABLED only, and only after a 1 s hold ----
-        operator_controller.back().and(disabled).debounce(1.0)
+        // ---- Encoder zeroing: DISABLED only, and only after a held press ----
+        operator_controller.back().and(disabled).debounce(ControlsConstants.ZERO_HOLD_SECONDS)
             .onTrue(Commands.runOnce(elevator::resetEncoders, elevator).ignoringDisable(true));
-        operator_controller.start().and(disabled).debounce(1.0)
+        operator_controller.start().and(disabled).debounce(ControlsConstants.ZERO_HOLD_SECONDS)
             .onTrue(Commands.runOnce(coral::resetPivotEncoder, coral).ignoringDisable(true));
 
         // ---- Manual take-over (the mechanisms have no default commands, so
@@ -426,26 +429,34 @@ public class RobotContainer {
             () -> -operator_controller.getLeftY(),      // up = carriage up
             () -> -operator_controller.getRightY()));   // forward = claw forward (+ angle)
         // Raw rollers inside manual: no pose check, no subsystem requirement.
-        manual.and(operator_controller.rightTrigger())
+        manual.and(operator_controller.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD))
             .whileTrue(superstructure.rollersRaw(Constants.CorAlConstants.CORAL_SCORE_SPEED));
-        manual.and(operator_controller.leftTrigger())
+        manual.and(operator_controller.leftTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD))
             .whileTrue(superstructure.rollersRaw(Constants.CorAlConstants.ALGAE_INTAKE_SPEED));
 
-        // ---- Rumble cues ----
+        // ---- Rumble cues (strengths and timings: ControlsConstants.RUMBLE_*) ----
         // Coral acquired: both drivers, one long buzz -> leave the station.
         new Trigger(coral::isGamePieceDetected).and(teleop)
-            .onTrue(driverRumble.pulse(1.0, 0.4).alongWith(operatorRumble.pulse(1.0, 0.4)));
+            .onTrue(driverRumble.pulse(ControlsConstants.RUMBLE_ACQUIRED_STRENGTH, ControlsConstants.RUMBLE_ACQUIRED_SECONDS)
+                .alongWith(operatorRumble.pulse(
+                    ControlsConstants.RUMBLE_ACQUIRED_STRENGTH, ControlsConstants.RUMBLE_ACQUIRED_SECONDS)));
         // Pose reached: operator, two short buzzes -> the score trigger is live.
-        ready.and(teleop).onTrue(operatorRumble.pulses(2, 0.8, 0.12, 0.10));
+        ready.and(teleop).onTrue(operatorRumble.pulses(ControlsConstants.RUMBLE_POSE_READY_COUNT,
+            ControlsConstants.RUMBLE_POSE_READY_STRENGTH, ControlsConstants.RUMBLE_POSE_READY_ON_SECONDS,
+            ControlsConstants.RUMBLE_POSE_READY_OFF_SECONDS));
         // Aligned and pose reached: driver, steady light buzz -> fire.
         ready.and(() -> swerve.isVisionTrackingEnabled() && swerve.isAligned())
-            .whileTrue(driverRumble.whileActive(0.5));
+            .whileTrue(driverRumble.whileActive(ControlsConstants.RUMBLE_ALIGNED_STRENGTH));
         // Scored at L3/L4, exit is waiting for room: driver, slow pulse -> back away.
         new Trigger(() -> superstructure.isWaitingForBackOff() || superstructure.isWaitingForReefClearance())
-            .whileTrue(driverRumble.pulses(2, 0.6, 0.15, 0.35).repeatedly());
+            .whileTrue(driverRumble.pulses(ControlsConstants.RUMBLE_BACK_AWAY_COUNT,
+                ControlsConstants.RUMBLE_BACK_AWAY_STRENGTH, ControlsConstants.RUMBLE_BACK_AWAY_ON_SECONDS,
+                ControlsConstants.RUMBLE_BACK_AWAY_OFF_SECONDS).repeatedly());
         // Score pulled with nothing to score from: operator, one tick.
-        operator_controller.rightTrigger().and(auto).and(() -> !superstructure.isScoringGoal())
-            .onTrue(operatorRumble.pulse(0.4, 0.08));
+        operator_controller.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto)
+            .and(() -> !superstructure.isScoringGoal())
+            .onTrue(operatorRumble.pulse(ControlsConstants.RUMBLE_NO_SCORE_STRENGTH,
+                ControlsConstants.RUMBLE_NO_SCORE_SECONDS));
     }
 
     /** Returns the autonomous routine selected on the dashboard. */

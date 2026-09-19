@@ -2,9 +2,10 @@
 // CANdle LED subsystem - commented out (Sept 2026): there is no CANdle on the
 // robot, so every line below is disabled to keep the device off the CAN bus
 // and the class out of the build. To bring it back: remove the leading "// "
-// from every line of this file, uncomment LEDConstants in Constants.java, and
-// uncomment the lines marked "CANdle disabled" in RobotContainer.java and
-// Dashboard.java (which then publishes the real "LEDs/State").
+// from every line of this file, uncomment LEDConstants and its two imports in
+// Constants.java, and uncomment the lines marked "CANdle disabled" in
+// RobotContainer.java and Dashboard.java (which then publishes the real
+// "LEDs/State").
 // ============================================================================
 
 // package frc.robot.subsystems;
@@ -19,7 +20,6 @@
 // import com.ctre.phoenix6.controls.StrobeAnimation;
 // import com.ctre.phoenix6.hardware.CANdle;
 // import com.ctre.phoenix6.signals.RGBWColor;
-// import com.ctre.phoenix6.signals.StripTypeValue;
 // 
 // import edu.wpi.first.wpilibj.DriverStation;
 // import edu.wpi.first.wpilibj.DriverStation.Alliance;
@@ -59,13 +59,7 @@
 //         TELEOP_IDLE
 //     }
 // 
-//     // Colors (RGBW). White channel is 0 for standard RGB strips.
-//     private static final RGBWColor kRed = new RGBWColor(255, 0, 0);
-//     private static final RGBWColor kBlue = new RGBWColor(0, 0, 255);
-//     private static final RGBWColor kGreen = new RGBWColor(0, 255, 0);
-//     private static final RGBWColor kCyan = new RGBWColor(0, 200, 255);
-//     private static final RGBWColor kYellow = new RGBWColor(255, 180, 0);
-//     private static final RGBWColor kPurple = new RGBWColor(120, 0, 255); // No-alliance fallback
+//     // Colors, animation rates and the strip type are LEDConstants.
 // 
 //     private final CANdle candle;
 // 
@@ -78,11 +72,12 @@
 //     private final SolidColor solidRequest =
 //         new SolidColor(0, LEDConstants.LED_COUNT - 1);
 //     private final StrobeAnimation strobeRequest =
-//         new StrobeAnimation(0, LEDConstants.LED_COUNT - 1).withSlot(0).withFrameRate(8);
+//         new StrobeAnimation(0, LEDConstants.LED_COUNT - 1).withSlot(0).withFrameRate(LEDConstants.STROBE_FRAME_RATE);
 //     private final LarsonAnimation larsonRequest =
-//         new LarsonAnimation(0, LEDConstants.LED_COUNT - 1).withSlot(0).withSize(6).withFrameRate(30);
+//         new LarsonAnimation(0, LEDConstants.LED_COUNT - 1).withSlot(0)
+//             .withSize(LEDConstants.LARSON_SIZE).withFrameRate(LEDConstants.LARSON_FRAME_RATE);
 //     private final RainbowAnimation rainbowRequest =
-//         new RainbowAnimation(0, LEDConstants.LED_COUNT - 1).withSlot(0).withFrameRate(40);
+//         new RainbowAnimation(0, LEDConstants.LED_COUNT - 1).withSlot(0).withFrameRate(LEDConstants.RAINBOW_FRAME_RATE);
 //     // Clears whatever animation occupies slot 0 (needed before showing a solid color)
 //     private final EmptyAnimation clearAnimationRequest = new EmptyAnimation(0);
 // 
@@ -103,11 +98,10 @@
 // 
 //         candle = new CANdle(LEDConstants.CANDLE_ID);
 // 
-//         // Configure the strip type and global brightness. GRB is the byte
-//         // order used by common WS2812/NeoPixel strips - change if colors
-//         // appear swapped on the actual hardware.
+//         // Configure the strip type (LEDConstants.STRIP_TYPE: change it if
+//         // colors appear swapped on the actual hardware) and global brightness.
 //         CANdleConfiguration config = new CANdleConfiguration();
-//         config.LED.StripType = StripTypeValue.GRB;
+//         config.LED.StripType = LEDConstants.STRIP_TYPE;
 //         config.LED.BrightnessScalar = LEDConstants.BRIGHTNESS;
 //         candle.getConfigurator().apply(config);
 //     }
@@ -142,8 +136,9 @@
 //     /** The alliance color, or purple when the alliance is not yet known. */
 //     private RGBWColor allianceColor() {
 //         return DriverStation.getAlliance()
-//             .map(alliance -> alliance == Alliance.Red ? kRed : kBlue)
-//             .orElse(kPurple);
+//             .map(alliance -> alliance == Alliance.Red
+//                 ? LEDConstants.RED_ALLIANCE_COLOR : LEDConstants.BLUE_ALLIANCE_COLOR)
+//             .orElse(LEDConstants.NO_ALLIANCE_COLOR);
 //     }
 // 
 //     /**
@@ -161,13 +156,13 @@
 //                 break;
 //             case HAS_GAME_PIECE:
 //                 candle.setControl(clearAnimationRequest);
-//                 candle.setControl(solidRequest.withColor(kGreen));
+//                 candle.setControl(solidRequest.withColor(LEDConstants.GAME_PIECE_COLOR));
 //                 break;
 //             case VISION_TRACKING:
-//                 candle.setControl(strobeRequest.withColor(kCyan));
+//                 candle.setControl(strobeRequest.withColor(LEDConstants.TRACKING_COLOR));
 //                 break;
 //             case ENDGAME:
-//                 candle.setControl(strobeRequest.withColor(kYellow));
+//                 candle.setControl(strobeRequest.withColor(LEDConstants.ENDGAME_COLOR));
 //                 break;
 //             case TELEOP_IDLE:
 //             default:

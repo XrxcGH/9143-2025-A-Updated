@@ -5,6 +5,7 @@ import edu.wpi.first.wpilibj.Preferences;
 import frc.robot.Constants.CorAlConstants;
 import frc.robot.Constants.DriveConstants;
 import frc.robot.Constants.ElevatorConstants;
+import frc.robot.Constants.TunablesConstants;
 import frc.robot.Constants.VisionConstants;
 
 /**
@@ -36,14 +37,17 @@ import frc.robot.Constants.VisionConstants;
  * next loop, on the next button press for values the Superstructure reads
  * at plan time, or on the next disable for the values held on a motor
  * controller or sensor (elevator, pivot, CANrange). Every numeric getter
- * except the two tracking gains clamps to a sane range so a typo on the
- * dashboard cannot command something dangerous.
+ * clamps to its range in Constants.TunablesConstants (the two tracking gains
+ * to a multiple of their default) so a typo on the dashboard cannot command
+ * something dangerous. The defaults version is there too; this class holds
+ * only the keys and the logic.
  */
 public final class Tunables {
     private Tunables() {}
 
     // ------------------------------------------------------------------
-    // Keys as shown in the Robot Preferences widget (grouped by prefix)
+    // Keys as shown in the Robot Preferences widget (grouped by prefix).
+    // They stay here, not in Constants: renaming a key loses its stored value.
     // ------------------------------------------------------------------
     private static final String TELEOP_SPEED_SCALE = "Drive - Teleop Speed Scale (0-1)";
     private static final String ELEVATOR_TRAVEL_RATIO = "Elevator - Travel Ratio (measured / modeled)";
@@ -77,28 +81,10 @@ public final class Tunables {
     private static final String DEFAULTS_VERSION_KEY = "Tunables - Defaults Version (do not edit)";
 
     /**
-     * Version stamp of the factory defaults in Constants. Stored values
-     * survive deploys, so changing a default in Constants does nothing on a
-     * robot that already has the key stored - unless this number is bumped.
-     * On the first boot after a bump, init() does one of two things:
-     *   - if it has a targeted migration block for the stored version, it
-     *     overwrites only the keys named there and keeps everything else
-     *     the team has tuned on the dashboard;
-     *   - otherwise it overwrites every tunable with the new defaults.
-     * Bump it when a default changes and must take effect on the robot
-     * (and add a migration block when only a few defaults moved); leave it
-     * alone to preserve values tuned on the dashboard.
-     *
-     * Version 15 is the set of defaults in Constants as released
-     * (Sept 2026); earlier versions were pre-release tuning rounds.
-     */
-    private static final int DEFAULTS_VERSION = 15;
-
-    /**
      * Seeds every key with its Constants default if it does not exist yet
      * (never overwrites a value the team has already tuned). When
-     * {@link #DEFAULTS_VERSION} has been bumped since the last boot it
-     * instead runs the targeted migration for the stored version or, if
+     * TunablesConstants.DEFAULTS_VERSION has been bumped since the last boot
+     * it instead runs the targeted migration for the stored version or, if
      * there is none, overwrites every key. Call once at robot startup,
      * before the subsystems are constructed.
      */
@@ -109,14 +95,15 @@ public final class Tunables {
         // on a setpoint), so everything else the team has tuned on the
         // dashboard (vision distances, speed scale, ...) survives. A bump
         // otherwise resets every tunable; add a block like this one whenever
-        // only a few defaults move.
+        // only a few defaults move. (14 and 15 name stored defaults versions,
+        // so they stay here: they are identifiers, not settings.)
         if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) == 14) {
             Preferences.setDouble(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP);
             Preferences.setDouble(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS);
             Preferences.setDouble(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR);
             Preferences.setInt(DEFAULTS_VERSION_KEY, 15);
         }
-        if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) != DEFAULTS_VERSION) {
+        if (Preferences.getInt(DEFAULTS_VERSION_KEY, 0) != TunablesConstants.DEFAULTS_VERSION) {
             resetToDefaults();
             return;
         }
@@ -159,7 +146,7 @@ public final class Tunables {
      * a defaults-version bump at boot that has no targeted migration).
      */
     public static void resetToDefaults() {
-        Preferences.setInt(DEFAULTS_VERSION_KEY, DEFAULTS_VERSION);
+        Preferences.setInt(DEFAULTS_VERSION_KEY, TunablesConstants.DEFAULTS_VERSION);
         Preferences.setDouble(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE);
         Preferences.setDouble(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO);
         Preferences.setDouble(ELEVATOR_ZERO_HEIGHT, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
@@ -215,11 +202,12 @@ public final class Tunables {
 
     /**
      * Fraction of theoretical top speed / rotation rate at full stick,
-     * clamped to [0.05, 1.0] so a bad dashboard entry can neither disable
-     * driving nor exceed the drivetrain's capability.
+     * clamped so a bad dashboard entry can neither disable driving nor
+     * exceed the drivetrain's capability.
      */
     public static double teleopSpeedScale() {
-        return clamped(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE, 0.05, 1.0);
+        return clamped(TELEOP_SPEED_SCALE, DriveConstants.TELEOP_SPEED_SCALE,
+            TunablesConstants.TELEOP_SPEED_SCALE_MIN, TunablesConstants.TELEOP_SPEED_SCALE_MAX);
     }
 
     // ------------------------------------------------------------------
@@ -235,7 +223,8 @@ public final class Tunables {
      * ~3x in either direction (soft limits and presets are in inches).
      */
     public static double elevatorTravelRatio() {
-        return clamped(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO, 0.33, 3.0);
+        return clamped(ELEVATOR_TRAVEL_RATIO, ElevatorConstants.ELEVATOR_MEASURED_TRAVEL_RATIO,
+            TunablesConstants.ELEVATOR_TRAVEL_RATIO_MIN, TunablesConstants.ELEVATOR_TRAVEL_RATIO_MAX);
     }
 
     /**
@@ -245,22 +234,26 @@ public final class Tunables {
      * to a few inches: anything larger is a measurement error.
      */
     public static double elevatorZeroHeight() {
-        return clamped(ELEVATOR_ZERO_HEIGHT, ElevatorConstants.ELEVATOR_ZERO_HEIGHT, 0.0, 6.0);
+        return clamped(ELEVATOR_ZERO_HEIGHT, ElevatorConstants.ELEVATOR_ZERO_HEIGHT,
+            TunablesConstants.ELEVATOR_ZERO_HEIGHT_MIN, TunablesConstants.ELEVATOR_ZERO_HEIGHT_MAX);
     }
 
     /** Position loop proportional gain, duty cycle per inch of error. */
     public static double elevatorKp() {
-        return clamped(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP, 0.0, 2.0);
+        return clamped(ELEVATOR_KP, ElevatorConstants.ELEVATOR_kP,
+            TunablesConstants.ELEVATOR_KP_MIN, TunablesConstants.ELEVATOR_KP_MAX);
     }
 
     /** Static friction feedforward, volts. */
     public static double elevatorKs() {
-        return clamped(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS, 0.0, 3.0);
+        return clamped(ELEVATOR_KS, ElevatorConstants.ELEVATOR_kS,
+            TunablesConstants.ELEVATOR_KS_MIN, TunablesConstants.ELEVATOR_KS_MAX);
     }
 
     /** Multiplier on the NEO free-speed kV model (1.0 = pure back-EMF model). */
     public static double elevatorKvScale() {
-        return clamped(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE, 0.0, 2.0);
+        return clamped(ELEVATOR_KV_SCALE, ElevatorConstants.ELEVATOR_kV_SCALE,
+            TunablesConstants.ELEVATOR_KV_SCALE_MIN, TunablesConstants.ELEVATOR_KV_SCALE_MAX);
     }
 
     /**
@@ -269,7 +262,8 @@ public final class Tunables {
      * mean the carriage weighs far more than the CAD says.
      */
     public static double elevatorKa() {
-        return clamped(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA, 0.0, 0.012);
+        return clamped(ELEVATOR_KA, ElevatorConstants.ELEVATOR_kA,
+            TunablesConstants.ELEVATOR_KA_MIN, TunablesConstants.ELEVATOR_KA_MAX);
     }
 
     /**
@@ -277,22 +271,26 @@ public final class Tunables {
      * control. Set it from the "Elevator/kG From Cruise" dashboard readout.
      */
     public static double elevatorKg() {
-        return clamped(ELEVATOR_KG, ElevatorConstants.ELEVATOR_kG, 0.0, 3.0);
+        return clamped(ELEVATOR_KG, ElevatorConstants.ELEVATOR_kG,
+            TunablesConstants.ELEVATOR_KG_MIN, TunablesConstants.ELEVATOR_KG_MAX);
     }
 
     /** MAXMotion cruise velocity, inches per second. */
     public static double elevatorCruiseVelocity() {
-        return clamped(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY, 0.5, 60.0);
+        return clamped(ELEVATOR_CRUISE_VELOCITY, ElevatorConstants.ELEVATOR_MAX_VELOCITY,
+            TunablesConstants.ELEVATOR_CRUISE_VELOCITY_MIN, TunablesConstants.ELEVATOR_CRUISE_VELOCITY_MAX);
     }
 
     /** MAXMotion acceleration, inches per second squared. */
     public static double elevatorMaxAcceleration() {
-        return clamped(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION, 1.0, 500.0);
+        return clamped(ELEVATOR_MAX_ACCELERATION, ElevatorConstants.ELEVATOR_MAX_ACCELERATION,
+            TunablesConstants.ELEVATOR_MAX_ACCELERATION_MIN, TunablesConstants.ELEVATOR_MAX_ACCELERATION_MAX);
     }
 
     /** Deviation from the MAXMotion profile (inches) that triggers a profile regeneration. */
     public static double elevatorProfileError() {
-        return clamped(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR, 0.05, 5.0);
+        return clamped(ELEVATOR_PROFILE_ERROR, ElevatorConstants.ELEVATOR_ALLOWED_PROFILE_ERROR,
+            TunablesConstants.ELEVATOR_PROFILE_ERROR_MIN, TunablesConstants.ELEVATOR_PROFILE_ERROR_MAX);
     }
 
     // ------------------------------------------------------------------
@@ -303,12 +301,14 @@ public final class Tunables {
 
     /** Motion Magic cruise velocity, deg/s (clamped below the ~550 deg/s free speed). */
     public static double pivotCruiseVelocity() {
-        return clamped(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY, 10.0, 500.0);
+        return clamped(PIVOT_CRUISE_VELOCITY, CorAlConstants.CORAL_PIVOT_MAX_VELOCITY,
+            TunablesConstants.PIVOT_CRUISE_VELOCITY_MIN, TunablesConstants.PIVOT_CRUISE_VELOCITY_MAX);
     }
 
     /** Motion Magic acceleration, deg/s^2. */
     public static double pivotMaxAcceleration() {
-        return clamped(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION, 20.0, 3000.0);
+        return clamped(PIVOT_MAX_ACCELERATION, CorAlConstants.CORAL_PIVOT_MAX_ACCELERATION,
+            TunablesConstants.PIVOT_MAX_ACCELERATION_MIN, TunablesConstants.PIVOT_MAX_ACCELERATION_MAX);
     }
 
     /**
@@ -318,7 +318,8 @@ public final class Tunables {
      * Constants. Clamped to about three times the CAD estimate (~0.3 V).
      */
     public static double pivotKg() {
-        return clamped(PIVOT_KG, CorAlConstants.CORAL_PIVOT_kG, 0.0, 1.0);
+        return clamped(PIVOT_KG, CorAlConstants.CORAL_PIVOT_kG,
+            TunablesConstants.PIVOT_KG_MIN, TunablesConstants.PIVOT_KG_MAX);
     }
 
     /**
@@ -327,12 +328,14 @@ public final class Tunables {
      * with the pivot kG.
      */
     public static double pivotBalanceAngle() {
-        return clamped(PIVOT_BALANCE_ANGLE, CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG, 1.0, 179.0);
+        return clamped(PIVOT_BALANCE_ANGLE, CorAlConstants.CORAL_PIVOT_BALANCE_ANGLE_DEG,
+            TunablesConstants.PIVOT_BALANCE_ANGLE_MIN, TunablesConstants.PIVOT_BALANCE_ANGLE_MAX);
     }
 
     /** Motion Magic jerk limit, deg/s^3 (0 disables the limit - a plain trapezoid). */
     public static double pivotMaxJerk() {
-        return clamped(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK, 0.0, 50000.0);
+        return clamped(PIVOT_MAX_JERK, CorAlConstants.CORAL_PIVOT_MAX_JERK,
+            TunablesConstants.PIVOT_MAX_JERK_MIN, TunablesConstants.PIVOT_MAX_JERK_MAX);
     }
 
     // ------------------------------------------------------------------
@@ -342,7 +345,8 @@ public final class Tunables {
 
     /** CANrange proximity threshold, meters: a coral is "present" below it (minus the hysteresis). */
     public static double coralDetectDistance() {
-        return clamped(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD, 0.02, 4.0);
+        return clamped(CORAL_DETECT_DISTANCE, CorAlConstants.GAME_PIECE_DETECTION_THRESHOLD,
+            TunablesConstants.CORAL_DETECT_DISTANCE_MIN, TunablesConstants.CORAL_DETECT_DISTANCE_MAX);
     }
 
     /**
@@ -364,7 +368,8 @@ public final class Tunables {
      * holding a coral and split the two.
      */
     public static double coralMinSignalStrength() {
-        return clamped(CORAL_MIN_SIGNAL_STRENGTH, CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH, 0.0, 30000.0);
+        return clamped(CORAL_MIN_SIGNAL_STRENGTH, CorAlConstants.GAME_PIECE_MIN_SIGNAL_STRENGTH,
+            TunablesConstants.CORAL_MIN_SIGNAL_STRENGTH_MIN, TunablesConstants.CORAL_MIN_SIGNAL_STRENGTH_MAX);
     }
 
     /**
@@ -380,7 +385,8 @@ public final class Tunables {
 
     /** CANrange proximity hysteresis, meters, applied on both sides of the threshold. */
     public static double coralDetectHysteresis() {
-        return clamped(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS, 0.0, 0.1);
+        return clamped(CORAL_DETECT_HYSTERESIS, CorAlConstants.GAME_PIECE_DETECTION_HYSTERESIS,
+            TunablesConstants.CORAL_DETECT_HYSTERESIS_MIN, TunablesConstants.CORAL_DETECT_HYSTERESIS_MAX);
     }
 
     // ------------------------------------------------------------------
@@ -389,48 +395,56 @@ public final class Tunables {
 
     /** Forward distance from the robot center to a reef tag with the front bumpers flush on the reef base. */
     public static double reefFlushDistance() {
-        return clampedMagnitude(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE, 0.3, 2.0);
+        return clampedMagnitude(REEF_FLUSH_DISTANCE, VisionConstants.REEF_FLUSH_DISTANCE,
+            TunablesConstants.REEF_FLUSH_DISTANCE_MIN, TunablesConstants.REEF_FLUSH_DISTANCE_MAX);
     }
 
     /** Distance from the robot center back to a coral-station tag with the rear bumpers flush (used as a negative forward goal). */
     public static double stationFlushDistance() {
-        return clampedMagnitude(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE, 0.3, 2.0);
+        return clampedMagnitude(STATION_FLUSH_DISTANCE, VisionConstants.STATION_FLUSH_DISTANCE,
+            TunablesConstants.STATION_FLUSH_DISTANCE_MIN, TunablesConstants.STATION_FLUSH_DISTANCE_MAX);
     }
 
     /** Standoff distance from a reef tag for L1 scoring. */
     public static double l1ScoreDistance() {
-        return clampedMagnitude(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE, 0.3, 3.0);
+        return clampedMagnitude(L1_SCORE_DISTANCE, VisionConstants.L1_SCORE_DISTANCE,
+            TunablesConstants.L1_SCORE_DISTANCE_MIN, TunablesConstants.L1_SCORE_DISTANCE_MAX);
     }
 
     /** Distance from the robot center to a barge tag at the net-shot position (centered, square). */
     public static double bargeScoreDistance() {
-        return clampedMagnitude(BARGE_SCORE_DISTANCE, VisionConstants.BARGE_SCORE_DISTANCE, 0.3, 3.0);
+        return clampedMagnitude(BARGE_SCORE_DISTANCE, VisionConstants.BARGE_SCORE_DISTANCE,
+            TunablesConstants.BARGE_SCORE_DISTANCE_MIN, TunablesConstants.BARGE_SCORE_DISTANCE_MAX);
     }
 
     /** Distance from the robot center to a processor tag with the front bumper just off the wall. */
     public static double processorDistance() {
-        return clampedMagnitude(PROCESSOR_DISTANCE, VisionConstants.PROCESSOR_DISTANCE, 0.3, 2.0);
+        return clampedMagnitude(PROCESSOR_DISTANCE, VisionConstants.PROCESSOR_DISTANCE,
+            TunablesConstants.PROCESSOR_DISTANCE_MIN, TunablesConstants.PROCESSOR_DISTANCE_MAX);
     }
 
     /** Lateral offset from a reef tag center to a branch center. */
     public static double reefBranchOffset() {
-        return clampedMagnitude(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET, 0.0, 0.5);
+        return clampedMagnitude(REEF_BRANCH_OFFSET, VisionConstants.REEF_BRANCH_OFFSET,
+            TunablesConstants.REEF_BRANCH_OFFSET_MIN, TunablesConstants.REEF_BRANCH_OFFSET_MAX);
     }
 
     // ------------------------------------------------------------------
     // Vision tracking gains
     // ------------------------------------------------------------------
 
-    /** m/s of drive command per meter of position error, clamped to 0 - 3x the default. */
+    /** m/s of drive command per meter of position error, clamped to 0 - TRACKING_KP_MAX_MULTIPLE x the default. */
     public static double trackingDistanceKp() {
         return clamped(TRACKING_DISTANCE_KP, VisionConstants.TrackingGains.DISTANCE_kP,
-            0.0, 3.0 * VisionConstants.TrackingGains.DISTANCE_kP);
+            TunablesConstants.TRACKING_DISTANCE_KP_MIN,
+            TunablesConstants.TRACKING_KP_MAX_MULTIPLE * VisionConstants.TrackingGains.DISTANCE_kP);
     }
 
-    /** rad/s of rotation command per degree of angle error, clamped to 0 - 3x the default. */
+    /** rad/s of rotation command per degree of angle error, clamped to 0 - TRACKING_KP_MAX_MULTIPLE x the default. */
     public static double trackingRotationKp() {
         return clamped(TRACKING_ROTATION_KP, VisionConstants.TrackingGains.ROTATION_kP,
-            0.0, 3.0 * VisionConstants.TrackingGains.ROTATION_kP);
+            TunablesConstants.TRACKING_ROTATION_KP_MIN,
+            TunablesConstants.TRACKING_KP_MAX_MULTIPLE * VisionConstants.TrackingGains.ROTATION_kP);
     }
 
 }

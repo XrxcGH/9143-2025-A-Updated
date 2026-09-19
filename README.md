@@ -434,6 +434,7 @@ Two build details:
 
 - `gradle.properties` pins Gradle to the WPILib 2026 JDK at its standard Windows install path (`C:/Users/Public/wpilib/2026/jdk`). Without it, Gradle uses whatever `JAVA_HOME` points at, and some other JDK distributions ship an older `msvcp140.dll` that hard-crashes WPILib's native libraries when a unit test loads them. On macOS / Linux, or with a non-default WPILib install, **change or remove that line**.
 - Tests fork one JVM per class (`forkEvery`) because simulated CAN devices reject duplicate IDs within a process.
+- GitHub runs the same `./gradlew build` on every pull request and every push to `main` (`.github/workflows/build.yml`). A red X on a pull request means the code does not build or a test fails; the run's log shows the first error.
 
 ### Other tools
 - **Phoenix Tuner X**: CTRE device config/firmware, hoot log viewing, swerve project generator (no Tuner X project file is kept in the repository; see the checklist before regenerating `TunerConstants.java`).

@@ -1,0 +1,40 @@
+# Builds the robot code and runs every unit test on each pull request, and on each
+# push to main. It is the same check as "./gradlew build" on a laptop, so a red X
+# on a pull request means the code would not build or a test failed: open the run,
+# expand the "Build and run the tests" step and read the first error.
+name: Build and test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only access is all this job needs.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run it replaces.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # WPILib 2026 builds with Java 17.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Caches Gradle's downloads between runs.
+      - uses: gradle/actions/setup-gradle@v4
+
+      # gradle.properties points Gradle at the WPILib JDK on a Windows laptop. On the
+      # build server that path does not exist, so the JDK installed above is used.
+      - name: Build and run the tests
+        run: ./gradlew build -Dorg.gradle.java.home="$JAVA_HOME"

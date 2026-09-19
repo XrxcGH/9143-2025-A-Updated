@@ -1,0 +1,12 @@
+# Line endings: every text file is stored with LF, so a diff never shows a whole
+# file changed just because it was saved on a different operating system.
+* text=auto eol=lf
+
+# Windows batch files must keep CRLF to run.
+*.bat text eol=crlf
+
+# Binary files are never touched.
+*.jar binary
+*.png binary
+*.glb binary
+*.step binary

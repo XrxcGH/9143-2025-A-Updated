@@ -11,9 +11,9 @@ import edu.wpi.first.wpilibj.RobotBase;
  * works correctly in simulation and unit tests.
  */
 public final class Main {
-	private Main() {}
+    private Main() {}
 
-	public static void main(String... args) {
-		RobotBase.startRobot(Robot::new);
-	}
+    public static void main(String... args) {
+        RobotBase.startRobot(Robot::new);
+    }
 }

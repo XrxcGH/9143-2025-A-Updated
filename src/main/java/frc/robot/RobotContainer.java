@@ -97,9 +97,9 @@ import frc.robot.util.Tunables;
  */
 public class RobotContainer {
     /** Top speed from swerve characterization, used to scale driver input. */
-    private double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
+    private double maxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
     /** Max rotation rate for driver input (DriveConstants.MAX_ANGULAR_RATE_ROT_PER_SEC). */
-    private double MaxAngularRate = RotationsPerSecond.of(DriveConstants.MAX_ANGULAR_RATE_ROT_PER_SEC).in(RadiansPerSecond);
+    private double maxAngularRate =RotationsPerSecond.of(DriveConstants.MAX_ANGULAR_RATE_ROT_PER_SEC).in(RadiansPerSecond);
 
     // ------------------------------------------------------------------
     // Reusable swerve requests for teleop driving (allocated once)
@@ -122,27 +122,27 @@ public class RobotContainer {
         .withDriveRequestType(DriveConstants.TELEOP_DRIVE_REQUEST_TYPE);
 
     /** Publishes swerve state to NetworkTables/SignalLogger every odometry update. */
-    private final Telemetry logger = new Telemetry(MaxSpeed);
+    private final Telemetry logger = new Telemetry(maxSpeed);
 
     // Controllers: driver handles the drivetrain, operator handles mechanisms
-    private final CommandXboxController driver_controller =
+    private final CommandXboxController driverController =
         new CommandXboxController(ControlsConstants.DRIVER_CONTROLLER_PORT);
-    private final CommandXboxController operator_controller =
+    private final CommandXboxController operatorController =
         new CommandXboxController(ControlsConstants.OPERATOR_CONTROLLER_PORT);
     /** Haptic cues (coral acquired, pose reached, aligned, back away). */
-    private final Rumble driverRumble = new Rumble(driver_controller);
-    private final Rumble operatorRumble = new Rumble(operator_controller);
+    private final Rumble driverRumble = new Rumble(driverController);
+    private final Rumble operatorRumble = new Rumble(operatorController);
 
     // ------------------------------------------------------------------
     // Subsystems
     // ------------------------------------------------------------------
     public final Swerve swerve;
     private final Elevator elevator = new Elevator();
-    private final CorAl coral = new CorAl();
+    private final CorAl corAl = new CorAl();
     // CANdle disabled (no CANdle on the robot): private final LEDs leds;
 
     /** Coordinated elevator+arm motion with collision interlocks. */
-    private final Superstructure superstructure = new Superstructure(elevator, coral);
+    private final Superstructure superstructure = new Superstructure(elevator, corAl);
 
     /** Dashboard chooser for selecting the autonomous routine (logged through
      *  AdvantageKit so every log records which auto was selected). */
@@ -163,7 +163,7 @@ public class RobotContainer {
         // CANdle disabled (no CANdle on the robot). LEDs derive their state
         // from the other subsystems through these suppliers; restore this
         // line, the field, the import, and the Dashboard argument together:
-        // leds = new LEDs(coral::isGamePieceDetected, swerve::isVisionTrackingEnabled);
+        // leds = new LEDs(corAl::isGamePieceDetected, swerve::isVisionTrackingEnabled);
 
         // Named commands for the PathPlanner autos (registered before the
         // autos are loaded by buildAutoChooser). "score*" = raise, eject,
@@ -242,14 +242,14 @@ public class RobotContainer {
         // reef goal: a STOW goal accepts only station tags, and the robot
         // would sit still in front of the reef.
         swerve.getVision().setGoalSupplier(() ->
-            superstructure.getGoal() == Superstructure.Goal.STOW && coral.isGamePieceDetected()
+            superstructure.getGoal() == Superstructure.Goal.STOW && corAl.isGamePieceDetected()
                 ? Superstructure.Goal.CORAL_L4 : superstructure.getGoal());
 
         // (Tunables.init() runs in Robot before this container is built, so
         // the subsystems above were configured from the stored values.)
 
         // All Elastic/NetworkTables publishing is centralized here.
-        dashboard = new Dashboard(swerve, elevator, coral, /* CANdle disabled: leds, */ superstructure);
+        dashboard = new Dashboard(swerve, elevator, corAl, /* CANdle disabled: leds, */ superstructure);
 
         configureBindings();
     }
@@ -297,34 +297,34 @@ public class RobotContainer {
         swerve.setDefaultCommand(
             swerve.applyRequest(() -> {
                 double scale = Tunables.teleopSpeedScale() * heightSpeedScale();
-                double maxSpeed = MaxSpeed * scale;
-                double maxAngularRate = MaxAngularRate * scale;
+                double scaledMaxSpeed = maxSpeed * scale;
+                double scaledMaxAngularRate = maxAngularRate * scale;
                 return drive
-                    .withDeadband(maxSpeed * DriveConstants.STICK_DEADBAND)
-                    .withRotationalDeadband(maxAngularRate * DriveConstants.STICK_DEADBAND)
-                    .withVelocityX(-driver_controller.getLeftY() * maxSpeed)
-                    .withVelocityY(-driver_controller.getLeftX() * maxSpeed)
-                    .withRotationalRate(-driver_controller.getRightX() * maxAngularRate);
+                    .withDeadband(scaledMaxSpeed * DriveConstants.STICK_DEADBAND)
+                    .withRotationalDeadband(scaledMaxAngularRate * DriveConstants.STICK_DEADBAND)
+                    .withVelocityX(-driverController.getLeftY() * scaledMaxSpeed)
+                    .withVelocityY(-driverController.getLeftX() * scaledMaxSpeed)
+                    .withRotationalRate(-driverController.getRightX() * scaledMaxAngularRate);
             })
         );
 
         Trigger testMode = new Trigger(DriverStation::isTest);
 
         // A: X-lock. B (point wheels) and the SysId chords only exist in Test mode.
-        driver_controller.a().whileTrue(swerve.applyRequest(() -> brake));
-        driver_controller.b().and(testMode).whileTrue(swerve.applyRequest(() ->
-            point.withModuleDirection(new Rotation2d(-driver_controller.getLeftY(), -driver_controller.getLeftX()))));
-        driver_controller.back().and(driver_controller.y()).and(testMode).whileTrue(swerve.sysIdDynamic(Direction.kForward));
-        driver_controller.back().and(driver_controller.x()).and(testMode).whileTrue(swerve.sysIdDynamic(Direction.kReverse));
-        driver_controller.start().and(driver_controller.y()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
-        driver_controller.start().and(driver_controller.x()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
+        driverController.a().whileTrue(swerve.applyRequest(() -> brake));
+        driverController.b().and(testMode).whileTrue(swerve.applyRequest(() ->
+            point.withModuleDirection(new Rotation2d(-driverController.getLeftY(), -driverController.getLeftX()))));
+        driverController.back().and(driverController.y()).and(testMode).whileTrue(swerve.sysIdDynamic(Direction.kForward));
+        driverController.back().and(driverController.x()).and(testMode).whileTrue(swerve.sysIdDynamic(Direction.kReverse));
+        driverController.start().and(driverController.y()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kForward));
+        driverController.start().and(driverController.x()).and(testMode).whileTrue(swerve.sysIdQuasistatic(Direction.kReverse));
 
         // D-pad nudges in all eight directions from the POV angle, so a thumb
         // that lands on a diagonal still moves the robot (povUp() and the
         // other cardinal triggers are true only at exactly their own angle,
         // so bindings on those alone would ignore a 45-degree press).
-        new Trigger(() -> driver_controller.getHID().getPOV() >= 0).whileTrue(swerve.applyRequest(() -> {
-            double pov = Math.toRadians(driver_controller.getHID().getPOV()); // 0 = up, clockwise
+        new Trigger(() -> driverController.getHID().getPOV() >= 0).whileTrue(swerve.applyRequest(() -> {
+            double pov = Math.toRadians(driverController.getHID().getPOV()); // 0 = up, clockwise
             return forwardStraight.withVelocityX(DriveConstants.NUDGE_SPEED * Math.cos(pov))
                 .withVelocityY(-DriveConstants.NUDGE_SPEED * Math.sin(pov));
         }));
@@ -335,10 +335,10 @@ public class RobotContainer {
         // heading, so it is safe at any time. While disabled with no tag
         // supplying a heading it also seeds the pose heading to the
         // alliance's forward direction; back + left bumper forces that seed.
-        driver_controller.leftBumper().and(driver_controller.back().negate())
+        driverController.leftBumper().and(driverController.back().negate())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(
                 DriverStation.isDisabled() && !swerve.getVision().hasFreshHeadingSeed())).ignoringDisable(true));
-        driver_controller.back().and(driver_controller.leftBumper())
+        driverController.back().and(driverController.leftBumper())
             .onTrue(Commands.runOnce(() -> swerve.zeroDriverHeading(true)).ignoringDisable(true));
 
         // Y: correct the pose heading from tag geometry. While enabled only
@@ -349,13 +349,13 @@ public class RobotContainer {
         // does nothing. The driver's frame is held in the raw gyro frame, so
         // "forward" on the stick does not move. (Not in Test mode, where
         // Back / Start + Y are the SysId bindings.)
-        driver_controller.y().and(testMode.negate())
+        driverController.y().and(testMode.negate())
             .onTrue(Commands.runOnce(() -> swerve.getVision().requestHeadingReseed()).ignoringDisable(true));
 
         // Hold a trigger to align on that side's branch; release = sticks.
-        driver_controller.leftTrigger(ControlsConstants.ALIGN_TRIGGER_THRESHOLD)
+        driverController.leftTrigger(ControlsConstants.ALIGN_TRIGGER_THRESHOLD)
             .whileTrue(alignTo(Vision.BranchSide.LEFT));
-        driver_controller.rightTrigger(ControlsConstants.ALIGN_TRIGGER_THRESHOLD)
+        driverController.rightTrigger(ControlsConstants.ALIGN_TRIGGER_THRESHOLD)
             .whileTrue(alignTo(Vision.BranchSide.RIGHT));
 
         swerve.registerTelemetry(logger::telemeterize);
@@ -367,20 +367,20 @@ public class RobotContainer {
     private void configureSuperstructureBindings() {
         // LB is the manual take-over. Everything automatic is gated on it
         // being up, so a held LB means "sticks only" with no surprises.
-        Trigger manual = operator_controller.leftBumper();
+        Trigger manual = operatorController.leftBumper();
         Trigger auto = manual.negate();
         Trigger teleop = new Trigger(DriverStation::isTeleopEnabled);
         Trigger disabled = new Trigger(DriverStation::isDisabled);
 
         // ---- Coral levels: a diamond under the right thumb ----
-        operator_controller.a().and(auto).onTrue(superstructure.goToCoralL1()); // bottom
-        operator_controller.x().and(auto).onTrue(superstructure.goToCoralL2()); // left
-        operator_controller.b().and(auto).onTrue(superstructure.goToCoralL3()); // right
-        operator_controller.y().and(auto).onTrue(superstructure.goToCoralL4()); // top
+        operatorController.a().and(auto).onTrue(superstructure.goToCoralL1()); // bottom
+        operatorController.x().and(auto).onTrue(superstructure.goToCoralL2()); // left
+        operatorController.b().and(auto).onTrue(superstructure.goToCoralL3()); // right
+        operatorController.y().and(auto).onTrue(superstructure.goToCoralL4()); // top
 
         // ---- Triggers: game piece in / game piece out ----
         // HOME: stow (+ intake rollers if empty), or algae carry if one is held.
-        operator_controller.leftTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto)
+        operatorController.leftTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto)
             .onTrue(superstructure.home());
 
         // SCORE: gated on the measured pose. Pulled early it waits -
@@ -388,35 +388,35 @@ public class RobotContainer {
         // never interrupt a staged move that is still on its way to the pose.
         Trigger ready = new Trigger(superstructure::readyToScore);
         Command score = superstructure.score(() -> swerve.getStateCopy().Pose);
-        operator_controller.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto).and(ready)
+        operatorController.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto).and(ready)
             .onTrue(score);
         // Driver's copy: also waits for the aligner when the aligner is in use.
-        driver_controller.rightBumper().and(auto).and(ready) // not while the operator holds the manual take-over
+        driverController.rightBumper().and(auto).and(ready) // not while the operator holds the manual take-over
             .and(() -> !swerve.isVisionTrackingEnabled() || swerve.isAligned())
             .onTrue(score);
 
         // ---- Algae on the left thumb: up = high, down = low, left = hold ----
         // Diagonals count toward up/down so a sloppy press is not lost.
-        Trigger dpadUp = operator_controller.povUp()
-            .or(operator_controller.povUpLeft()).or(operator_controller.povUpRight());
-        Trigger dpadDown = operator_controller.povDown()
-            .or(operator_controller.povDownLeft()).or(operator_controller.povDownRight());
+        Trigger dpadUp = operatorController.povUp()
+            .or(operatorController.povUpLeft()).or(operatorController.povUpRight());
+        Trigger dpadDown = operatorController.povDown()
+            .or(operatorController.povDownLeft()).or(operatorController.povDownRight());
         dpadUp.and(auto).onTrue(superstructure.intakeAlgaeHigh());
         dpadDown.and(auto).onTrue(superstructure.intakeAlgaeLow());
-        operator_controller.povLeft().and(auto).onTrue(superstructure.holdAlgae());
-        operator_controller.rightBumper().and(auto).onTrue(superstructure.goToBarge()); // RT then fires it
+        operatorController.povLeft().and(auto).onTrue(superstructure.holdAlgae());
+        operatorController.rightBumper().and(auto).onTrue(superstructure.goToBarge()); // RT then fires it
 
         // D-pad right: swing the arm to the safe travel angle, in place. It is
         // deliberately not on Back or Start: those are the disabled-only
         // encoder zeros, and a button still held from zeroing when the robot
         // enables would fire an enabled binding without a fresh press.
-        operator_controller.povRight().and(auto).onTrue(superstructure.raiseArm());
+        operatorController.povRight().and(auto).onTrue(superstructure.raiseArm());
 
         // ---- Encoder zeroing: DISABLED only, and only after a held press ----
-        operator_controller.back().and(disabled).debounce(ControlsConstants.ZERO_HOLD_SECONDS)
+        operatorController.back().and(disabled).debounce(ControlsConstants.ZERO_HOLD_SECONDS)
             .onTrue(Commands.runOnce(elevator::resetEncoders, elevator).ignoringDisable(true));
-        operator_controller.start().and(disabled).debounce(ControlsConstants.ZERO_HOLD_SECONDS)
-            .onTrue(Commands.runOnce(coral::resetPivotEncoder, coral).ignoringDisable(true));
+        operatorController.start().and(disabled).debounce(ControlsConstants.ZERO_HOLD_SECONDS)
+            .onTrue(Commands.runOnce(corAl::resetPivotEncoder, corAl).ignoringDisable(true));
 
         // ---- Manual take-over (the mechanisms have no default commands, so
         // the sticks are live only while LB is held) ----
@@ -426,17 +426,17 @@ public class RobotContainer {
         // it - whileTrue alone waits for an edge that was dropped while
         // disabled, and with LB held every other operator input is locked out.)
         manual.and(new Trigger(DriverStation::isEnabled)).whileTrue(superstructure.manualOverride(
-            () -> -operator_controller.getLeftY(),      // up = carriage up
-            () -> -operator_controller.getRightY()));   // forward = claw forward (+ angle)
+            () -> -operatorController.getLeftY(),      // up = carriage up
+            () -> -operatorController.getRightY()));   // forward = claw forward (+ angle)
         // Raw rollers inside manual: no pose check, no subsystem requirement.
-        manual.and(operator_controller.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD))
+        manual.and(operatorController.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD))
             .whileTrue(superstructure.rollersRaw(Constants.CorAlConstants.CORAL_SCORE_SPEED));
-        manual.and(operator_controller.leftTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD))
+        manual.and(operatorController.leftTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD))
             .whileTrue(superstructure.rollersRaw(Constants.CorAlConstants.ALGAE_INTAKE_SPEED));
 
         // ---- Rumble cues (strengths and timings: ControlsConstants.RUMBLE_*) ----
         // Coral acquired: both drivers, one long buzz -> leave the station.
-        new Trigger(coral::isGamePieceDetected).and(teleop)
+        new Trigger(corAl::isGamePieceDetected).and(teleop)
             .onTrue(driverRumble.pulse(ControlsConstants.RUMBLE_ACQUIRED_STRENGTH, ControlsConstants.RUMBLE_ACQUIRED_SECONDS)
                 .alongWith(operatorRumble.pulse(
                     ControlsConstants.RUMBLE_ACQUIRED_STRENGTH, ControlsConstants.RUMBLE_ACQUIRED_SECONDS)));
@@ -453,7 +453,7 @@ public class RobotContainer {
                 ControlsConstants.RUMBLE_BACK_AWAY_STRENGTH, ControlsConstants.RUMBLE_BACK_AWAY_ON_SECONDS,
                 ControlsConstants.RUMBLE_BACK_AWAY_OFF_SECONDS).repeatedly());
         // Score pulled with nothing to score from: operator, one tick.
-        operator_controller.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto)
+        operatorController.rightTrigger(ControlsConstants.OPERATOR_TRIGGER_THRESHOLD).and(auto)
             .and(() -> !superstructure.isScoringGoal())
             .onTrue(operatorRumble.pulse(ControlsConstants.RUMBLE_NO_SCORE_STRENGTH,
                 ControlsConstants.RUMBLE_NO_SCORE_SECONDS));
@@ -526,13 +526,13 @@ public class RobotContainer {
      */
     public void enabledInit() {
         elevator.holdCurrentPosition();
-        coral.setPivotAngle(coral.getPivotAngle());
+        corAl.setPivotAngle(corAl.getPivotAngle());
     }
 
     /** Called from Robot.disabledInit(): stop every mechanism output. */
     public void disabledInit() {
         elevator.stopElevator();
-        coral.stopPivot();
-        coral.stopIntake();
+        corAl.stopPivot();
+        corAl.stopIntake();
     }
 }

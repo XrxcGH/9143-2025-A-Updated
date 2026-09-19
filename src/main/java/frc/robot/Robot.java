@@ -43,10 +43,10 @@ import frc.robot.util.Tunables;
  */
 public class Robot extends LoggedRobot {
     /** The autonomous command selected on the dashboard, scheduled in autonomousInit(). */
-    private Command m_autonomousCommand;
+    private Command autonomousCommand;
 
     /** Container that owns all subsystems and controller bindings. */
-    private final RobotContainer m_robotContainer;
+    private final RobotContainer robotContainer;
 
     /** Shown while .wpilog files go to internal storage (no USB stick). */
     private final Alert internalLogAlert = new Alert(
@@ -98,7 +98,7 @@ public class Robot extends LoggedRobot {
         // since the mechanisms configure their controllers from them.
         Tunables.init();
 
-        m_robotContainer = new RobotContainer();
+        robotContainer = new RobotContainer();
 
         // Warm up the PathPlanner path-following code (trajectory generation,
         // JSON parsing, JIT compilation) while the robot is sitting disabled.
@@ -118,13 +118,13 @@ public class Robot extends LoggedRobot {
 
         // Publish all Elastic dashboard data (field pose, match time,
         // subsystem status, alerts) once per loop.
-        m_robotContainer.updateDashboard();
+        robotContainer.updateDashboard();
     }
 
     @Override
     public void disabledInit() {
         // Stop all mechanism outputs when the robot is disabled
-        m_robotContainer.disabledInit();
+        robotContainer.disabledInit();
 
         // Show the pre/post-match checklist tab while disabled
         Elastic.selectTab("Setup");
@@ -136,7 +136,7 @@ public class Robot extends LoggedRobot {
     @Override
     public void disabledExit() {
         // Hold both mechanisms where they are (see RobotContainer.enabledInit)
-        m_robotContainer.enabledInit();
+        robotContainer.enabledInit();
     }
 
     /**
@@ -162,10 +162,10 @@ public class Robot extends LoggedRobot {
     public void autonomousInit() {
         Elastic.selectTab("Autonomous");
 
-        m_autonomousCommand = m_robotContainer.getAutonomousCommand();
+        autonomousCommand = robotContainer.getAutonomousCommand();
 
-        if (m_autonomousCommand != null) {
-            CommandScheduler.getInstance().schedule(m_autonomousCommand);
+        if (autonomousCommand != null) {
+            CommandScheduler.getInstance().schedule(autonomousCommand);
         }
     }
 
@@ -180,8 +180,8 @@ public class Robot extends LoggedRobot {
     public void teleopInit() {
         Elastic.selectTab("Teleop");
 
-        if (m_autonomousCommand != null) {
-            m_autonomousCommand.cancel();
+        if (autonomousCommand != null) {
+            autonomousCommand.cancel();
         }
     }
 

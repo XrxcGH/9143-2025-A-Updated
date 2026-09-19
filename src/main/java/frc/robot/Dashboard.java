@@ -79,7 +79,7 @@ import frc.robot.util.Tunables;
 public class Dashboard {
     private final Swerve swerve;
     private final Elevator elevator;
-    private final CorAl coral;
+    private final CorAl corAl;
     // CANdle disabled (no CANdle on the robot): private final LEDs leds;
     private final Superstructure superstructure;
 
@@ -144,15 +144,15 @@ public class Dashboard {
     private final Alert elevatorSyncAlert = new Alert(
         "Elevator sides out of sync - check for belt slippage or mechanical binding.",
         AlertType.kWarning);
-    private final Alert coralBootZeroAlert = new Alert(
+    private final Alert corAlBootZeroAlert = new Alert(
         "CorAl pivot: the stored through-bore zero put the arm outside its travel at startup and was refused "
             + "(has the encoder moved on its shaft?). Put the arm on its base stop and zero it (" + PIVOT_ZERO_HINT + ").",
         AlertType.kError);
-    private final Alert coralBootAngleAlert = new Alert(
+    private final Alert corAlBootAngleAlert = new Alert(
         "CorAl pivot started away from its base: the angle was restored from the stored through-bore zero. "
             + "If the arm IS on its base stop, the encoder has shifted - zero it (" + PIVOT_ZERO_HINT + ").",
         AlertType.kInfo);
-    private final Alert coralFeedbackAlert = new Alert(
+    private final Alert corAlFeedbackAlert = new Alert(
         "CorAl motor encoder disagrees with the through bore - it will re-sync when the arm is idle.",
         AlertType.kWarning);
     private final Alert lowBatteryAlert = new Alert(
@@ -176,11 +176,11 @@ public class Dashboard {
      * RobotContainer after the subsystems exist. (The auto chooser is a
      * LoggedDashboardChooser that publishes itself - see RobotContainer.)
      */
-    public Dashboard(Swerve swerve, Elevator elevator, CorAl coral, /* CANdle disabled: LEDs leds, */
+    public Dashboard(Swerve swerve, Elevator elevator, CorAl corAl, /* CANdle disabled: LEDs leds, */
             Superstructure superstructure) {
         this.swerve = swerve;
         this.elevator = elevator;
-        this.coral = coral;
+        this.corAl = corAl;
         // CANdle disabled (no CANdle on the robot): this.leds = leds;
         this.superstructure = superstructure;
 
@@ -241,7 +241,7 @@ public class Dashboard {
         SmartDashboard.putData("Command Scheduler", CommandScheduler.getInstance());
         // Subsystem widgets (show default/current command) for the Testing tab
         SmartDashboard.putData("Elevator Subsystem", elevator);
-        SmartDashboard.putData("CorAl Subsystem", coral);
+        SmartDashboard.putData("CorAl Subsystem", corAl);
 
         // --- Pre-match utility buttons (Command widgets on the Setup tab) ---
         // ignoringDisable lets the pit crew zero mechanisms without enabling -
@@ -254,7 +254,7 @@ public class Dashboard {
                 .onlyIf(DriverStation::isDisabled)
                 .ignoringDisable(true).withName("Zero Elevator"));
         SmartDashboard.putData("Zero CorAl Pivot",
-            Commands.runOnce(coral::resetPivotEncoder, coral)
+            Commands.runOnce(corAl::resetPivotEncoder, corAl)
                 .onlyIf(DriverStation::isDisabled)
                 .ignoringDisable(true).withName("Zero CorAl Pivot"));
 
@@ -323,7 +323,7 @@ public class Dashboard {
 
         // --- Superstructure visualization ---
         double heightMeters = Units.inchesToMeters(elevator.getCurrentPosition());
-        double armAngleDeg = coral.getPivotAngle();
+        double armAngleDeg = corAl.getPivotAngle();
 
         // Mechanism2d: elevator ligament grows with height; arm ligament is
         // drawn relative to the elevator (0 deg tucked = down, 90 = out).
@@ -358,8 +358,8 @@ public class Dashboard {
         Logger.recordOutput("Elevator/HeightInches", elevator.getCurrentPosition());
         Logger.recordOutput("Elevator/TargetInches", elevator.getTargetPosition());
         Logger.recordOutput("CorAl/AngleDegrees", armAngleDeg);
-        Logger.recordOutput("CorAl/TargetDegrees", coral.getTargetAngle());
-        Logger.recordOutput("CorAl/GamePiece", coral.isGamePieceDetected());
+        Logger.recordOutput("CorAl/TargetDegrees", corAl.getTargetAngle());
+        Logger.recordOutput("CorAl/GamePiece", corAl.isGamePieceDetected());
         // (Vision/BestTag and Vision/AlignmentTag are logged in the Vision
         // block below, from the same reads as the dashboard values.)
 
@@ -408,30 +408,30 @@ public class Dashboard {
         SmartDashboard.putNumber("Elevator/Follower Height", elevator.getFollowerPosition());
 
         // --- CorAl ---
-        SmartDashboard.putNumber("CorAl/Angle", coral.getPivotAngle());
-        SmartDashboard.putNumber("CorAl/Target", coral.getTargetAngle());
-        SmartDashboard.putNumber("CorAl/Motor Angle", coral.getMotorAngle());
-        SmartDashboard.putBoolean("CorAl/At Target", coral.isAtTargetAngle());
-        SmartDashboard.putNumber("CorAl/Pivot Velocity", coral.getPivotVelocity());
-        SmartDashboard.putBoolean("CorAl/Game Piece", coral.isGamePieceDetected());
-        SmartDashboard.putBoolean("CorAl/Through Bore OK", coral.isThroughBoreConnected());
-        SmartDashboard.putNumber("CorAl/CANrange Distance", coral.getCANRangeDistance());
+        SmartDashboard.putNumber("CorAl/Angle", corAl.getPivotAngle());
+        SmartDashboard.putNumber("CorAl/Target", corAl.getTargetAngle());
+        SmartDashboard.putNumber("CorAl/Motor Angle", corAl.getMotorAngle());
+        SmartDashboard.putBoolean("CorAl/At Target", corAl.isAtTargetAngle());
+        SmartDashboard.putNumber("CorAl/Pivot Velocity", corAl.getPivotVelocity());
+        SmartDashboard.putBoolean("CorAl/Game Piece", corAl.isGamePieceDetected());
+        SmartDashboard.putBoolean("CorAl/Through Bore OK", corAl.isThroughBoreConnected());
+        SmartDashboard.putNumber("CorAl/CANrange Distance", corAl.getCANRangeDistance());
         // Detection tuning readouts: set "CorAl - Coral Detect Distance"
         // halfway between the empty-claw and coral distances; Raw Detect
         // is the sensor's verdict before the debounce.
-        SmartDashboard.putNumber("CorAl/CANrange Signal Strength", coral.getCANRangeSignalStrength());
-        SmartDashboard.putString("CorAl/CANrange Health", coral.getCANRangeHealth());
-        SmartDashboard.putBoolean("CorAl/CANrange Raw Detect", coral.isCANRangeRawDetected());
-        SmartDashboard.putNumber("CorAl/CANrange Threshold", coral.getDetectThreshold());
-        SmartDashboard.putNumber("CorAl/CANrange Min Signal Strength", coral.getMinSignalStrength());
+        SmartDashboard.putNumber("CorAl/CANrange Signal Strength", corAl.getCANRangeSignalStrength());
+        SmartDashboard.putString("CorAl/CANrange Health", corAl.getCANRangeHealth());
+        SmartDashboard.putBoolean("CorAl/CANrange Raw Detect", corAl.isCANRangeRawDetected());
+        SmartDashboard.putNumber("CorAl/CANrange Threshold", corAl.getDetectThreshold());
+        SmartDashboard.putNumber("CorAl/CANrange Min Signal Strength", corAl.getMinSignalStrength());
         SmartDashboard.putString("CorAl/CANrange Detect When",
-            coral.isDetectWhenCloser() ? "closer than threshold" : "farther than threshold");
-        SmartDashboard.putBoolean("CorAl/CANrange Detection Enabled", coral.isDetectionEnabled());
-        SmartDashboard.putNumber("CorAl/Pivot Current", coral.getPivotCurrent());
-        SmartDashboard.putNumber("CorAl/Intake Current", coral.getIntakeCurrent());
-        SmartDashboard.putNumber("CorAl/Pivot Output", coral.getPivotOutput());
-        SmartDashboard.putNumber("CorAl/Pivot Volts", coral.getPivotVolts());
-        SmartDashboard.putNumber("CorAl/Intake Output", coral.getIntakeOutput());
+            corAl.isDetectWhenCloser() ? "closer than threshold" : "farther than threshold");
+        SmartDashboard.putBoolean("CorAl/CANrange Detection Enabled", corAl.isDetectionEnabled());
+        SmartDashboard.putNumber("CorAl/Pivot Current", corAl.getPivotCurrent());
+        SmartDashboard.putNumber("CorAl/Intake Current", corAl.getIntakeCurrent());
+        SmartDashboard.putNumber("CorAl/Pivot Output", corAl.getPivotOutput());
+        SmartDashboard.putNumber("CorAl/Pivot Volts", corAl.getPivotVolts());
+        SmartDashboard.putNumber("CorAl/Intake Output", corAl.getIntakeOutput());
 
         // --- Vision ---
         // What the cameras see, unfiltered - the same tags their streams
@@ -504,14 +504,14 @@ public class Dashboard {
 
 
         // --- Alerts (persistent conditions) ---
-        boolean throughBoreConnected = coral.isThroughBoreConnected();
+        boolean throughBoreConnected = corAl.isThroughBoreConnected();
         throughBoreAlert.set(!throughBoreConnected);
         elevatorSyncAlert.set(!elevator.sidesInSync());
         elevatorBelowZeroAlert.set(elevator.readsBelowZero());
         elevatorRatioPendingAlert.set(elevator.isTravelRatioChangePending());
-        coralFeedbackAlert.set(throughBoreConnected && !coral.isMotorFeedbackValid());
-        coralBootZeroAlert.set(coral.isBootZeroRejected());
-        coralBootAngleAlert.set(Math.abs(coral.getBootRestoredAngle()) > CorAlConstants.PIVOT_BOOT_RESTORED_ALERT_DEG);
+        corAlFeedbackAlert.set(throughBoreConnected && !corAl.isMotorFeedbackValid());
+        corAlBootZeroAlert.set(corAl.isBootZeroRejected());
+        corAlBootAngleAlert.set(Math.abs(corAl.getBootRestoredAngle()) > CorAlConstants.PIVOT_BOOT_RESTORED_ALERT_DEG);
         // Resting-voltage check only while disabled - voltage sags under
         // load during a match are normal and would nag the drive team.
         lowBatteryAlert.set(DriverStation.isDisabled()

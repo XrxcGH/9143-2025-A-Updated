@@ -38,7 +38,7 @@ class ControlsBindingTest {
 
     private RobotContainer container;
     private Elevator elevator;
-    private CorAl coral;
+    private CorAl corAl;
     private Superstructure superstructure;
     private XboxControllerSim operator;
     private final List<String> interrupted = new ArrayList<>();
@@ -60,7 +60,7 @@ class ControlsBindingTest {
         neutral();
         container = new RobotContainer();
         elevator = (Elevator) field("elevator");
-        coral = (CorAl) field("coral");
+        corAl = (CorAl) field("corAl");
         superstructure = (Superstructure) field("superstructure");
         CommandScheduler.getInstance().onCommandInterrupt(c -> interrupted.add(c.getName()));
     }
@@ -159,7 +159,7 @@ class ControlsBindingTest {
         assertFalse(superstructure.readyToScore(), "pose not reached in this test");
         assertTrue(interrupted.isEmpty(), "an early score pull must not cancel the staged move: " + interrupted);
         assertEquals(move, elevator.getCurrentCommand());
-        assertEquals(0.0, coral.getIntakeOutput(), 1e-9, "rollers must not run before the pose is reached");
+        assertEquals(0.0, corAl.getIntakeOutput(), 1e-9, "rollers must not run before the pose is reached");
     }
 
     @Test
@@ -191,8 +191,8 @@ class ControlsBindingTest {
         assertEquals(Superstructure.Goal.STOW, superstructure.getGoal());
         operator.setRightTriggerAxis(1.0);
         run(5);
-        assertEquals(null, coral.getCurrentCommand(), "no score command may start from the stow goal");
-        assertEquals(0.0, coral.getIntakeOutput(), 1e-9);
+        assertEquals(null, corAl.getCurrentCommand(), "no score command may start from the stow goal");
+        assertEquals(0.0, corAl.getIntakeOutput(), 1e-9);
     }
 
     /** The WPILib semantics the gated score relies on: (held AND ready).onTrue fires on ready's rising edge, once. */

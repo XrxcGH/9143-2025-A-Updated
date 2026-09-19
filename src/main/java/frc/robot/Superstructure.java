@@ -119,7 +119,7 @@ public class Superstructure {
     private static final double TOL = SuperstructureConstants.SAFE_ANGLE_TOLERANCE;
 
     private final CarriageAxis elevator;
-    private final ArmAxis coral;
+    private final ArmAxis corAl;
 
     // ------------------------------------------------------------------
     // Paces: how fast the carriage runs each kind of move (see Pace), from
@@ -147,9 +147,9 @@ public class Superstructure {
     /** True while a move is being held until the robot is clear of the reef. */
     private boolean waitingForReefClearance = false;
 
-    public Superstructure(CarriageAxis elevator, ArmAxis coral) {
+    public Superstructure(CarriageAxis elevator, ArmAxis corAl) {
         this.elevator = elevator;
-        this.coral = coral;
+        this.corAl = corAl;
     }
 
     /**
@@ -293,11 +293,11 @@ public class Superstructure {
     // ==================================================================
 
     private boolean armAtLeast(double angle) {
-        return coral.getPivotAngle() >= angle - TOL;
+        return corAl.getPivotAngle() >= angle - TOL;
     }
 
     private boolean armAtMost(double angle) {
-        return coral.getPivotAngle() <= angle + TOL;
+        return corAl.getPivotAngle() <= angle + TOL;
     }
 
     /**
@@ -310,7 +310,7 @@ public class Superstructure {
      * cannot stall.
      */
     private boolean armStrictlyAtMost(double angle) {
-        return coral.getPivotAngle() <= angle;
+        return corAl.getPivotAngle() <= angle;
     }
 
     private boolean heightAtLeast(double height) {
@@ -322,7 +322,7 @@ public class Superstructure {
     }
 
     private Command armTo(double angle) {
-        return Commands.runOnce(() -> coral.setPivotAngle(angle), coral);
+        return Commands.runOnce(() -> corAl.setPivotAngle(angle), corAl);
     }
 
     private Command elevatorTo(double height) {
@@ -336,19 +336,19 @@ public class Superstructure {
     private Command both(double height, double angle) {
         return Commands.runOnce(() -> {
             elevator.setPosition(height);
-            coral.setPivotAngle(angle);
-        }, elevator, coral);
+            corAl.setPivotAngle(angle);
+        }, elevator, corAl);
     }
 
     /** True when both mechanisms have settled at their commanded targets. */
     private boolean atTargets() {
-        return elevator.isAtTargetPosition() && coral.isAtTargetAngle();
+        return elevator.isAtTargetPosition() && corAl.isAtTargetAngle();
     }
 
     /** True when both mechanisms have stopped moving, wherever they ended up. */
     private boolean bothStopped() {
         return Math.abs(elevator.getVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_ELEVATOR_IN_S
-            && Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S;
+            && Math.abs(corAl.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S;
     }
 
     /**
@@ -716,7 +716,7 @@ public class Superstructure {
      * per-command state: {destination it arrived at (NaN = not yet), unused}.
      */
     private double armAngleForSweep(double[] arrival, double destination) {
-        double measured = coral.getPivotAngle();
+        double measured = corAl.getPivotAngle();
         if (arrival[0] != destination) {
             arrival[0] = Double.NaN; // a new destination: not there yet
         }
@@ -886,13 +886,13 @@ public class Superstructure {
      */
     private Command moveTo(PresetHeights height, PivotPresetAngles angle) {
         return Commands.defer(() -> planMove(height.getHeight(), angle.getAngle()),
-            Set.of(elevator, coral));
+            Set.of(elevator, corAl));
     }
 
     /** Builds the motion sequence for a target pose from the current state. */
     private Command planMove(double targetHeight, double targetAngle) {
         double h0 = elevator.getCurrentPosition();
-        double a0 = coral.getPivotAngle();
+        double a0 = corAl.getPivotAngle();
         double target = Math.max(targetHeight, ElevatorConstants.ELEVATOR_ZERO_HEIGHT);
 
         // ---- Moves that never leave the low box need no RAISE excursion ----
@@ -914,7 +914,7 @@ public class Superstructure {
                 // state: swing it clear first, in place.
                 Command clearFirst = (!armStartsClear && h0 > SuperstructureConstants.ARM_TUCK_MAX_HEIGHT)
                     ? armTo(SuperstructureConstants.ARM_CLEAR_MIN_ANGLE + TOL)
-                        .andThen(Commands.waitUntil(() -> coral.getPivotAngle()
+                        .andThen(Commands.waitUntil(() -> corAl.getPivotAngle()
                             >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE))
                     : Commands.none();
                 return clearFirst
@@ -927,7 +927,7 @@ public class Superstructure {
             // to clear ~8 deg before the carriage may leave the base),
             // then both together.
             return armTo(targetAngle)
-                .andThen(Commands.waitUntil(() -> coral.getPivotAngle()
+                .andThen(Commands.waitUntil(() -> corAl.getPivotAngle()
                     >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE || a0 >= SuperstructureConstants.ARM_CLEAR_MIN_ANGLE))
                 .andThen(elevatorTo(target))
                 .andThen(settle());
@@ -1150,7 +1150,7 @@ public class Superstructure {
     private Command armWithCarriage(double targetAngle, DoubleSupplier extraLimit, double[] committed) {
         double[] finalSince = {Double.NaN};
         return Commands.run(() -> {
-            double angle = coral.getPivotAngle();
+            double angle = corAl.getPivotAngle();
             // Where the carriage is and where it comes to rest: a carriage
             // still coasting upward is about to be somewhere else, and the
             // arm must be legal there too. The tighter of the two.
@@ -1164,7 +1164,7 @@ public class Superstructure {
             if (!Double.isNaN(extra)) {
                 limit = targetAngle < angle ? Math.max(limit, extra) : Math.min(limit, extra);
             }
-            coral.setPivotAngle(limit);
+            corAl.setPivotAngle(limit);
             if (committed != null) {
                 committed[0] = limit;
             }
@@ -1173,15 +1173,15 @@ public class Superstructure {
             } else if (Double.isNaN(finalSince[0])) {
                 finalSince[0] = Timer.getFPGATimestamp();
             }
-        }, coral).until(() -> {
+        }, corAl).until(() -> {
             if (Double.isNaN(finalSince[0])) {
                 return false; // still held by the carriage: a safety wait, no timeout
             }
             double sinceFinal = Timer.getFPGATimestamp() - finalSince[0];
             return sinceFinal >= SuperstructureConstants.SETTLE_TIMEOUT_SECONDS
                 || (sinceFinal >= SuperstructureConstants.ARM_ARRIVED_MIN_SECONDS
-                    && (coral.isAtTargetAngle()
-                        || Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S));
+                    && (corAl.isAtTargetAngle()
+                        || Math.abs(corAl.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S));
         });
     }
 
@@ -1195,8 +1195,8 @@ public class Superstructure {
      */
     private Command armArrived() {
         return Commands.waitSeconds(SuperstructureConstants.ARM_ARRIVED_MIN_SECONDS)
-            .andThen(Commands.waitUntil(() -> coral.isAtTargetAngle()
-                || Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S))
+            .andThen(Commands.waitUntil(() -> corAl.isAtTargetAngle()
+                || Math.abs(corAl.getPivotVelocity()) <= SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S))
             .withTimeout(SuperstructureConstants.SETTLE_TIMEOUT_SECONDS);
     }
 
@@ -1215,7 +1215,7 @@ public class Superstructure {
 
     private Command escapeToSafe(double targetHeight, Pace climbPace) {
         double h0 = elevator.getCurrentPosition();
-        double a0 = coral.getPivotAngle();
+        double a0 = corAl.getPivotAngle();
 
         if (a0 >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE - TOL) {
             // Free to travel - IF the arm is staying here. A second button
@@ -1224,7 +1224,7 @@ public class Superstructure {
             // plan's setpoint still latched on the TalonFX: unless the arm
             // is re-commanded it carries on while the new plan drives the
             // carriage through a band that is only clear at RAISE. Re-latch it.
-            double armGoal = coral.getTargetAngle();
+            double armGoal = corAl.getTargetAngle();
             boolean parked = armGoal >= SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE - TOL
                 && armGoal <= SuperstructureConstants.HIGH_ANGLE_STAGE;
             if (parked || a0 > SuperstructureConstants.HIGH_ANGLE_STAGE) {
@@ -1232,7 +1232,7 @@ public class Superstructure {
             }
             return armTo(SAFE_ANGLE)
                 .andThen(Commands.waitUntil(() -> armAtLeast(SuperstructureConstants.SAFE_TRAVEL_MIN_ANGLE)
-                    && coral.getPivotVelocity() >= -SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S));
+                    && corAl.getPivotVelocity() >= -SuperstructureConstants.SETTLE_STOPPED_PIVOT_DEG_S));
         }
         if (h0 >= SuperstructureConstants.L4_ZONE_MIN_HEIGHT && a0 < SuperstructureConstants.BAND_PASS_MIN_ANGLE) {
             return leaveHighPose(targetHeight);
@@ -1266,7 +1266,7 @@ public class Superstructure {
             targetHeight > h0
                 ? Commands.run(() -> {
                     commandCarriage(climbLatch,
-                        Math.min(targetHeight, climbCeiling(coral.getPivotAngle())), targetHeight, true, climbPace);
+                        Math.min(targetHeight, climbCeiling(corAl.getPivotAngle())), targetHeight, true, climbPace);
                 }, elevator)
                 : travelWithArm(() -> targetHeight, () -> SAFE_ANGLE));
     }
@@ -1515,7 +1515,7 @@ public class Superstructure {
      */
     public Command stow() {
         return setGoal(Goal.STOW)
-            .andThen(Commands.runOnce(coral::stopIntake, coral))
+            .andThen(Commands.runOnce(corAl::stopIntake, corAl))
             .andThen(moveTo(PresetHeights.BASE, PivotPresetAngles.BASE));
     }
 
@@ -1542,7 +1542,7 @@ public class Superstructure {
                     armTo(SAFE_ANGLE),
                     () -> Math.abs(elevator.getCurrentPosition() - stay) > SuperstructureConstants.RAISE_ARM_PUT_BACK_MIN))
                 .andThen(armArrived());
-        }, Set.of(elevator, coral));
+        }, Set.of(elevator, corAl));
     }
 
     /**
@@ -1553,7 +1553,7 @@ public class Superstructure {
      */
     public Command intakeCoral() {
         return stow().andThen(intakeRollers())
-            .unless(coral::isGamePieceDetected);
+            .unless(corAl::isGamePieceDetected);
     }
 
     /**
@@ -1565,16 +1565,16 @@ public class Superstructure {
      */
     public Command intakeRollers() {
         return Commands.sequence(
-            Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.CORAL_INTAKE_SPEED), coral),
-            Commands.waitUntil(coral::isGamePieceDetected),
+            Commands.runOnce(() -> corAl.setIntakeSpeed(CorAlConstants.CORAL_INTAKE_SPEED), corAl),
+            Commands.waitUntil(corAl::isGamePieceDetected),
             // Explicit stop: the subsystem's auto-stop only fires on the
             // rising edge of detection - if the coral was already latched
             // by the time the rollers started (e.g., it arrived during the
             // stow phase), no edge ever comes and the rollers would run
             // forever without this.
-            Commands.runOnce(coral::stopIntake, coral)
-        ).handleInterrupt(coral::stopIntake) // Never leave rollers running on interrupt
-            .unless(coral::isGamePieceDetected);
+            Commands.runOnce(corAl::stopIntake, corAl)
+        ).handleInterrupt(corAl::stopIntake) // Never leave rollers running on interrupt
+            .unless(corAl::isGamePieceDetected);
     }
 
     /** Moves to the L1 scoring pose (base height, 100 deg). */
@@ -1633,10 +1633,10 @@ public class Superstructure {
         // clamp the ratchet last sent) and let any pose command cancel the
         // eject.
         return Commands.sequence(
-            Commands.runOnce(() -> coral.ejectRollers(scoreSpeed(currentGoal))),
+            Commands.runOnce(() -> corAl.ejectRollers(scoreSpeed(currentGoal))),
             Commands.waitSeconds(SuperstructureConstants.CORAL_EJECT_SECONDS),
-            Commands.runOnce(coral::stopIntake)
-        ).handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
+            Commands.runOnce(corAl::stopIntake)
+        ).handleInterrupt(corAl::stopIntake); // Never leave rollers running on interrupt
     }
 
     // ==================================================================
@@ -1648,7 +1648,7 @@ public class Superstructure {
         return setGoal(Goal.ALGAE_LOW)
             .andThen(Commands.runOnce(() -> algaeHeld = true))
             .andThen(moveTo(PresetHeights.ALGAE_LOW_INTAKE, PivotPresetAngles.ALGAE_INTAKE))
-            .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), coral));
+            .andThen(Commands.runOnce(() -> corAl.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), corAl));
     }
 
     /** Moves to the high algae intake pose (37.5 in, 160 deg) and runs the rollers inward. */
@@ -1656,7 +1656,7 @@ public class Superstructure {
         return setGoal(Goal.ALGAE_HIGH)
             .andThen(Commands.runOnce(() -> algaeHeld = true))
             .andThen(moveTo(PresetHeights.ALGAE_HIGH_INTAKE, PivotPresetAngles.ALGAE_INTAKE))
-            .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), coral));
+            .andThen(Commands.runOnce(() -> corAl.setIntakeSpeed(CorAlConstants.ALGAE_INTAKE_SPEED), corAl));
     }
 
     /**
@@ -1667,8 +1667,8 @@ public class Superstructure {
     public Command holdAlgae() {
         return Commands.runOnce(() -> {
                 algaeHeld = true;
-                coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED);
-            }, coral)
+                corAl.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED);
+            }, corAl)
             .andThen(raiseArm()); // Hold angle == safe travel angle
     }
 
@@ -1682,13 +1682,13 @@ public class Superstructure {
     public Command scoreAlgae() {
         return setGoal(Goal.ALGAE_SCORE)
             .andThen(moveTo(PresetHeights.ALGAE_SCORE, PivotPresetAngles.ALGAE_SCORE))
-            .andThen(Commands.runOnce(() -> coral.ejectRollers(CorAlConstants.ALGAE_SCORE_SPEED), coral))
+            .andThen(Commands.runOnce(() -> corAl.ejectRollers(CorAlConstants.ALGAE_SCORE_SPEED), corAl))
             .andThen(Commands.waitSeconds(SuperstructureConstants.ALGAE_EJECT_SECONDS))
             .andThen(Commands.runOnce(() -> {
-                coral.stopIntake();
+                corAl.stopIntake();
                 algaeHeld = false; // released: the next home() stows and intakes instead of carrying
-            }, coral))
-            .handleInterrupt(coral::stopIntake); // Never leave rollers running on interrupt
+            }, corAl))
+            .handleInterrupt(corAl::stopIntake); // Never leave rollers running on interrupt
     }
 
     // ==================================================================
@@ -1743,7 +1743,7 @@ public class Superstructure {
         boolean atHeightAndStill =
             Math.abs(elevator.getCurrentPosition() - height) <= SuperstructureConstants.SCORE_READY_HEIGHT_TOL
             && Math.abs(elevator.getVelocity()) <= SuperstructureConstants.SCORE_READY_MAX_ELEVATOR_SPEED
-            && Math.abs(coral.getPivotVelocity()) <= SuperstructureConstants.SCORE_READY_MAX_PIVOT_SPEED;
+            && Math.abs(corAl.getPivotVelocity()) <= SuperstructureConstants.SCORE_READY_MAX_PIVOT_SPEED;
         double now = Timer.getFPGATimestamp();
         if (!atHeightAndStill) {
             landedSince = Double.NaN;
@@ -1752,7 +1752,7 @@ public class Superstructure {
         if (Double.isNaN(landedSince)) {
             landedSince = now;
         }
-        double angleError = Math.abs(coral.getPivotAngle() - preset[1]);
+        double angleError = Math.abs(corAl.getPivotAngle() - preset[1]);
         return angleError <= SuperstructureConstants.SCORE_READY_ANGLE_TOL
             || (angleError <= SuperstructureConstants.SCORE_READY_LANDED_ANGLE_TOL
                 && now - landedSince >= SuperstructureConstants.SCORE_READY_LANDED_SECONDS);
@@ -1780,12 +1780,12 @@ public class Superstructure {
             Pose2d ejectedAt = robotPose.get();
 
             Command rollersOut = Commands.startEnd(
-                () -> coral.ejectRollers(scoreSpeed(scored)), // L1 runs the rollers the other way
-                coral::stopIntake, coral);
+                () -> corAl.ejectRollers(scoreSpeed(scored)), // L1 runs the rollers the other way
+                corAl::stopIntake, corAl);
             Command ejectWindow = algae
                 ? Commands.waitSeconds(SuperstructureConstants.ALGAE_EJECT_SECONDS)
                 : Commands.waitSeconds(SuperstructureConstants.CORAL_EJECT_SECONDS)
-                    .andThen(Commands.waitUntil(() -> !coral.isGamePieceDetected())
+                    .andThen(Commands.waitUntil(() -> !corAl.isGamePieceDetected())
                         .withTimeout(SuperstructureConstants.CORAL_EJECT_CLEAR_TIMEOUT_SECONDS));
             Command backedOff = exitSwingsForward
                 ? Commands.waitUntil(() -> robotPose.get().getTranslation()
@@ -1796,8 +1796,8 @@ public class Superstructure {
 
             return Commands.deadline(ejectWindow, rollersOut)
                 .andThen(Commands.runOnce(() -> algaeHeld = false))
-                .andThen(backedOff.andThen(home()).unless(coral::isGamePieceDetected));
-        }, Set.of(elevator, coral));
+                .andThen(backedOff.andThen(home()).unless(corAl::isGamePieceDetected));
+        }, Set.of(elevator, corAl));
     }
 
     /**
@@ -1813,7 +1813,7 @@ public class Superstructure {
             return Commands.waitUntil(() -> robotPose.get().getTranslation()
                     .getDistance(from.getTranslation()) >= SuperstructureConstants.REEF_BACKOFF_METERS)
                 .andThen(stow());
-        }, Set.of(elevator, coral));
+        }, Set.of(elevator, corAl));
     }
 
     /**
@@ -1828,7 +1828,7 @@ public class Superstructure {
     /** Algae carry: holding pressure, base height, travel angle (the L1 pose, which the corridors clear). */
     public Command carryAlgae() {
         return setGoal(Goal.ALGAE_CARRY)
-            .andThen(Commands.runOnce(() -> coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED), coral))
+            .andThen(Commands.runOnce(() -> corAl.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED), corAl))
             .andThen(moveTo(PresetHeights.CORAL_L1, PivotPresetAngles.RAISE));
     }
 
@@ -1837,8 +1837,8 @@ public class Superstructure {
         return setGoal(Goal.ALGAE_SCORE)
             .andThen(Commands.runOnce(() -> {
                 algaeHeld = true;
-                coral.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED);
-            }, coral))
+                corAl.setIntakeSpeed(CorAlConstants.ALGAE_HOLD_SPEED);
+            }, corAl))
             .andThen(moveTo(PresetHeights.ALGAE_SCORE, PivotPresetAngles.ALGAE_SCORE));
     }
 
@@ -1850,9 +1850,9 @@ public class Superstructure {
      */
     private void freezeNow() {
         elevator.setPosition(stoppingPoint(Pace.FULL), Pace.FULL);
-        double w = coral.getPivotVelocity();
-        coral.setPivotAngle(coral.getPivotAngle()
-            + Math.copySign(w * w / (2.0 * Math.max(coral.maxAcceleration(), 1.0)), w));
+        double w = corAl.getPivotVelocity();
+        corAl.setPivotAngle(corAl.getPivotAngle()
+            + Math.copySign(w * w / (2.0 * Math.max(corAl.maxAcceleration(), 1.0)), w));
     }
 
     /**
@@ -1875,13 +1875,13 @@ public class Superstructure {
                     // drives back, a bounce at the end of every jog.
                     elevator.setPosition(stoppingPoint(Pace.FULL), Pace.FULL);
                 }
-                coral.manualPivotControl(pivotStick.getAsDouble());
-            }, elevator, coral)
+                corAl.manualPivotControl(pivotStick.getAsDouble());
+            }, elevator, corAl)
             .finallyDo(() -> {
                 if (elevator.isInManualMode()) {
                     elevator.setPosition(stoppingPoint(Pace.FULL), Pace.FULL);
                 }
-                coral.manualPivotControl(0.0); // captures and holds if the stick was deflected
+                corAl.manualPivotControl(0.0); // captures and holds if the stick was deflected
             });
     }
 
@@ -1891,8 +1891,8 @@ public class Superstructure {
      * without cancelling it.
      */
     public Command rollersRaw(double dutyCycle) {
-        return Commands.startEnd(() -> coral.setIntakeSpeed(dutyCycle), () -> {
-            coral.stopIntake();
+        return Commands.startEnd(() -> corAl.setIntakeSpeed(dutyCycle), () -> {
+            corAl.stopIntake();
             algaeHeld = false;
         });
     }
@@ -1910,12 +1910,12 @@ public class Superstructure {
 
     /** True if the elevator can move from its current height to the target with the arm held where it is. */
     public boolean isElevatorOnlyMoveSafe(double targetHeight) {
-        return elevatorPathClear(elevator.getCurrentPosition(), targetHeight, coral.getPivotAngle());
+        return elevatorPathClear(elevator.getCurrentPosition(), targetHeight, corAl.getPivotAngle());
     }
 
     /** True if the arm can rotate from its current angle to the target with the elevator held where it is. */
     public boolean isPivotOnlyMoveSafe(double targetAngle) {
-        return pivotPathClear(coral.getPivotAngle(), targetAngle, elevator.getCurrentPosition());
+        return pivotPathClear(corAl.getPivotAngle(), targetAngle, elevator.getCurrentPosition());
     }
 
     /**
@@ -1931,7 +1931,7 @@ public class Superstructure {
                     "Elevator test move refused",
                     String.format("%.1f in is not reachable with the arm at %.0f deg (CAD contact band). "
                         + "Put the arm at %.0f deg (Pivot Setpoint %.0f + Pivot Go) for full travel.",
-                        target, coral.getPivotAngle(), SAFE_ANGLE, SAFE_ANGLE)));
+                        target, corAl.getPivotAngle(), SAFE_ANGLE, SAFE_ANGLE)));
                 return Commands.none();
             }
             return elevatorTo(target);
@@ -1956,17 +1956,17 @@ public class Superstructure {
                 return Commands.none();
             }
             return armTo(target);
-        }, Set.of(coral));
+        }, Set.of(corAl));
     }
 
     /** Runs the intake rollers at a dashboard-supplied duty cycle (-1 to 1). */
     public Command testIntakeRun(DoubleSupplier dutyCycle) {
         return Commands.runOnce(() ->
-            coral.setIntakeSpeed(Math.max(-1.0, Math.min(1.0, dutyCycle.getAsDouble()))), coral);
+            corAl.setIntakeSpeed(Math.max(-1.0, Math.min(1.0, dutyCycle.getAsDouble()))), corAl);
     }
 
     /** Stops the intake rollers. */
     public Command testIntakeStop() {
-        return Commands.runOnce(coral::stopIntake, coral);
+        return Commands.runOnce(corAl::stopIntake, corAl);
     }
 }

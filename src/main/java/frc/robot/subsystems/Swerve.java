@@ -58,59 +58,59 @@ import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
  * Vision instance elsewhere.
  */
 public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
-    private Notifier m_simNotifier = null;
-    private double m_lastSimTime;
+    private Notifier simNotifier = null;
+    private double lastSimTime;
 
     // Field conventions, not settings: each alliance's "forward" on the field.
     // Blue alliance sees forward as 0 degrees (toward red alliance wall)
-    private static final Rotation2d kBlueAlliancePerspectiveRotation = Rotation2d.kZero;
+    private static final Rotation2d BLUE_ALLIANCE_PERSPECTIVE_ROTATION = Rotation2d.kZero;
     // Red alliance sees forward as 180 degrees (toward blue alliance wall)
-    private static final Rotation2d kRedAlliancePerspectiveRotation = Rotation2d.k180deg;
+    private static final Rotation2d RED_ALLIANCE_PERSPECTIVE_ROTATION = Rotation2d.k180deg;
     // The driver's forward direction, held in the raw gyro frame (the one
     // thing vision corrections and pose resets never touch). See periodic().
-    private Rotation2d m_driverForwardRaw = null;
-    private Alliance m_driverForwardAlliance = null;
+    private Rotation2d driverForwardRaw = null;
+    private Alliance driverForwardAlliance = null;
     /** True once the driver has zeroed their heading: from then on vision never moves it. */
-    private boolean m_driverZeroed = false;
+    private boolean driverZeroed = false;
 
     // Swerve request to apply during robot-centric path following (drive
     // request type and why: AutoConstants.PATH_DRIVE_REQUEST_TYPE).
-    private final SwerveRequest.ApplyRobotSpeeds m_pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds()
+    private final SwerveRequest.ApplyRobotSpeeds pathApplyRobotSpeeds = new SwerveRequest.ApplyRobotSpeeds()
         .withDriveRequestType(AutoConstants.PATH_DRIVE_REQUEST_TYPE);
 
     // Swerve request reused by the AprilTag tracking command (avoids allocating
     // a new request every loop; drive request type and why:
     // VisionConstants.TrackingGains.DRIVE_REQUEST_TYPE).
-    private final SwerveRequest.RobotCentric m_visionTrackRequest = new SwerveRequest.RobotCentric()
+    private final SwerveRequest.RobotCentric visionTrackRequest = new SwerveRequest.RobotCentric()
         .withDriveRequestType(VisionConstants.TrackingGains.DRIVE_REQUEST_TYPE);
 
     // Alignment telemetry (robot frame: meters / degrees), refreshed by the tracking command
-    private boolean m_alignHasTarget = false;
-    private boolean m_aligned = false;
-    private double m_alignForwardError = 0.0;
-    private double m_alignLateralError = 0.0;
-    private double m_alignHeadingErrorDeg = 0.0;
+    private boolean alignHasTarget = false;
+    private boolean aligned = false;
+    private double alignForwardError = 0.0;
+    private double alignLateralError = 0.0;
+    private double alignHeadingErrorDeg = 0.0;
     // Tracking command state: the last velocities sent (the slew limiter works
     // from these), the stay-stopped latches, and the contact-stall timer
-    private double m_trackVx = 0.0;
-    private double m_trackVy = 0.0;
-    private double m_trackOmega = 0.0;
-    private double m_trackLastTime = 0.0;
-    private boolean m_trackTranslationHeld = false;
-    private boolean m_trackContactHeld = false; // held because the bumper is on the reef, not because the error is small
-    private boolean m_trackHeadingHeld = false;
-    private double m_trackStalledSince = -1.0;
+    private double trackVx = 0.0;
+    private double trackVy = 0.0;
+    private double trackOmega = 0.0;
+    private double trackLastTime = 0.0;
+    private boolean trackTranslationHeld = false;
+    private boolean trackContactHeld = false; // held because the bumper is on the reef, not because the error is small
+    private boolean trackHeadingHeld = false;
+    private double trackStalledSince = -1.0;
     // Whether the last autonomous pose reset kept the vision-seeded heading
-    private boolean m_lastAutoResetKeptHeading = false;
+    private boolean lastAutoResetKeptHeading = false;
 
     // Vision-measurement spin rejection (VisionConstants.VISION_MAX_OMEGA_RAD_PER_SEC
     // and VISION_REJECT_AFTER_SPIN_SECONDS): when the robot last spun fast
-    private double m_lastFastRotationTime = -VisionConstants.VISION_REJECT_AFTER_SPIN_SECONDS;
+    private double lastFastRotationTime = -VisionConstants.VISION_REJECT_AFTER_SPIN_SECONDS;
 
     // Swerve requests to apply during SysId characterization
-    private final SwerveRequest.SysIdSwerveTranslation m_translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
-    private final SwerveRequest.SysIdSwerveSteerGains m_steerCharacterization = new SwerveRequest.SysIdSwerveSteerGains();
-    private final SwerveRequest.SysIdSwerveRotation m_rotationCharacterization = new SwerveRequest.SysIdSwerveRotation();
+    private final SwerveRequest.SysIdSwerveTranslation translationCharacterization = new SwerveRequest.SysIdSwerveTranslation();
+    private final SwerveRequest.SysIdSwerveSteerGains steerCharacterization = new SwerveRequest.SysIdSwerveSteerGains();
+    private final SwerveRequest.SysIdSwerveRotation rotationCharacterization = new SwerveRequest.SysIdSwerveRotation();
 
     // Vision subsystem (pose fusion and AprilTag alignment targets)
     private Vision vision;
@@ -120,7 +120,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
     private boolean isVisionTrackingEnabled = false;
 
     // SysId routine for characterizing translation. This is used to find PID gains for the drive motors.
-    private final SysIdRoutine m_sysIdRoutineTranslation = new SysIdRoutine(
+    private final SysIdRoutine sysIdRoutineTranslation = new SysIdRoutine(
         new SysIdRoutine.Config(
             null,   		// Use default ramp rate (1 V/s)
             Volts.of(DriveConstants.SYSID_TRANSLATION_STEP_VOLTS),	// Reduced dynamic step voltage, to prevent a brownout
@@ -129,14 +129,14 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             state -> SignalLogger.writeString("SysIdTranslation_State", state.toString())
         ),
         new SysIdRoutine.Mechanism(
-            output -> setControl(m_translationCharacterization.withVolts(output)),
+            output -> setControl(translationCharacterization.withVolts(output)),
             null,
             this
         )
     );
 
     // SysId routine for characterizing steer. This is used to find PID gains for the steer motors.
-    private final SysIdRoutine m_sysIdRoutineSteer = new SysIdRoutine(
+    private final SysIdRoutine sysIdRoutineSteer = new SysIdRoutine(
         new SysIdRoutine.Config(
             null,			// Use default ramp rate (1 V/s)
             Volts.of(DriveConstants.SYSID_STEER_STEP_VOLTS),	// Dynamic step voltage
@@ -145,7 +145,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             state -> SignalLogger.writeString("SysIdSteer_State", state.toString())
         ),
         new SysIdRoutine.Mechanism(
-            volts -> setControl(m_steerCharacterization.withVolts(volts)),
+            volts -> setControl(steerCharacterization.withVolts(volts)),
             null,
             this
         )
@@ -156,7 +156,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
      * This is used to find PID gains for the FieldCentricFacingAngle HeadingController.
      * See the documentation of SwerveRequest.SysIdSwerveRotation for info on importing the log to SysId.
      */
-    private final SysIdRoutine m_sysIdRoutineRotation = new SysIdRoutine(
+    private final SysIdRoutine sysIdRoutineRotation = new SysIdRoutine(
         new SysIdRoutine.Config(
             // This is in radians per second^2, but SysId only supports "volts per second"
             Volts.of(DriveConstants.SYSID_ROTATION_RAMP_RATE).per(Second),
@@ -169,7 +169,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
         new SysIdRoutine.Mechanism(
             output -> {
                 /* output is actually radians per second, but SysId only supports "volts" */
-                setControl(m_rotationCharacterization.withRotationalRate(output.in(Volts)));
+                setControl(rotationCharacterization.withRotationalRate(output.in(Volts)));
                 /* also log the requested output for SysId */
                 SignalLogger.writeDouble("Rotational_Rate", output.in(Volts));
             },
@@ -179,7 +179,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
     );
 
     // The SysId routine to test
-    private SysIdRoutine m_sysIdRoutineToApply = m_sysIdRoutineTranslation;
+    private SysIdRoutine sysIdRoutineToApply = sysIdRoutineTranslation;
 
     /**
      * Constructs a CTRE SwerveDrivetrain using the specified constants.
@@ -272,7 +272,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
                 () -> getState().Speeds,    // Supplier of current robot speeds
                 // Consumer of ChassisSpeeds and feedforwards to drive the robot
                 (speeds, feedforwards) -> setControl(
-                    m_pathApplyRobotSpeeds.withSpeeds(speeds)
+                    pathApplyRobotSpeeds.withSpeeds(speeds)
                         .withWheelForceFeedforwardsX(feedforwards.robotRelativeForcesXNewtons())
                         .withWheelForceFeedforwardsY(feedforwards.robotRelativeForcesYNewtons())
                 ),
@@ -304,24 +304,24 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
     /**
      * Runs the SysId Quasistatic test in the given direction for the routine
-     * specified by {@link #m_sysIdRoutineToApply}.
+     * specified by {@link #sysIdRoutineToApply}.
      *
      * @param direction Direction of the SysId Quasistatic test
      * @return Command to run
      */
     public Command sysIdQuasistatic(SysIdRoutine.Direction direction) {
-        return m_sysIdRoutineToApply.quasistatic(direction);
+        return sysIdRoutineToApply.quasistatic(direction);
     }
 
     /**
      * Runs the SysId Dynamic test in the given direction for the routine
-     * specified by {@link #m_sysIdRoutineToApply}.
+     * specified by {@link #sysIdRoutineToApply}.
      *
      * @param direction Direction of the SysId Dynamic test
      * @return Command to run
      */
     public Command sysIdDynamic(SysIdRoutine.Direction direction) {
-        return m_sysIdRoutineToApply.dynamic(direction);
+        return sysIdRoutineToApply.dynamic(direction);
     }
 
     /**
@@ -338,13 +338,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
     public void setSysIdRoutine(SysIdRoutineType routineType) {
         switch (routineType) {
             case TRANSLATION:
-                m_sysIdRoutineToApply = m_sysIdRoutineTranslation;
+                sysIdRoutineToApply = sysIdRoutineTranslation;
                 break;
             case STEER:
-                m_sysIdRoutineToApply = m_sysIdRoutineSteer;
+                sysIdRoutineToApply = sysIdRoutineSteer;
                 break;
             case ROTATION:
-                m_sysIdRoutineToApply = m_sysIdRoutineRotation;
+                sysIdRoutineToApply = sysIdRoutineRotation;
                 break;
         }
     }
@@ -367,7 +367,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
      */
     public void setVisionTrackingEnabled(boolean enabled) {
         isVisionTrackingEnabled = enabled;
-        vision.toggleTracking(enabled);
+        vision.setTrackingEnabled(enabled);
     }
     
     /**
@@ -419,13 +419,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             // Start the slew limiter from what the robot is actually doing, so
             // taking over from the driver mid-motion is continuous too.
             var speeds = getStateCopy().Speeds;
-            m_trackVx = speeds.vxMetersPerSecond;
-            m_trackVy = speeds.vyMetersPerSecond;
-            m_trackOmega = speeds.omegaRadiansPerSecond;
-            m_trackTranslationHeld = false;
-            m_trackContactHeld = false;
-            m_trackHeadingHeld = false;
-            m_trackStalledSince = -1.0;
+            trackVx = speeds.vxMetersPerSecond;
+            trackVy = speeds.vyMetersPerSecond;
+            trackOmega = speeds.omegaRadiansPerSecond;
+            trackTranslationHeld = false;
+            trackContactHeld = false;
+            trackHeadingHeld = false;
+            trackStalledSince = -1.0;
         }, () -> {
             Optional<Vision.AprilTagTarget> target =
                 isVisionTrackingEnabled ? vision.getBestTarget() : Optional.empty();
@@ -435,10 +435,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
                 // No trackable target (or tracking off while still scheduled):
                 // come to a stop - ramped, not stepped.
                 clearAlignmentTelemetry();
-                m_trackTranslationHeld = false;
-                m_trackContactHeld = false;
-                m_trackHeadingHeld = false;
-                m_trackStalledSince = -1.0;
+                trackTranslationHeld = false;
+                trackContactHeld = false;
+                trackHeadingHeld = false;
+                trackStalledSince = -1.0;
                 applyTrackingCommand(0.0, 0.0, 0.0);
                 return;
             }
@@ -459,10 +459,10 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
                 .orElseGet(() -> new Rotation2d(tag.robotFrame.getX(), tag.robotFrame.getY())
                     .minus(new Rotation2d(g.forward, g.left)).getDegrees());
 
-            m_alignHasTarget = true;
-            m_alignForwardError = forwardError;
-            m_alignLateralError = lateralError;
-            m_alignHeadingErrorDeg = headingErrorDeg;
+            alignHasTarget = true;
+            alignForwardError = forwardError;
+            alignLateralError = lateralError;
+            alignHeadingErrorDeg = headingErrorDeg;
 
             // ---- Translation: one controller on the error vector ----
             // The speed comes from the length of the error vector and the
@@ -486,13 +486,13 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             // its own: without it the latch set below would be undone on the
             // next loop, and the robot would shove the reef again every
             // CONTACT_SECONDS.
-            double forwardExit = m_trackContactHeld
+            double forwardExit = trackContactHeld
                 ? VisionConstants.TrackingGains.CONTACT_FORWARD_ERROR * exitRatio : forwardDeadband * exitRatio;
             boolean outside = Math.abs(forwardError) > forwardExit
                 || Math.abs(lateralError) > lateralDeadband * exitRatio;
-            if (m_trackTranslationHeld ? outside : inside) {
-                m_trackTranslationHeld = !m_trackTranslationHeld;
-                m_trackContactHeld = false;
+            if (trackTranslationHeld ? outside : inside) {
+                trackTranslationHeld = !trackTranslationHeld;
+                trackContactHeld = false;
             }
 
             // Arrived by contact: told to move, not moving, laterally in
@@ -501,24 +501,24 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             var measured = getStateCopy().Speeds;
             double measuredSpeed = Math.hypot(measured.vxMetersPerSecond, measured.vyMetersPerSecond);
             double now = Timer.getFPGATimestamp();
-            boolean pushing = !m_trackTranslationHeld
-                && Math.hypot(m_trackVx, m_trackVy) >= VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY
+            boolean pushing = !trackTranslationHeld
+                && Math.hypot(trackVx, trackVy) >= VisionConstants.TrackingGains.MIN_LINEAR_VELOCITY
                     * VisionConstants.TrackingGains.CONTACT_MIN_COMMAND_FRACTION
                 && measuredSpeed < VisionConstants.TrackingGains.CONTACT_MAX_SPEED
                 && Math.abs(lateralError) < lateralDeadband * exitRatio
                 && Math.abs(forwardError) < VisionConstants.TrackingGains.CONTACT_FORWARD_ERROR;
             if (!pushing) {
-                m_trackStalledSince = -1.0;
-            } else if (m_trackStalledSince < 0) {
-                m_trackStalledSince = now;
-            } else if (now - m_trackStalledSince > VisionConstants.TrackingGains.CONTACT_SECONDS) {
-                m_trackTranslationHeld = true;
-                m_trackContactHeld = true;
+                trackStalledSince = -1.0;
+            } else if (trackStalledSince < 0) {
+                trackStalledSince = now;
+            } else if (now - trackStalledSince > VisionConstants.TrackingGains.CONTACT_SECONDS) {
+                trackTranslationHeld = true;
+                trackContactHeld = true;
             }
 
             double vx = 0.0;
             double vy = 0.0;
-            if (!m_trackTranslationHeld) {
+            if (!trackTranslationHeld) {
                 double distance = Math.hypot(forwardError, lateralError);
                 // Gains are live-tunable from the dashboard (Tunables -> Preferences)
                 double speed = Math.min(Math.max(distance * Tunables.trackingDistanceKp(),
@@ -531,16 +531,16 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
             // ---- Heading: P with the same stay-stopped hysteresis ----
             double headingDeadband = VisionConstants.TrackingGains.ROTATION_ERROR_DEADBAND;
-            if (m_trackHeadingHeld
+            if (trackHeadingHeld
                     ? Math.abs(headingErrorDeg) > headingDeadband * exitRatio
                     : Math.abs(headingErrorDeg) < headingDeadband) {
-                m_trackHeadingHeld = !m_trackHeadingHeld;
+                trackHeadingHeld = !trackHeadingHeld;
             }
-            double omega = m_trackHeadingHeld ? 0.0
+            double omega = trackHeadingHeld ? 0.0
                 : Math.copySign(Math.min(Math.abs(headingErrorDeg) * Tunables.trackingRotationKp(),
                     VisionConstants.TrackingGains.MAX_ANGULAR_VELOCITY), headingErrorDeg);
 
-            m_aligned = m_trackTranslationHeld && m_trackHeadingHeld;
+            aligned = trackTranslationHeld && trackHeadingHeld;
             applyTrackingCommand(vx, vy, omega);
         }).finallyDo(() -> {
             // Runs on cancel (align trigger released) and on interruption by
@@ -548,12 +548,12 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             // stop the robot and drop the tracking state so the flag always
             // reflects reality.
             isVisionTrackingEnabled = false;
-            vision.toggleTracking(false);
+            vision.setTrackingEnabled(false);
             clearAlignmentTelemetry();
-            m_trackVx = 0.0;
-            m_trackVy = 0.0;
-            m_trackOmega = 0.0;
-            setControl(m_visionTrackRequest
+            trackVx = 0.0;
+            trackVy = 0.0;
+            trackOmega = 0.0;
+            setControl(visionTrackRequest
                 .withVelocityX(0)
                 .withVelocityY(0)
                 .withRotationalRate(0));
@@ -562,11 +562,11 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
     /** No target: the error readouts must not freeze at their last values. */
     private void clearAlignmentTelemetry() {
-        m_alignHasTarget = false;
-        m_aligned = false;
-        m_alignForwardError = 0.0;
-        m_alignLateralError = 0.0;
-        m_alignHeadingErrorDeg = 0.0;
+        alignHasTarget = false;
+        aligned = false;
+        alignForwardError = 0.0;
+        alignLateralError = 0.0;
+        alignHeadingErrorDeg = 0.0;
     }
 
     /**
@@ -577,25 +577,25 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
      */
     private void applyTrackingCommand(double vx, double vy, double omega) {
         double now = Timer.getFPGATimestamp();
-        double dt = Math.min(Math.max(now - m_trackLastTime, VisionConstants.TrackingGains.SLEW_MIN_DT_SECONDS),
+        double dt = Math.min(Math.max(now - trackLastTime, VisionConstants.TrackingGains.SLEW_MIN_DT_SECONDS),
             VisionConstants.TrackingGains.SLEW_MAX_DT_SECONDS);
-        m_trackLastTime = now;
+        trackLastTime = now;
 
-        double dvx = vx - m_trackVx;
-        double dvy = vy - m_trackVy;
+        double dvx = vx - trackVx;
+        double dvy = vy - trackVy;
         double change = Math.hypot(dvx, dvy);
         double maxChange = VisionConstants.TrackingGains.MAX_LINEAR_ACCELERATION * dt;
         double scale = change > maxChange ? maxChange / change : 1.0;
-        m_trackVx += dvx * scale;
-        m_trackVy += dvy * scale;
+        trackVx += dvx * scale;
+        trackVy += dvy * scale;
 
         double maxOmegaChange = VisionConstants.TrackingGains.MAX_ANGULAR_ACCELERATION * dt;
-        m_trackOmega += Math.max(-maxOmegaChange, Math.min(maxOmegaChange, omega - m_trackOmega));
+        trackOmega += Math.max(-maxOmegaChange, Math.min(maxOmegaChange, omega - trackOmega));
 
-        setControl(m_visionTrackRequest
-            .withVelocityX(m_trackVx)
-            .withVelocityY(m_trackVy)
-            .withRotationalRate(m_trackOmega));
+        setControl(visionTrackRequest
+            .withVelocityX(trackVx)
+            .withVelocityY(trackVy)
+            .withRotationalRate(trackOmega));
     }
 
     /**
@@ -607,7 +607,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
      * never books a fusion that did not happen.
      */
     public boolean isRejectingVision() {
-        return Timer.getFPGATimestamp() - m_lastFastRotationTime < VisionConstants.VISION_REJECT_AFTER_SPIN_SECONDS;
+        return Timer.getFPGATimestamp() - lastFastRotationTime < VisionConstants.VISION_REJECT_AFTER_SPIN_SECONDS;
     }
 
     /**
@@ -659,52 +659,52 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
         // the rotation the pose is being given, not next loop from the cached
         // state (which may not show the reset yet).
         Alliance alliance = DriverStation.getAlliance().orElse(
-            m_driverForwardAlliance != null ? m_driverForwardAlliance : Alliance.Blue);
+            driverForwardAlliance != null ? driverForwardAlliance : Alliance.Blue);
         Rotation2d rawHeading = getStateCopy().RawHeading;
         if (vision.hasStrongHeadingSeed()
                 && disagreementDeg <= VisionConstants.HEADING_SEED_MAX_DISAGREEMENT_DEGREES) {
             resetTranslation(nominalStart.getTranslation());
-            m_lastAutoResetKeptHeading = true;
-            m_driverForwardRaw = allianceForward(alliance).minus(current.minus(rawHeading));
+            lastAutoResetKeptHeading = true;
+            driverForwardRaw = allianceForward(alliance).minus(current.minus(rawHeading));
         } else {
             resetPose(nominalStart);
-            m_lastAutoResetKeptHeading = false;
-            m_driverForwardRaw = allianceForward(alliance).minus(nominalStart.getRotation().minus(rawHeading));
+            lastAutoResetKeptHeading = false;
+            driverForwardRaw = allianceForward(alliance).minus(nominalStart.getRotation().minus(rawHeading));
         }
-        m_driverForwardAlliance = alliance;
-        m_driverZeroed = false;
+        driverForwardAlliance = alliance;
+        driverZeroed = false;
         setOperatorPerspectiveForward(allianceForward(alliance));
     }
 
     /** Whether the last autonomous pose reset kept the vision-seeded heading. */
     public boolean lastAutoResetKeptHeading() {
-        return m_lastAutoResetKeptHeading;
+        return lastAutoResetKeptHeading;
     }
 
     /** Whether the alignment servo currently has a target. */
     public boolean isAlignmentTargetVisible() {
-        return m_alignHasTarget;
+        return alignHasTarget;
     }
 
     /** True while the tracker has a target and every axis is inside its deadband. */
     public boolean isAligned() {
-        return m_alignHasTarget && m_aligned;
+        return alignHasTarget && aligned;
     }
 
     public double getAlignmentForwardError() {
-        return m_alignForwardError;
+        return alignForwardError;
     }
 
     public double getAlignmentLateralError() {
-        return m_alignLateralError;
+        return alignLateralError;
     }
 
     public double getAlignmentHeadingErrorDegrees() {
-        return m_alignHeadingErrorDeg;
+        return alignHeadingErrorDeg;
     }
 
     private static Rotation2d allianceForward(Alliance alliance) {
-        return alliance == Alliance.Red ? kRedAlliancePerspectiveRotation : kBlueAlliancePerspectiveRotation;
+        return alliance == Alliance.Red ? RED_ALLIANCE_PERSPECTIVE_ROTATION : BLUE_ALLIANCE_PERSPECTIVE_ROTATION;
     }
 
     /**
@@ -718,8 +718,8 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
      *     one (robot squared up by hand, no tags in view).
      */
     public void zeroDriverHeading(boolean resetPoseHeading) {
-        m_driverForwardRaw = getStateCopy().RawHeading;
-        m_driverZeroed = true;
+        driverForwardRaw = getStateCopy().RawHeading;
+        driverZeroed = true;
         if (resetPoseHeading) {
             Rotation2d forward = allianceForward(DriverStation.getAlliance().orElse(Alliance.Blue));
             resetRotation(forward);
@@ -735,7 +735,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
 
         // Track when the robot last spun fast, for vision-measurement rejection
         if (Math.abs(state.Speeds.omegaRadiansPerSecond) > VisionConstants.VISION_MAX_OMEGA_RAD_PER_SEC) {
-            m_lastFastRotationTime = Timer.getFPGATimestamp();
+            lastFastRotationTime = Timer.getFPGATimestamp();
         }
 
         // ---- The driver's field-centric frame is glued to the gyro ----
@@ -756,7 +756,7 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
         Rotation2d poseMinusRaw = state.Pose.getRotation().minus(state.RawHeading);
         Optional<Alliance> alliance = DriverStation.getAlliance();
         if (alliance.isPresent()) {
-            boolean changed = m_driverForwardAlliance != null && alliance.get() != m_driverForwardAlliance;
+            boolean changed = driverForwardAlliance != null && alliance.get() != driverForwardAlliance;
             // Until the driver has zeroed it themselves, a converged two-or-more
             // tag heading seed while disabled sets the driver's frame, which is
             // what a real field needs (robot booted facing any which way,
@@ -764,29 +764,29 @@ public class Swerve extends TunerSwerveDrivetrain implements Subsystem {
             // bumper - the bench case that must not move the driver's frame -
             // is not a strong seed, and after a driver zero nothing from vision
             // counts.
-            boolean seeded = DriverStation.isDisabled() && !m_driverZeroed && vision.hasStrongHeadingSeed();
-            if (m_driverForwardRaw == null || changed || seeded) {
-                m_driverForwardRaw = allianceForward(alliance.get()).minus(poseMinusRaw);
+            boolean seeded = DriverStation.isDisabled() && !driverZeroed && vision.hasStrongHeadingSeed();
+            if (driverForwardRaw == null || changed || seeded) {
+                driverForwardRaw = allianceForward(alliance.get()).minus(poseMinusRaw);
             }
-            m_driverForwardAlliance = alliance.get();
+            driverForwardAlliance = alliance.get();
         }
-        if (m_driverForwardRaw != null) {
-            setOperatorPerspectiveForward(m_driverForwardRaw.plus(poseMinusRaw));
+        if (driverForwardRaw != null) {
+            setOperatorPerspectiveForward(driverForwardRaw.plus(poseMinusRaw));
         }
     }
 
     private void startSimThread() {
-        m_lastSimTime = Utils.getCurrentTimeSeconds();
+        lastSimTime = Utils.getCurrentTimeSeconds();
 
         // Run simulation at a faster rate so PID gains behave more reasonably
-        m_simNotifier = new Notifier(() -> {
+        simNotifier = new Notifier(() -> {
             final double currentTime = Utils.getCurrentTimeSeconds();
-            double deltaTime = currentTime - m_lastSimTime;
-            m_lastSimTime = currentTime;
+            double deltaTime = currentTime - lastSimTime;
+            lastSimTime = currentTime;
 
             // use the measured time delta, get battery voltage from WPILib
             updateSimState(deltaTime, RobotController.getBatteryVoltage());
         });
-        m_simNotifier.startPeriodic(DriveConstants.SIM_LOOP_PERIOD_SECONDS);
+        simNotifier.startPeriodic(DriveConstants.SIM_LOOP_PERIOD_SECONDS);
     }
 }
